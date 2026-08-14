@@ -1,0 +1,621 @@
+import { createSeededRandom } from '../utils/random';
+import {
+  APPLE_SPAWNS,
+  DELIVERY_ZONE,
+  GAME_CONFIG,
+  GUARD1_START,
+  GUARD2_START,
+  KID_START,
+  OBSTACLES,
+  TICKS_PER_SECOND,
+  type Obstacle,
+} from './config';
+import {
+  createEmptyCommands,
+  type ActorCommand,
+  type AppleSnapshot,
+  type AppleState,
+  type GameCommands,
+  type GameEvent,
+  type GameSnapshot,
+  type GuardSnapshot,
+  type GuardState,
+  type KidSnapshot,
+  type KidState,
+  type MatchState,
+  type SimulationStep,
+  type Vec2,
+} from './types';
+
+type GuardModel = {
+  id: 'guard1' | 'guard2';
+  position: Vec2;
+  previousPosition: Vec2;
+  facing: Vec2;
+  state: GuardState;
+  stateTicks: number;
+  cooldownTicks: number;
+  pounceStartedTick: number;
+};
+
+type KidModel = {
+  position: Vec2;
+  previousPosition: Vec2;
+  facing: Vec2;
+  state: KidState;
+  stateTicks: number;
+  carriedAppleIds: number[];
+  pickingTargetId: number | null;
+};
+
+type AppleModel = {
+  id: number;
+  state: AppleState;
+  position: Vec2;
+  lockTicks: number;
+};
+
+export class GameSimulation {
+  private tick = 0;
+  private playTicks = 0;
+  private matchState: MatchState = 'Countdown';
+  private countdownTicks = GAME_CONFIG.countdownTicks;
+  private catches = 0;
+  private guards!: [GuardModel, GuardModel];
+  private kid!: KidModel;
+  private apples!: AppleModel[];
+  private events: GameEvent[] = [];
+  private rng = createSeededRandom(1);
+  private dropSerial = 0;
+
+  constructor() {
+    this.restart(false);
+  }
+
+  restart(skipCountdown = false): void {
+    this.tick = 0;
+    this.playTicks = 0;
+    this.matchState = skipCountdown ? 'Playing' : 'Countdown';
+    this.countdownTicks = skipCountdown ? 0 : GAME_CONFIG.countdownTicks;
+    this.catches = 0;
+    this.dropSerial = 0;
+    this.guards = [
+      this.createGuard('guard1', GUARD1_START),
+      this.createGuard('guard2', GUARD2_START),
+    ];
+    this.kid = {
+      position: copy(KID_START),
+      previousPosition: copy(KID_START),
+      facing: { x: 1, z: 0 },
+      state: 'Normal',
+      stateTicks: 0,
+      carriedAppleIds: [],
+      pickingTargetId: null,
+    };
+    this.apples = APPLE_SPAWNS.map((position, id) => ({
+      id,
+      state: 'Ground' as const,
+      position: copy(position),
+      lockTicks: 0,
+    }));
+    this.events = [];
+  }
+
+  seed(value: number): void {
+    this.rng = createSeededRandom(value);
+  }
+
+  step(commands: GameCommands = createEmptyCommands()): SimulationStep {
+    this.events = [];
+    if (commands.restartPressed) {
+      this.restart(false);
+      this.events.push({ type: 'restarted' });
+      return this.result();
+    }
+
+    this.tick += 1;
+    if (this.matchState === 'Countdown') {
+      this.countdownTicks = Math.max(0, this.countdownTicks - 1);
+      if (this.countdownTicks === 0) {
+        this.matchState = 'Playing';
+        this.events.push({ type: 'match-started' });
+      }
+      return this.result();
+    }
+
+    if (this.matchState !== 'Playing') {
+      return this.result();
+    }
+
+    this.playTicks += 1;
+    this.decrementAppleLocks();
+    this.savePreviousPositions();
+
+    const deliveryThrowRequested = commands.kid.dropPressed && this.isKidInDeliveryZone();
+    if (commands.kid.dropPressed && !deliveryThrowRequested) this.dropOneApple();
+    if (commands.kid.actionPressed) this.tryStartPicking();
+
+    this.updateGuard(this.guards[0], commands.guard1);
+    this.updateGuard(this.guards[1], commands.guard2);
+    this.updateKidMovement(commands.kid);
+    this.checkGuardPounceCollision();
+
+    const captured = this.checkCapture();
+    if (!captured) this.advanceKidState();
+    this.advanceGuardState(this.guards[0]);
+    this.advanceGuardState(this.guards[1]);
+
+    if (!captured && this.matchState === 'Playing' && deliveryThrowRequested) {
+      this.deliverOneApple();
+    }
+
+    return this.result();
+  }
+
+  getSnapshot(): GameSnapshot {
+    const delivered = this.apples.filter((apple) => apple.state === 'Delivered').length;
+    return {
+      tick: this.tick,
+      playTicks: this.playTicks,
+      elapsedSeconds: this.playTicks / TICKS_PER_SECOND,
+      matchState: this.matchState,
+      countdownTicks: this.countdownTicks,
+      catches: this.catches,
+      delivered,
+      totalApples: this.apples.length,
+      guards: [this.guardSnapshot(this.guards[0]), this.guardSnapshot(this.guards[1])],
+      kid: this.kidSnapshot(),
+      apples: this.apples.map((apple): AppleSnapshot => ({
+        id: apple.id,
+        state: apple.state,
+        position: copy(apple.position),
+        lockTicks: apple.lockTicks,
+      })),
+    };
+  }
+
+  loadScenario(name: string): void {
+    this.restart(true);
+    switch (name) {
+      case 'active-play':
+        return;
+      case 'pickup':
+        this.kid.position = copy(this.apples[0].position);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.moveGuardsAway();
+        return;
+      case 'picking':
+        this.kid.position = copy(this.apples[0].position);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.moveGuardsAway();
+        this.startPicking(this.apples[0]);
+        this.kid.stateTicks = Math.floor(GAME_CONFIG.pickingTicks / 2);
+        this.events = [];
+        return;
+      case 'picking-with-carry':
+        this.moveGuardsAway();
+        this.giveKidApples([0, 1]);
+        this.kid.position = copy(this.apples[2].position);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.startPicking(this.apples[2]);
+        this.events = [];
+        return;
+      case 'pickup-danger':
+        this.kid.position = copy(this.apples[0].position);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.guards[0].position = { x: this.kid.position.x, z: this.kid.position.z + 0.8 };
+        this.guards[0].previousPosition = copy(this.guards[0].position);
+        this.guards[1].position = { x: 10, z: -7 };
+        this.guards[1].previousPosition = copy(this.guards[1].position);
+        return;
+      case 'carrying':
+        this.moveGuardsAway();
+        this.kid.position = { x: 0, z: 0 };
+        this.kid.previousPosition = copy(this.kid.position);
+        this.giveKidApples([0, 1, 2]);
+        return;
+      case 'guard-on-apple':
+        this.moveGuardsAway();
+        this.guards[0].position = copy(this.apples[0].position);
+        this.guards[0].previousPosition = copy(this.guards[0].position);
+        return;
+      case 'delivery':
+        this.moveGuardsAway();
+        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.giveKidApples([0, 1]);
+        return;
+      case 'capture-priority':
+        this.catches = GAME_CONFIG.catchTarget - 1;
+        for (const apple of this.apples) apple.state = 'Delivered';
+        this.apples[0].state = 'Carried';
+        this.kid.carriedAppleIds = [0];
+        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.guards[0].position = copy(DELIVERY_ZONE);
+        this.guards[0].previousPosition = copy(DELIVERY_ZONE);
+        this.guards[1].position = { x: -10, z: -7 };
+        this.guards[1].previousPosition = copy(this.guards[1].position);
+        return;
+      case 'kid-win':
+        for (const apple of this.apples) apple.state = 'Delivered';
+        this.kid.carriedAppleIds = [];
+        this.matchState = 'KidWin';
+        return;
+      case 'guard-win':
+        this.catches = GAME_CONFIG.catchTarget;
+        this.matchState = 'GuardWin';
+        return;
+      default:
+        throw new Error(`Unknown simulation scenario: ${name}`);
+    }
+  }
+
+  private createGuard(id: GuardModel['id'], position: Vec2): GuardModel {
+    return {
+      id,
+      position: copy(position),
+      previousPosition: copy(position),
+      facing: { x: 0, z: 1 },
+      state: 'Move',
+      stateTicks: 0,
+      cooldownTicks: 0,
+      pounceStartedTick: -1000,
+    };
+  }
+
+  private result(): SimulationStep {
+    return {
+      snapshot: this.getSnapshot(),
+      events: [...this.events],
+    };
+  }
+
+  private savePreviousPositions(): void {
+    for (const guard of this.guards) guard.previousPosition = copy(guard.position);
+    this.kid.previousPosition = copy(this.kid.position);
+  }
+
+  private decrementAppleLocks(): void {
+    for (const apple of this.apples) {
+      apple.lockTicks = Math.max(0, apple.lockTicks - 1);
+    }
+  }
+
+  private updateGuard(guard: GuardModel, command: ActorCommand): void {
+    const direction = normalized({ x: command.moveX, z: command.moveZ });
+    if (guard.state === 'Move' && command.actionPressed && guard.cooldownTicks === 0) {
+      if (lengthSquared(direction) > 0) guard.facing = direction;
+      guard.state = 'Pounce';
+      guard.stateTicks = GAME_CONFIG.pounceTicks;
+      guard.pounceStartedTick = this.tick;
+      this.events.push({ type: 'pounce', guardId: guard.id });
+    }
+
+    if (guard.state === 'Move') {
+      if (lengthSquared(direction) > 0) guard.facing = direction;
+      this.moveWithCollisions(guard.position, direction, GAME_CONFIG.guardSpeed, GAME_CONFIG.guardRadius);
+    } else if (guard.state === 'Pounce') {
+      this.moveWithCollisions(
+        guard.position,
+        guard.facing,
+        GAME_CONFIG.pounceSpeed,
+        GAME_CONFIG.guardRadius,
+      );
+    }
+  }
+
+  private updateKidMovement(command: ActorCommand): void {
+    if (this.kid.state === 'Picking') return;
+    const direction = normalized({ x: command.moveX, z: command.moveZ });
+    if (lengthSquared(direction) > 0) this.kid.facing = direction;
+    this.moveWithCollisions(
+      this.kid.position,
+      direction,
+      this.currentKidSpeed(),
+      GAME_CONFIG.kidRadius,
+    );
+  }
+
+  private moveWithCollisions(position: Vec2, direction: Vec2, speed: number, radius: number): void {
+    position.x += direction.x * speed / TICKS_PER_SECOND;
+    position.z += direction.z * speed / TICKS_PER_SECOND;
+    position.x = clamp(
+      position.x,
+      -GAME_CONFIG.arenaHalfWidth + radius,
+      GAME_CONFIG.arenaHalfWidth - radius,
+    );
+    position.z = clamp(
+      position.z,
+      -GAME_CONFIG.arenaHalfDepth + radius,
+      GAME_CONFIG.arenaHalfDepth - radius,
+    );
+    for (const obstacle of OBSTACLES) {
+      resolveCircleAgainstObstacle(position, radius, obstacle);
+    }
+  }
+
+  private checkGuardPounceCollision(): void {
+    const [guard1, guard2] = this.guards;
+    if (guard1.state !== 'Pounce' || guard2.state !== 'Pounce') return;
+    if (Math.abs(guard1.pounceStartedTick - guard2.pounceStartedTick) > GAME_CONFIG.simultaneousPounceTicks) {
+      return;
+    }
+    if (!movingCirclesOverlap(guard1, guard2, GAME_CONFIG.guardRadius * 2)) return;
+    guard1.state = 'Stunned';
+    guard2.state = 'Stunned';
+    guard1.stateTicks = GAME_CONFIG.stunTicks;
+    guard2.stateTicks = GAME_CONFIG.stunTicks;
+    this.events.push({ type: 'guards-stunned' });
+  }
+
+  private checkCapture(): boolean {
+    if (this.kid.state === 'Invincible') return false;
+    const captureRadius = GAME_CONFIG.guardRadius + GAME_CONFIG.kidRadius;
+    const captor = this.guards.find((guard) =>
+      (guard.state === 'Move' || guard.state === 'Pounce') &&
+      movingPointDistanceSquared(guard, this.kid) <= captureRadius * captureRadius,
+    );
+    if (!captor) return false;
+
+    this.catches += 1;
+    this.cancelPicking();
+    this.dropAllCarriedApples();
+    this.kid.state = 'Invincible';
+    this.kid.stateTicks = GAME_CONFIG.invincibleTicks;
+    this.events.push({ type: 'captured', catches: this.catches });
+    if (this.catches >= GAME_CONFIG.catchTarget) {
+      this.matchState = 'GuardWin';
+      this.events.push({ type: 'match-ended', winner: 'guards' });
+    }
+    return true;
+  }
+
+  private advanceGuardState(guard: GuardModel): void {
+    if (guard.state === 'Move') {
+      guard.cooldownTicks = Math.max(0, guard.cooldownTicks - 1);
+      return;
+    }
+    guard.stateTicks = Math.max(0, guard.stateTicks - 1);
+    if (guard.stateTicks > 0) return;
+    if (guard.state === 'Pounce') {
+      guard.state = 'Recover';
+      guard.stateTicks = GAME_CONFIG.recoverTicks;
+      return;
+    }
+    guard.state = 'Move';
+    guard.cooldownTicks = GAME_CONFIG.pounceCooldownTicks;
+  }
+
+  private advanceKidState(): void {
+    if (this.kid.state === 'Normal') return;
+    this.kid.stateTicks = Math.max(0, this.kid.stateTicks - 1);
+    if (this.kid.stateTicks > 0) return;
+    if (this.kid.state === 'Invincible') {
+      this.kid.state = 'Normal';
+      return;
+    }
+
+    const targetId = this.kid.pickingTargetId;
+    this.kid.pickingTargetId = null;
+    this.kid.state = 'Normal';
+    if (targetId === null) return;
+    const apple = this.apples[targetId];
+    if (!apple || apple.state !== 'Ground' || apple.lockTicks > 0) return;
+    apple.state = 'Carried';
+    this.kid.carriedAppleIds.push(apple.id);
+    this.events.push({ type: 'picked', appleId: apple.id });
+  }
+
+  private tryStartPicking(): void {
+    if (this.kid.state !== 'Normal') return;
+    const candidates = this.apples
+      .filter((apple) => apple.state === 'Ground' && apple.lockTicks === 0)
+      .map((apple) => ({ apple, distanceSq: distanceSquared(this.kid.position, apple.position) }))
+      .filter(({ distanceSq }) => distanceSq <= GAME_CONFIG.pickupRadius * GAME_CONFIG.pickupRadius)
+      .sort((a, b) => a.distanceSq - b.distanceSq || a.apple.id - b.apple.id);
+    const target = candidates[0]?.apple;
+    if (target) this.startPicking(target);
+  }
+
+  private startPicking(apple: AppleModel): void {
+    this.kid.state = 'Picking';
+    this.kid.stateTicks = GAME_CONFIG.pickingTicks;
+    this.kid.pickingTargetId = apple.id;
+    this.events.push({ type: 'pick-started', appleId: apple.id });
+  }
+
+  private cancelPicking(): void {
+    if (this.kid.state !== 'Picking') return;
+    const appleId = this.kid.pickingTargetId;
+    this.kid.pickingTargetId = null;
+    if (appleId !== null) this.events.push({ type: 'pick-cancelled', appleId });
+  }
+
+  private dropOneApple(): void {
+    const appleId = this.kid.carriedAppleIds.pop();
+    if (appleId === undefined) return;
+    const apple = this.apples[appleId];
+    const side = this.dropSerial % 2 === 0 ? -1 : 1;
+    const lateral = side * (0.22 + this.rng() * 0.16);
+    this.dropSerial += 1;
+    const right = { x: -this.kid.facing.z, z: this.kid.facing.x };
+    apple.position = {
+      x: this.kid.position.x - this.kid.facing.x * 1.25 + right.x * lateral,
+      z: this.kid.position.z - this.kid.facing.z * 1.25 + right.z * lateral,
+    };
+    this.clampApplePosition(apple.position);
+    apple.state = 'Ground';
+    apple.lockTicks = GAME_CONFIG.manualDropLockTicks;
+    this.events.push({ type: 'dropped', appleId, reason: 'manual' });
+  }
+
+  private dropAllCarriedApples(): void {
+    const carried = [...this.kid.carriedAppleIds];
+    this.kid.carriedAppleIds = [];
+    carried.forEach((appleId, index) => {
+      const apple = this.apples[appleId];
+      const angle = (index / Math.max(1, carried.length)) * Math.PI * 2 + (this.rng() - 0.5) * 0.18;
+      const distance = 1.05 + (index % 2) * 0.28;
+      apple.position = {
+        x: this.kid.position.x + Math.cos(angle) * distance,
+        z: this.kid.position.z + Math.sin(angle) * distance,
+      };
+      this.clampApplePosition(apple.position);
+      apple.state = 'Ground';
+      apple.lockTicks = GAME_CONFIG.captureDropLockTicks;
+      this.events.push({ type: 'dropped', appleId, reason: 'capture' });
+    });
+  }
+
+  private isKidInDeliveryZone(): boolean {
+    return distanceSquared(this.kid.position, DELIVERY_ZONE) <= GAME_CONFIG.deliveryRadius ** 2;
+  }
+
+  private deliverOneApple(): void {
+    if (this.kid.carriedAppleIds.length === 0) return;
+    const appleId = this.kid.carriedAppleIds.pop();
+    if (appleId === undefined) return;
+    this.apples[appleId].state = 'Delivered';
+    const total = this.apples.filter((apple) => apple.state === 'Delivered').length;
+    this.events.push({ type: 'delivered', count: 1, total });
+    if (total === this.apples.length) {
+      this.matchState = 'KidWin';
+      this.events.push({ type: 'match-ended', winner: 'kid' });
+    }
+  }
+
+  private currentKidSpeed(): number {
+    const carryMultiplier = Math.max(
+      GAME_CONFIG.minimumCarryMultiplier,
+      1 - this.kid.carriedAppleIds.length * GAME_CONFIG.slowdownPerApple,
+    );
+    const invincibleMultiplier = this.kid.state === 'Invincible' ? GAME_CONFIG.invincibleSpeedMultiplier : 1;
+    return GAME_CONFIG.kidBaseSpeed * carryMultiplier * invincibleMultiplier;
+  }
+
+  private clampApplePosition(position: Vec2): void {
+    position.x = clamp(position.x, -GAME_CONFIG.arenaHalfWidth + 0.4, GAME_CONFIG.arenaHalfWidth - 0.4);
+    position.z = clamp(position.z, -GAME_CONFIG.arenaHalfDepth + 0.4, GAME_CONFIG.arenaHalfDepth - 0.4);
+  }
+
+  private guardSnapshot(guard: GuardModel): GuardSnapshot {
+    return {
+      id: guard.id,
+      position: copy(guard.position),
+      facing: copy(guard.facing),
+      state: guard.state,
+      stateTicks: guard.stateTicks,
+      cooldownTicks: guard.cooldownTicks,
+      pounceReady: guard.state === 'Move' && guard.cooldownTicks === 0,
+    };
+  }
+
+  private kidSnapshot(): KidSnapshot {
+    const progress = this.kid.state === 'Picking'
+      ? 1 - this.kid.stateTicks / GAME_CONFIG.pickingTicks
+      : 0;
+    return {
+      position: copy(this.kid.position),
+      facing: copy(this.kid.facing),
+      state: this.kid.state,
+      stateTicks: this.kid.stateTicks,
+      carriedAppleIds: [...this.kid.carriedAppleIds],
+      pickingTargetId: this.kid.pickingTargetId,
+      pickingProgress: clamp(progress, 0, 1),
+      speed: this.currentKidSpeed(),
+    };
+  }
+
+  private moveGuardsAway(): void {
+    this.guards[0].position = { x: -10.5, z: -7.5 };
+    this.guards[0].previousPosition = copy(this.guards[0].position);
+    this.guards[1].position = { x: 10.5, z: -7.5 };
+    this.guards[1].previousPosition = copy(this.guards[1].position);
+  }
+
+  private giveKidApples(ids: number[]): void {
+    this.kid.carriedAppleIds = [...ids];
+    for (const id of ids) this.apples[id].state = 'Carried';
+  }
+}
+
+function copy(vector: Vec2): Vec2 {
+  return { x: vector.x, z: vector.z };
+}
+
+function normalized(vector: Vec2): Vec2 {
+  const length = Math.hypot(vector.x, vector.z);
+  if (length <= 0.00001) return { x: 0, z: 0 };
+  return { x: vector.x / length, z: vector.z / length };
+}
+
+function lengthSquared(vector: Vec2): number {
+  return vector.x * vector.x + vector.z * vector.z;
+}
+
+function distanceSquared(a: Vec2, b: Vec2): number {
+  const x = a.x - b.x;
+  const z = a.z - b.z;
+  return x * x + z * z;
+}
+
+function movingPointDistanceSquared(
+  first: { previousPosition: Vec2; position: Vec2 },
+  second: { previousPosition: Vec2; position: Vec2 },
+): number {
+  const start = {
+    x: first.previousPosition.x - second.previousPosition.x,
+    z: first.previousPosition.z - second.previousPosition.z,
+  };
+  const end = {
+    x: first.position.x - second.position.x,
+    z: first.position.z - second.position.z,
+  };
+  const delta = { x: end.x - start.x, z: end.z - start.z };
+  const denominator = lengthSquared(delta);
+  const t = denominator <= 0.000001
+    ? 0
+    : clamp(-(start.x * delta.x + start.z * delta.z) / denominator, 0, 1);
+  const x = start.x + delta.x * t;
+  const z = start.z + delta.z * t;
+  return x * x + z * z;
+}
+
+function movingCirclesOverlap(first: GuardModel, second: GuardModel, radius: number): boolean {
+  return movingPointDistanceSquared(first, second) <= radius * radius;
+}
+
+function resolveCircleAgainstObstacle(position: Vec2, radius: number, obstacle: Obstacle): void {
+  const minX = obstacle.x - obstacle.halfWidth;
+  const maxX = obstacle.x + obstacle.halfWidth;
+  const minZ = obstacle.z - obstacle.halfDepth;
+  const maxZ = obstacle.z + obstacle.halfDepth;
+  const closestX = clamp(position.x, minX, maxX);
+  const closestZ = clamp(position.z, minZ, maxZ);
+  const deltaX = position.x - closestX;
+  const deltaZ = position.z - closestZ;
+  const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+  if (distanceSq >= radius * radius) return;
+
+  if (distanceSq > 0.000001) {
+    const distance = Math.sqrt(distanceSq);
+    const push = radius - distance;
+    position.x += deltaX / distance * push;
+    position.z += deltaZ / distance * push;
+    return;
+  }
+
+  const distances = [
+    { axis: 'x' as const, value: Math.abs(position.x - minX), target: minX - radius },
+    { axis: 'x' as const, value: Math.abs(maxX - position.x), target: maxX + radius },
+    { axis: 'z' as const, value: Math.abs(position.z - minZ), target: minZ - radius },
+    { axis: 'z' as const, value: Math.abs(maxZ - position.z), target: maxZ + radius },
+  ].sort((a, b) => a.value - b.value);
+  const nearest = distances[0];
+  position[nearest.axis] = nearest.target;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
