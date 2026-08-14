@@ -27,6 +27,7 @@ export const GAME_CONFIG = {
   simultaneousPounceTicks: 9,
   stunTicks: 60,
   deliveryRadius: 2,
+  maxFrameRate: 60,
   maxFrameDelta: 0.1,
   maxDpr: 2,
 } as const;

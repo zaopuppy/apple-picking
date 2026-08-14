@@ -24,12 +24,14 @@ export class Game {
   private readonly audio = new AudioSystem();
   private readonly hud = new Hud();
   private readonly loop = new Loop(
-    (delta, elapsed) => this.update(delta, elapsed),
+    (delta, elapsed, fps) => this.update(delta, elapsed, fps),
     () => this.render(),
+    GAME_CONFIG.maxFrameRate,
   );
 
   private frame = 0;
   private accumulator = 0;
+  private fps = 0;
   private pausedForScreenshot = false;
   private reducedMotion = false;
   private renderTime = 0;
@@ -62,8 +64,9 @@ export class Game {
     window.__THREE_GAME_TEST_HOOKS__ = undefined;
   }
 
-  private update(delta: number, elapsed: number): void {
+  private update(delta: number, elapsed: number, fps: number): void {
     this.frame += 1;
+    this.fps = fps;
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
     this.renderTime = this.reducedMotion ? 0 : elapsed;
     if (this.pausedForScreenshot) {
@@ -94,7 +97,7 @@ export class Game {
   private syncPresentation(): void {
     const snapshot = this.simulation.getSnapshot();
     this.view.sync(snapshot, this.renderTime, this.reducedMotion);
-    this.hud.update(snapshot);
+    this.hud.update(snapshot, this.fps);
   }
 
   private render(): void {
@@ -176,6 +179,10 @@ export class Game {
     const info = this.renderer.info;
     window.__THREE_GAME_DIAGNOSTICS__ = {
       frame: this.frame,
+      frameRate: {
+        current: this.fps,
+        cap: GAME_CONFIG.maxFrameRate,
+      },
       tick: snapshot.tick,
       elapsed: snapshot.elapsedSeconds,
       matchState: snapshot.matchState,

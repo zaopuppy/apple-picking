@@ -5,6 +5,10 @@ import type { AppleSnapshot, GameCommands, GameSnapshot, GuardSnapshot, KidSnaps
 declare global {
   interface ThreeGameDiagnostics {
     frame: number;
+    frameRate: {
+      current: number;
+      cap: number;
+    };
     tick: number;
     elapsed: number;
     matchState: MatchState;

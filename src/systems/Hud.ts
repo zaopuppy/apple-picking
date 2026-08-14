@@ -10,6 +10,7 @@ export class Hud {
   private readonly catchesFill = this.getElement('#catches-fill');
   private readonly carriedValue = this.getElement('#carried-value');
   private readonly timerValue = this.getElement('#timer-value');
+  private readonly fpsValue = this.getElement('#fps-value');
   private readonly matchMessage = this.getElement('#match-message');
   private readonly statusLine = this.getElement('#status-line');
   private readonly guard1State = this.getElement('#guard1-state');
@@ -18,7 +19,7 @@ export class Hud {
   private readonly resultOverlay = this.getElement('#result-overlay');
   private readonly resultTitle = this.getElement('#result-title');
 
-  update(snapshot: GameSnapshot): void {
+  update(snapshot: GameSnapshot, fps: number): void {
     this.deliveredValue.textContent = String(snapshot.delivered);
     this.deliveredTotal.textContent = String(snapshot.totalApples);
     this.deliveredFill.style.width = `${snapshot.delivered / snapshot.totalApples * 100}%`;
@@ -29,6 +30,7 @@ export class Hud {
     const minutes = Math.floor(snapshot.elapsedSeconds / 60).toString().padStart(2, '0');
     const seconds = Math.floor(snapshot.elapsedSeconds % 60).toString().padStart(2, '0');
     this.timerValue.textContent = `${minutes}:${seconds}`;
+    this.fpsValue.textContent = fps > 0 ? String(fps) : '--';
     this.guard1State.textContent = this.guardLabel(snapshot.guards[0]);
     this.guard2State.textContent = this.guardLabel(snapshot.guards[1]);
     this.kidState.textContent = this.kidLabel(snapshot);

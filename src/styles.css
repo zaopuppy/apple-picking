@@ -134,6 +134,20 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.fps-readout {
+  margin-top: 5px;
+  color: rgba(36, 48, 27, 0.68);
+  font: 800 0.56rem/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+#fps-value {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
+}
+
 #state-strip {
   position: absolute;
   top: max(98px, calc(env(safe-area-inset-top) + 88px));

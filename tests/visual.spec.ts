@@ -57,6 +57,13 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10);
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('active-play'));
 
+  const fpsValue = page.locator('#fps-value');
+  await expect(fpsValue).toBeVisible();
+  await expect.poll(async () => Number(await fpsValue.textContent())).toBeGreaterThan(0);
+  const frameRate = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.frameRate);
+  expect(frameRate?.current).toBeLessThanOrEqual(60);
+  expect(frameRate?.cap).toBe(60);
+
   const sample = await sampleCanvas(page);
   expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
 
@@ -83,6 +90,76 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test('render loop adapts to the available refresh rate and caps at 60 FPS', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Synthetic refresh timing only needs one browser target.');
+  await page.goto('/src/core/Loop.ts');
+
+  const samples = await page.evaluate(async () => {
+    const loopModulePath = String('/src/core/Loop.ts');
+    const { Loop } = await import(/* @vite-ignore */ loopModulePath);
+
+    const runAtRefreshRate = (refreshRate: number, callbackCount: number) => {
+      const originalRequestAnimationFrame = window.requestAnimationFrame;
+      const originalCancelAnimationFrame = window.cancelAnimationFrame;
+      let scheduled: FrameRequestCallback | undefined;
+      let nextFrameId = 1;
+      let updates = 0;
+      let renders = 0;
+      let fps = 0;
+
+      window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+        scheduled = callback;
+        return nextFrameId++;
+      };
+      window.cancelAnimationFrame = () => {
+        scheduled = undefined;
+      };
+
+      try {
+        const loop = new Loop(
+          (_delta: number, _elapsed: number, measuredFps: number) => {
+            updates += 1;
+            fps = measuredFps;
+          },
+          () => {
+            renders += 1;
+          },
+          60,
+        );
+        loop.start();
+        const startedAt = performance.now();
+
+        for (let index = 1; index <= callbackCount; index += 1) {
+          const callback = scheduled;
+          if (!callback) throw new Error('Loop did not schedule the next animation frame.');
+          scheduled = undefined;
+          callback(startedAt + index * 1000 / refreshRate);
+        }
+
+        loop.stop();
+        return { updates, renders, fps };
+      } finally {
+        window.requestAnimationFrame = originalRequestAnimationFrame;
+        window.cancelAnimationFrame = originalCancelAnimationFrame;
+      }
+    };
+
+    return {
+      highRefresh: runAtRefreshRate(120, 240),
+      lowRefresh: runAtRefreshRate(30, 60),
+    };
+  });
+
+  expect(samples.highRefresh.updates).toBeGreaterThanOrEqual(118);
+  expect(samples.highRefresh.updates).toBeLessThanOrEqual(121);
+  expect(samples.highRefresh.renders).toBe(samples.highRefresh.updates);
+  expect(samples.highRefresh.fps).toBe(60);
+  expect(samples.lowRefresh.updates).toBe(60);
+  expect(samples.lowRefresh.renders).toBe(60);
+  expect(samples.lowRefresh.fps).toBeGreaterThanOrEqual(29);
+  expect(samples.lowRefresh.fps).toBeLessThanOrEqual(30);
 });
 
 test('restart announcement stays horizontally centered during its animation', async ({ page }) => {
