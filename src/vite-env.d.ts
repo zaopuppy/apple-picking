@@ -52,6 +52,8 @@ declare global {
       externalRequested: boolean;
       treeVariants: number;
       treeInstances: number;
+      stumpInstances: number;
+      largeTreeInstances: number;
       treeTriangles: number;
       fruitInstances: number;
       fruitTriangles: number;
@@ -59,6 +61,12 @@ declare global {
       mapName: string;
       paths: number;
       clearings: number;
+      landmarks: number;
+      terrainZones: number;
+      landmarkMeshes: number;
+      landmarkTriangles: number;
+      arenaWidth: number;
+      arenaDepth: number;
       lastFailure: string | null;
     };
     characters: {

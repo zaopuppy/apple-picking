@@ -1,9 +1,10 @@
 import * as THREE from 'three';
+import { GAME_CONFIG } from '../game/config';
 
-const LANDSCAPE_WORLD_WIDTH = 25.5;
-const PORTRAIT_WORLD_WIDTH = 18.8;
-const LANDSCAPE_WORLD_HEIGHT = 18.5;
-const PORTRAIT_WORLD_HEIGHT = 25;
+const LANDSCAPE_WORLD_WIDTH = GAME_CONFIG.arenaHalfWidth * 2 * 1.06;
+const PORTRAIT_WORLD_WIDTH = GAME_CONFIG.arenaHalfDepth * 2 * 1.25;
+const LANDSCAPE_WORLD_HEIGHT = GAME_CONFIG.arenaHalfDepth * 2 * 1.12;
+const PORTRAIT_WORLD_HEIGHT = GAME_CONFIG.arenaHalfWidth * 2 * 1.25;
 const PORTRAIT_LAYOUT_THRESHOLD = 0.86;
 
 export function usesPortraitArenaLayout(aspect: number): boolean {

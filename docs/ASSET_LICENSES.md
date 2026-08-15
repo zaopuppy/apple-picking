@@ -21,7 +21,7 @@
 | 使用中 | Impact Sounds 1.0：`impactWood_light_002`、`impactWood_light_004`、`impactSoft_heavy_001`、`impactPunch_medium_002`、`impactPunch_heavy_002` | [Kenney Impact Sounds](https://kenney.nl/assets/impact-sounds) | CC0 1.0 | 2026-08-15 | 转为单声道 MP3、按游戏事件重命名，并合入单请求 JSON 音效包；运行时统一音量并轻微改变播放速率 | `public/assets/audio/kenney/` | 苹果落地、飞扑、双 guard 碰撞、抓到 kid |
 | 已替换 | Forest Nature Pack 1.0 FREE：`Tree_1_A_Color1`、`Tree_2_B_Color1`、`Tree_3_C_Color1` | [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 保留旧运行时文件作为历史资产；游戏不再加载 | `public/assets/models/kaykit-forest/` | 历史果园树木视觉 |
 | 使用中 | Adventurers Character Pack 2.0 FREE：`Knight`、`Rogue`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 分别整理为 `Knight_Guard.glb` 与 `Rogue_Kid.glb`；只合入使用中的 5/4 个动画；两张图集由 1024 × 1024 降采样至 256 × 256；保留 Knight 原生头盔和面罩 | `public/assets/models/kaykit-adventurers/` | guard1、guard2 与 kid 的视觉和动作；碰撞、负重、苹果堆和状态逻辑保持独立 |
-| 使用中 | FREE DOWNLOAD Low poly nature pack：`Full_Grow001_2`、`Full_Grow003_7`、`MidGrow005_13`、`APPLE__20` | [Gostbento / Sketchfab](https://sketchfab.com/3d-models/free-download-low-poly-nature-pack-cb45d4926fcb4807bc93126b59325cf8) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 2026-08-15 | 运行时从单个 GLB 提取阔叶树、松树、樱花树和苹果；树木按品种实例化，苹果复用 geometry 并独立控制材质状态 | `public/assets/models/animal-crossing/free_download_low_poly_nature_pack.glb` | 密林地图树木、可拾取苹果；圆形碰撞代理由地图数据独立维护 |
+| 使用中 | FREE DOWNLOAD Low poly nature pack：`Cut_0`、`Full_Grow001_2`、`Full_Grow003_7`、`MidGrow005_13`、`APPLE__20` | [Gostbento / Sketchfab](https://sketchfab.com/3d-models/free-download-low-poly-nature-pack-cb45d4926fcb4807bc93126b59325cf8) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 2026-08-15 | 运行时从单个 GLB 提取树桩、阔叶树、松树、樱花树和苹果；树桩缩放到 `0.46` 高，苹果为可读性保留 `0.78` 的风格化高度；障碍按品种实例化 | `public/assets/models/animal-crossing/free_download_low_poly_nature_pack.glb` | 开放果园的树桩与少量大树、可拾取苹果；圆形碰撞代理由地图数据独立维护 |
 
 原始许可证副本保存在：
 
@@ -31,13 +31,13 @@
 - `public/assets/models/kaykit-adventurers/LICENSE.txt`
 - `public/assets/models/animal-crossing/LICENSE.txt`
 
-## 密林地图与 Nature Pack 定稿
+## 开放乡野地图与 Nature Pack 定稿
 
-- 默认“林间集市”地图包含 115 棵树、6 个苹果、道路网络和多块小空地；所有角色、苹果和投递区都通过 0.5 单位导航网格验证可达；
-- 三种树木合计 243,504 个实例化三角面，6 个苹果合计 1,152 个三角面；默认桌面场景约 265,104 个渲染三角面，低于移动端 300,000 预算；
+- 默认“果园村口”地图为 72 × 54，包含 2 个语义地标、86 个树桩、7 棵大树和 6 个苹果；所有角色、苹果和投递区都通过 1 单位导航网格验证可达；
+- 四种树木合计 21,648 个实例化三角面，6 个苹果合计 1,152 个三角面，2 个程序化地标合计 1,208 个三角面；程序化房屋、围栏和池塘属于项目自制几何，不新增外部资产许可；
 - 单个 6,762,476 bytes GLB 由缓存加载器只请求一次，程序化树和苹果会一直保留到导入成功；`?trees=procedural&fruit=procedural` 可强制检查完整回退；
 - 地图树木使用独立的圆形 XZ 碰撞代理。视觉模型、树种和缩放不会把 GLB 网格直接带入确定性模拟；
-- 独立编辑器位于 `/editor.html`，支持确定性随机候选、画笔、撤销/重做、本地图库和 JSON 导入导出。
+- 独立编辑器位于 `/editor.html`，支持房屋小院、池塘、视觉地表、确定性随机候选、画笔、撤销/重做、本地图库和 JSON 导入导出。
 
 ## 接入检查清单
 
@@ -98,11 +98,13 @@
 
 ## 当前基线
 
-基线场景：默认“林间集市”倒计时画面，2026-08-15 采集。
+基线场景：默认“林间集市”倒计时画面，2026-08-15 采集。该表保留为旧密林版本的历史对照；开放乡野版本的当前硬性预算由自动测试持续检查。
 
 | 视口 | Draw calls | 三角面 | Geometries | Textures | 色彩熵 | 边缘密度 | 明度对比 | 主色占比 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Desktop 1280 × 720, DPR 1 | 48 | 265,104 | 55 | 12 | 6.00 | 0.591 | 167.9 | 0.206 |
-| Mobile 390 × 664, DPR 2 | 48 | 265,104 | 55 | 12 | 4.18 | 0.400 | 173.5 | 0.406 |
+| Desktop 1280 × 720, DPR 1 | 49 | 81,468 | 57 | 12 | 3.54 | 0.416 | 165.5 | 0.475 |
+| Mobile 390 × 664, DPR 2 | 49 | 81,468 | 57 | 12 | 2.62 | 0.271 | 165.5 | 0.406 |
 
-基线截图和 JSON 由 `npm run inspect:canvas` 生成在 `artifacts/stage0-baseline/`，属于本地 QA 产物，不提交仓库。
+开放乡野“果园村口”于 2026-08-16 重新采集：桌面和 390 × 664 窄屏均为 74 draw calls、44,724 三角面、77 geometries、12 textures，低于项目的 150 draw calls、300,000 三角面、200 geometries 和 40 textures 移动端预算。
+
+基线截图和 JSON 由 `npm run inspect:canvas` 生成在 `artifacts/canvas-inspection/`，属于本地 QA 产物，不提交仓库。

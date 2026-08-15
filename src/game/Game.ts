@@ -17,12 +17,12 @@ import {
   type SimulationStep,
 } from './types';
 
-const PORTRAIT_CAMERA_ANGLE = 35;
+const PORTRAIT_CAMERA_ANGLE = 25;
 
 const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
   ...DEFAULT_MOVEMENT_TUNING,
-  landscapeCameraAngle: 50,
-  cameraZoom: 1.2,
+  landscapeCameraAngle: 34,
+  cameraZoom: 1.08,
   hemisphereIntensity: 2.1,
   sunIntensity: 3.1,
   reducedMotion: false,
@@ -31,7 +31,7 @@ const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.OrthographicCamera(-14, 14, 11, -11, 0.1, 100);
+  private readonly camera = new THREE.OrthographicCamera(-70, 70, 55, -55, 0.1, 500);
   private readonly input = new InputRouter();
   private readonly map: OrchardMap;
   private readonly simulation: GameSimulation;
@@ -62,7 +62,7 @@ export class Game {
     this.simulation = new GameSimulation(this.map);
     this.renderer = createRenderer(canvas);
     this.scene.background = new THREE.Color('#91ad62');
-    this.camera.position.set(0, 23.5, 19.5);
+    this.camera.position.set(0, 117.5, 97.5);
     this.camera.lookAt(0, 0, 0);
     this.createLighting();
     this.view = new ArenaView(this.scene, this.map);
@@ -141,7 +141,7 @@ export class Game {
     const width = Math.max(1, this.canvas.clientWidth);
     const height = Math.max(1, this.canvas.clientHeight);
     const portraitLayout = usesPortraitArenaLayout(width / height);
-    const cameraHeight = portraitLayout ? 34 : 23.5;
+    const cameraHeight = portraitLayout ? 170 : 117.5;
     const angleDegrees = portraitLayout
       ? PORTRAIT_CAMERA_ANGLE
       : this.debugTuning.landscapeCameraAngle;
@@ -158,15 +158,15 @@ export class Game {
 
   private createLighting(): void {
     this.scene.add(this.hemisphere);
-    this.sun.position.set(-9, 18, 10);
+    this.sun.position.set(-45, 90, 50);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(1536, 1536);
+    this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 48;
-    this.sun.shadow.camera.left = -16;
-    this.sun.shadow.camera.right = 16;
-    this.sun.shadow.camera.top = 14;
-    this.sun.shadow.camera.bottom = -14;
+    this.sun.shadow.camera.far = 240;
+    this.sun.shadow.camera.left = -70;
+    this.sun.shadow.camera.right = 70;
+    this.sun.shadow.camera.top = 55;
+    this.sun.shadow.camera.bottom = -55;
     this.sun.shadow.bias = -0.0004;
     this.scene.add(this.sun);
   }
@@ -290,7 +290,7 @@ export class Game {
         engine: 'custom-xz-circles',
         timestep: FIXED_DELTA_SECONDS,
         bodies: 3 + looseAppleCount,
-        colliders: 4 + this.map.trees.length + looseAppleCount,
+        colliders: 4 + this.map.trees.length + this.map.landmarks.length + looseAppleCount,
         sensors: 1,
         ccdBodies: 0,
       },

@@ -5,11 +5,13 @@ import type { OrchardTree, TreeVariant } from '../game/maps/OrchardMap';
 const NATURE_PACK_URL = `${import.meta.env.BASE_URL}assets/models/animal-crossing/free_download_low_poly_nature_pack.glb`;
 const APPLE_NODE_NAME = 'APPLE__20';
 const TREE_NODE_NAMES: Record<TreeVariant, string> = {
+  stump: 'Cut_0',
   broadleaf: 'Full_Grow001_2',
   pine: 'Full_Grow003_7',
   cherry: 'MidGrow005_13',
 };
 const TREE_TARGET_HEIGHTS: Record<TreeVariant, number> = {
+  stump: 0.46,
   broadleaf: 2.65,
   pine: 2.9,
   cherry: 2.55,
@@ -64,7 +66,7 @@ export async function loadNaturePackTreeVisuals(
       variantPlacements.length,
     );
     instances.name = `nature-pack-tree-${variant}`;
-    instances.castShadow = true;
+    instances.castShadow = variant !== 'stump';
     instances.receiveShadow = true;
     instances.instanceMatrix.setUsage(THREE.StaticDrawUsage);
 

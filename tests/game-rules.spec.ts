@@ -240,6 +240,54 @@ test.describe('deterministic apple-picking rules', () => {
       .toBeGreaterThanOrEqual(1.03 - 0.00001);
   });
 
+  test('homesteads and ponds are solid landmarks that actors must route around', async ({ page }) => {
+    await page.evaluate(() => {
+      const collisionMap = {
+        version: 4,
+        id: 'landmark-collision-test',
+        name: '地标碰撞测试',
+        seed: 17,
+        trees: [],
+        paths: [],
+        clearings: [],
+        landmarks: [
+          { id: 'house', kind: 'homestead', x: 0, z: 0, rotationY: 0, radiusX: 4, radiusZ: 3 },
+          { id: 'pond', kind: 'pond', x: 15, z: 0, rotationY: 0, radiusX: 4, radiusZ: 3 },
+        ],
+        terrainZones: [],
+        appleSpawns: [
+          { x: -25, z: -20 },
+          { x: -15, z: -20 },
+          { x: -5, z: -20 },
+          { x: 5, z: -20 },
+          { x: 15, z: -20 },
+          { x: 25, z: -20 },
+        ],
+        kidStart: { x: -8, z: 0 },
+        guardStarts: [{ x: 9, z: 0 }, { x: -25, z: 15 }],
+        deliveryZone: { x: 25, z: 20 },
+      };
+      localStorage.setItem('apple-picking.active-map.v4', JSON.stringify(collisionMap));
+    });
+    await page.reload();
+    await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.setPausedForScreenshot(true);
+      hooks.scenario('active-play');
+      return hooks.step({
+        guard1: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+        kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+      }, 120);
+    });
+
+    expect(result.kid.position.x).toBeCloseTo(-4.48, 4);
+    expect(result.kid.position.z).toBeCloseTo(0, 4);
+    expect(result.guards[0].position.x).toBeCloseTo(10.45, 4);
+    expect(result.guards[0].position.z).toBeCloseTo(0, 4);
+  });
+
   test('elapsed time counts up without a timeout or tie state', async ({ page }) => {
     const snapshot = await page.evaluate(() => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;

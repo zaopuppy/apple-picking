@@ -32,28 +32,31 @@
           <div id="tool-list" class="tool-list">
             <button class="tool active" data-tool="tree" type="button"><b>♣</b><span>种树<small>1</small></span></button>
             <button class="tool" data-tool="erase" type="button"><b>⌫</b><span>擦除<small>2</small></span></button>
-            <button class="tool" data-tool="path" type="button"><b>〰</b><span>小路<small>3</small></span></button>
-            <button class="tool" data-tool="clearing" type="button"><b>◯</b><span>空地<small>4</small></span></button>
-            <button class="tool" data-tool="apple" type="button"><b>●</b><span>果实<small>5</small></span></button>
-            <button class="tool" data-tool="kid" type="button"><b>◆</b><span>小偷起点<small>6</small></span></button>
-            <button class="tool" data-tool="guard1" type="button"><b>▲</b><span>守卫一<small>7</small></span></button>
-            <button class="tool" data-tool="guard2" type="button"><b>▲</b><span>守卫二<small>8</small></span></button>
-            <button class="tool" data-tool="delivery" type="button"><b>◎</b><span>投递区<small>9</small></span></button>
+            <button class="tool" data-tool="homestead" type="button"><b>⌂</b><span>房屋小院<small>3</small></span></button>
+            <button class="tool" data-tool="pond" type="button"><b>◉</b><span>池塘<small>4</small></span></button>
+            <button class="tool" data-tool="orchard" type="button"><b>▥</b><span>果园地块<small>5</small></span></button>
+            <button class="tool" data-tool="meadow" type="button"><b>◯</b><span>草地空场<small>6</small></span></button>
+            <button class="tool" data-tool="apple" type="button"><b>●</b><span>果实<small>7</small></span></button>
+            <button class="tool" data-tool="kid" type="button"><b>◆</b><span>小偷起点<small>8</small></span></button>
+            <button class="tool" data-tool="guard1" type="button"><b>▲</b><span>守卫一<small>9</small></span></button>
+            <button class="tool" data-tool="guard2" type="button"><b>▲</b><span>守卫二<small>Q</small></span></button>
+            <button class="tool" data-tool="delivery" type="button"><b>◎</b><span>投递区<small>W</small></span></button>
           </div>
 
           <div class="control-block">
-            <label for="tree-variant">树木品种</label>
+            <label for="tree-variant">障碍品种</label>
             <select id="tree-variant">
+              <option value="stump">树桩（推荐）</option>
               <option value="broadleaf">阔叶树</option>
               <option value="cherry">樱花树</option>
               <option value="pine">松树</option>
             </select>
           </div>
           <div class="control-block range-control">
-            <label for="brush-size">画笔半径 <output id="brush-size-value">1.6</output></label>
-            <input id="brush-size" type="range" min="0.7" max="3.6" step="0.1" value="1.6" />
+            <label for="brush-size">画笔半径 <output id="brush-size-value">4.5</output></label>
+            <input id="brush-size" type="range" min="1.5" max="11" step="0.5" value="4.5" />
           </div>
-          <p class="tool-hint">在地图上拖动。小路和空地会自动清除附近树木。</p>
+          <p class="tool-hint">开放地形是主体。房屋小院与池塘不可进入；树桩和大树只用于边界点缀。</p>
         </aside>
 
         <section class="map-board">
@@ -84,22 +87,22 @@
           <div class="generator-grid">
             <label>结构预置
               <select id="preset-select">
-                <option value="clearings">林间空地</option>
-                <option value="winding">蜿蜒果径</option>
-                <option value="crossroads">交错林路</option>
+                <option value="village">果园村口</option>
+                <option value="pond-garden">池塘花园</option>
+                <option value="open-orchard">开阔果园</option>
               </select>
             </label>
             <label>随机种子
               <input id="seed-input" type="number" min="1" step="1" value="20260815" />
             </label>
-            <label class="range-control">树林密度 <output id="density-value">78%</output>
-              <input id="density-input" type="range" min="35" max="100" value="78" />
+            <label class="range-control">开放程度 <output id="openness-value">82%</output>
+              <input id="openness-input" type="range" min="65" max="94" value="82" />
             </label>
-            <label class="range-control">道路宽度 <output id="path-width-value">2.4</output>
-              <input id="path-width-input" type="range" min="1.8" max="4.2" step="0.1" value="2.4" />
+            <label class="range-control">地标覆盖 <output id="landmark-density-value">13%</output>
+              <input id="landmark-density-input" type="range" min="6" max="20" value="13" />
             </label>
           </div>
-          <button id="generate-button" class="generate-button" type="button">生成四个候选</button>
+          <button id="generate-button" class="generate-button" type="button">从十二张中筛选四张</button>
           <div id="candidate-list" class="candidate-list" aria-label="随机地图候选"></div>
 
           <div class="library-heading">

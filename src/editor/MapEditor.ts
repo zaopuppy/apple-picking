@@ -7,11 +7,18 @@ import {
 import {
   cloneOrchardMap,
   insideArena,
+  landmarkBlocksPoint,
+  landmarkInsideArena,
   MAX_MAP_APPLES,
+  MAX_MAP_LANDMARKS,
+  MAX_TERRAIN_ZONES,
   MAX_MAP_TREES,
   parseOrchardMap,
   TREE_VARIANTS,
+  type LandmarkKind,
+  type OrchardLandmark,
   type OrchardMap,
+  type OrchardTerrainZone,
   type OrchardTree,
   type TreeVariant,
   validateOrchardMap,
@@ -28,8 +35,10 @@ import {
 type EditorTool =
   | 'tree'
   | 'erase'
-  | 'path'
-  | 'clearing'
+  | 'homestead'
+  | 'pond'
+  | 'orchard'
+  | 'meadow'
   | 'apple'
   | 'kid'
   | 'guard1'
@@ -45,13 +54,15 @@ type ViewportTransform = {
 const TOOL_KEYS: Record<string, EditorTool> = {
   Digit1: 'tree',
   Digit2: 'erase',
-  Digit3: 'path',
-  Digit4: 'clearing',
-  Digit5: 'apple',
-  Digit6: 'kid',
-  Digit7: 'guard1',
-  Digit8: 'guard2',
-  Digit9: 'delivery',
+  Digit3: 'homestead',
+  Digit4: 'pond',
+  Digit5: 'orchard',
+  Digit6: 'meadow',
+  Digit7: 'apple',
+  Digit8: 'kid',
+  Digit9: 'guard1',
+  KeyQ: 'guard2',
+  KeyW: 'delivery',
 };
 
 export class MapEditor {
@@ -69,10 +80,10 @@ export class MapEditor {
   private readonly treeVariantInput = getElement<HTMLSelectElement>('#tree-variant');
   private readonly presetInput = getElement<HTMLSelectElement>('#preset-select');
   private readonly seedInput = getElement<HTMLInputElement>('#seed-input');
-  private readonly densityInput = getElement<HTMLInputElement>('#density-input');
-  private readonly densityValue = getElement<HTMLOutputElement>('#density-value');
-  private readonly pathWidthInput = getElement<HTMLInputElement>('#path-width-input');
-  private readonly pathWidthValue = getElement<HTMLOutputElement>('#path-width-value');
+  private readonly opennessInput = getElement<HTMLInputElement>('#openness-input');
+  private readonly opennessValue = getElement<HTMLOutputElement>('#openness-value');
+  private readonly landmarkDensityInput = getElement<HTMLInputElement>('#landmark-density-input');
+  private readonly landmarkDensityValue = getElement<HTMLOutputElement>('#landmark-density-value');
   private readonly candidateList = getElement<HTMLElement>('#candidate-list');
   private readonly savedMapList = getElement<HTMLElement>('#saved-map-list');
   private readonly importInput = getElement<HTMLInputElement>('#import-input');
@@ -85,7 +96,6 @@ export class MapEditor {
   private tool: EditorTool = 'tree';
   private pointerWorld: Vec2 | null = null;
   private drawing = false;
-  private activePathId: string | null = null;
   private lastStamp: Vec2 | null = null;
   private serial = 0;
   private toastTimer: number | null = null;
@@ -103,6 +113,7 @@ export class MapEditor {
     this.resizeObserver.observe(this.canvas.parentElement ?? this.canvas);
     this.resizeCanvas();
     this.generateCandidates();
+    this.renderSavedMaps();
     this.refresh();
   }
 
@@ -128,11 +139,11 @@ export class MapEditor {
       this.brushValue.value = this.brushSize.toFixed(1);
       this.draw();
     }, { signal });
-    this.densityInput.addEventListener('input', () => {
-      this.densityValue.value = `${this.densityInput.value}%`;
+    this.opennessInput.addEventListener('input', () => {
+      this.opennessValue.value = `${this.opennessInput.value}%`;
     }, { signal });
-    this.pathWidthInput.addEventListener('input', () => {
-      this.pathWidthValue.value = Number(this.pathWidthInput.value).toFixed(1);
+    this.landmarkDensityInput.addEventListener('input', () => {
+      this.landmarkDensityValue.value = `${this.landmarkDensityInput.value}%`;
     }, { signal });
     this.nameInput.addEventListener('input', () => {
       this.map.name = this.nameInput.value.trim() || '未命名果园';
@@ -155,15 +166,6 @@ export class MapEditor {
     this.pushHistory();
     this.drawing = true;
     this.lastStamp = null;
-    if (this.tool === 'path') {
-      this.activePathId = `path-custom-${Date.now()}-${this.serial}`;
-      this.serial += 1;
-      this.map.paths.push({
-        id: this.activePathId,
-        width: clamp(this.brushSize * 1.55, 1.4, 5),
-        points: [{ ...point }],
-      });
-    }
     this.applyTool(point, true);
     this.refresh();
   };
@@ -182,7 +184,6 @@ export class MapEditor {
     if (!this.drawing) return;
     event.preventDefault();
     this.drawing = false;
-    this.activePathId = null;
     this.lastStamp = null;
     this.refresh();
   };
@@ -218,58 +219,57 @@ export class MapEditor {
   private applyTool(point: Vec2, initial: boolean): void {
     switch (this.tool) {
       case 'tree':
-        if (initial || this.shouldStamp(point, 0.42)) this.stampTrees(point);
+        if (initial || this.shouldStamp(point, Math.max(1.1, this.brushSize * 0.32))) this.stampTrees(point);
         break;
       case 'erase':
-        if (initial || this.shouldStamp(point, 0.24)) this.eraseAt(point, this.brushSize);
+        if (initial || this.shouldStamp(point, Math.max(0.8, this.brushSize * 0.24))) {
+          this.eraseAt(point, this.brushSize);
+        }
         break;
-      case 'path':
-        this.extendPath(point);
-        break;
-      case 'clearing':
+      case 'homestead':
+      case 'pond':
         if (!initial) return;
-        this.map.clearings.push({
-          id: `clearing-custom-${Date.now()}-${this.serial}`,
-          ...point,
-          radius: this.brushSize,
-        });
-        this.serial += 1;
-        this.eraseTrees(point, this.brushSize + 0.25);
+        this.placeLandmark(point, this.tool);
+        break;
+      case 'orchard':
+      case 'meadow':
+        if (!initial) return;
+        this.placeTerrainZone(point, this.tool);
         break;
       case 'apple':
         if (!initial || this.map.appleSpawns.length >= MAX_MAP_APPLES) return;
         this.map.appleSpawns.push({ ...point });
-        this.eraseTrees(point, 0.9);
+        this.eraseTrees(point, 1.5);
         break;
       case 'kid':
         if (!initial) return;
         this.map.kidStart = { ...point };
-        this.eraseTrees(point, 1.15);
+        this.eraseTrees(point, 2);
         break;
       case 'guard1':
         if (!initial) return;
         this.map.guardStarts[0] = { ...point };
-        this.eraseTrees(point, 1.15);
+        this.eraseTrees(point, 2);
         break;
       case 'guard2':
         if (!initial) return;
         this.map.guardStarts[1] = { ...point };
-        this.eraseTrees(point, 1.15);
+        this.eraseTrees(point, 2);
         break;
       case 'delivery':
         if (!initial) return;
         this.map.deliveryZone = { ...point };
-        this.eraseTrees(point, GAME_CONFIG.deliveryRadius + 0.5);
+        this.eraseTrees(point, GAME_CONFIG.deliveryRadius + 1);
         break;
     }
   }
 
   private stampTrees(point: Vec2): void {
     if (this.map.trees.length >= MAX_MAP_TREES) return;
-    const sampleCount = Math.max(1, Math.round(this.brushSize * 1.5));
+    const sampleCount = Math.max(1, Math.round(this.brushSize * 0.85));
     const variant = TREE_VARIANTS.includes(this.treeVariantInput.value as TreeVariant)
       ? this.treeVariantInput.value as TreeVariant
-      : 'broadleaf';
+      : 'stump';
     for (let index = 0; index < sampleCount && this.map.trees.length < MAX_MAP_TREES; index += 1) {
       const phase = this.serial * 2.399963 + index * 1.87;
       const radius = index === 0 ? 0 : this.brushSize * (0.25 + (index % 3) * 0.18);
@@ -278,8 +278,11 @@ export class MapEditor {
         z: point.z + Math.sin(phase) * radius,
       };
       if (!insideArena(candidate, 0.5)) continue;
-      if (this.map.trees.some((tree) => distance(tree, candidate) < 0.72)) continue;
-      if (this.isImportantPoint(candidate, 0.82)) continue;
+      if (this.map.trees.some((tree) => distance(tree, candidate) < 1.1)) continue;
+      if (this.isImportantPoint(candidate, 1.3)) continue;
+      if (this.map.landmarks.some((landmark) => landmarkBlocksPoint(landmark, candidate, 0.8))) {
+        continue;
+      }
       this.map.trees.push({
         id: `tree-custom-${Date.now()}-${this.serial}`,
         ...candidate,
@@ -296,6 +299,12 @@ export class MapEditor {
     this.eraseTrees(point, radius);
     this.map.appleSpawns = this.map.appleSpawns.filter((apple) => distance(apple, point) > Math.max(0.5, radius * 0.4));
     this.map.clearings = this.map.clearings.filter((clearing) => distance(clearing, point) > radius * 0.5);
+    this.map.landmarks = this.map.landmarks.filter((landmark) =>
+      !landmarkBlocksPoint(landmark, point, radius * 0.2),
+    );
+    this.map.terrainZones = this.map.terrainZones.filter((zone) =>
+      distance(zone, point) > Math.max(radius * 0.45, Math.min(zone.radiusX, zone.radiusZ) * 0.55),
+    );
     this.lastStamp = { ...point };
   }
 
@@ -303,14 +312,57 @@ export class MapEditor {
     this.map.trees = this.map.trees.filter((tree) => distance(tree, point) > radius);
   }
 
-  private extendPath(point: Vec2): void {
-    if (!this.activePathId) return;
-    const path = this.map.paths.find((candidate) => candidate.id === this.activePathId);
-    if (!path) return;
-    const last = path.points[path.points.length - 1];
-    if (distance(last, point) < 0.42) return;
-    path.points.push({ ...point });
-    this.eraseTrees(point, path.width / 2 + 0.28);
+  private placeLandmark(point: Vec2, kind: LandmarkKind): void {
+    if (this.map.landmarks.length >= MAX_MAP_LANDMARKS) return;
+    const landmark: OrchardLandmark = {
+      id: `landmark-custom-${Date.now()}-${this.serial}`,
+      kind,
+      ...point,
+      rotationY: (this.serial % 4) * Math.PI / 2,
+      radiusX: kind === 'homestead' ? Math.max(4.5, this.brushSize * 1.15) : Math.max(3.4, this.brushSize),
+      radiusZ: kind === 'homestead' ? Math.max(3.5, this.brushSize * 0.88) : Math.max(2.6, this.brushSize * 0.72),
+    };
+    if (!landmarkInsideArena(landmark, 0.8)) {
+      this.showToast('地标离边界太近，请向地图内部放置。');
+      return;
+    }
+    if (this.isImportantPointInsideLandmark(landmark, 2.2)) {
+      this.showToast('地标会挡住关键点，请换一个位置。');
+      return;
+    }
+    const candidateRadius = Math.hypot(landmark.radiusX, landmark.radiusZ);
+    if (this.map.landmarks.some((existing) =>
+      distance(existing, landmark) < candidateRadius + Math.hypot(existing.radiusX, existing.radiusZ) + 1.5,
+    )) {
+      this.showToast('地标之间需要保留宽阔的绕行空间。');
+      return;
+    }
+    this.map.landmarks.push(landmark);
+    this.map.trees = this.map.trees.filter((tree) => !landmarkBlocksPoint(landmark, tree, 0.9));
+    this.serial += 1;
+  }
+
+  private placeTerrainZone(point: Vec2, kind: 'orchard' | 'meadow'): void {
+    if (this.map.terrainZones.length >= MAX_TERRAIN_ZONES) return;
+    const zone: OrchardTerrainZone = {
+      id: `terrain-custom-${Date.now()}-${this.serial}`,
+      kind,
+      ...point,
+      rotationY: (this.serial % 5 - 2) * 0.12,
+      radiusX: Math.min(16, Math.max(4.5, this.brushSize * 1.45)),
+      radiusZ: Math.min(12, Math.max(3.5, this.brushSize)),
+    };
+    this.map.terrainZones.push(zone);
+    this.serial += 1;
+  }
+
+  private isImportantPointInsideLandmark(landmark: OrchardLandmark, padding: number): boolean {
+    return [
+      this.map.kidStart,
+      ...this.map.guardStarts,
+      this.map.deliveryZone,
+      ...this.map.appleSpawns,
+    ].some((point) => landmarkBlocksPoint(landmark, point, padding));
   }
 
   private shouldStamp(point: Vec2, spacing: number): boolean {
@@ -355,13 +407,13 @@ export class MapEditor {
   private generateCandidates(): void {
     const preset = MAP_PRESETS.includes(this.presetInput.value as MapPreset)
       ? this.presetInput.value as MapPreset
-      : 'clearings';
+      : 'village';
     const seed = Number(this.seedInput.value) || Date.now();
     this.candidates = generateMapCandidates({
       seed,
       preset,
-      density: Number(this.densityInput.value) / 100,
-      pathWidth: Number(this.pathWidthInput.value),
+      openness: Number(this.opennessInput.value) / 100,
+      landmarkDensity: Number(this.landmarkDensityInput.value) / 100,
     });
     this.renderCandidates();
     this.showToast('已生成 4 个可重复的候选地图。点击缩略图选择。');
@@ -378,7 +430,7 @@ export class MapEditor {
       canvas.width = 260;
       canvas.height = 180;
       const label = document.createElement('span');
-      label.textContent = `#${index + 1} · ${candidate.trees.length} 树`;
+      label.textContent = `#${index + 1} · ${candidate.landmarks.length} 地标 · ${treeMixLabel(candidate)}`;
       button.append(canvas, label);
       button.addEventListener('click', () => {
         this.pushHistory();
@@ -459,7 +511,7 @@ export class MapEditor {
       const name = document.createElement('strong');
       name.textContent = map.name;
       const meta = document.createElement('small');
-      meta.textContent = `${map.trees.length} 树 · ${map.appleSpawns.length} 果实 · seed ${map.seed}`;
+      meta.textContent = `${map.landmarks.length} 地标 · ${treeMixLabel(map)} · ${map.appleSpawns.length} 果实 · seed ${map.seed}`;
       const actions = document.createElement('div');
       const load = document.createElement('button');
       load.type = 'button';
@@ -487,7 +539,7 @@ export class MapEditor {
     const validation = validateOrchardMap(this.map);
     this.status.dataset.state = validation.valid ? 'valid' : 'invalid';
     this.status.textContent = validation.valid
-      ? `可游玩 · ${this.map.trees.length} 树 · ${this.map.appleSpawns.length} 果实`
+      ? `可游玩 · ${this.map.landmarks.length} 地标 · ${this.map.trees.length} 木本点缀（${largeTreeCount(this.map)} 大树） · ${this.map.appleSpawns.length} 果实`
       : `${validation.errors.length} 个问题需要处理`;
     this.playButton.disabled = !validation.valid;
     this.undoButton.disabled = this.history.length === 0;
@@ -502,7 +554,6 @@ export class MapEditor {
       chip.classList.toggle('error', validation.errors.includes(message));
       this.validationList.append(chip);
     }
-    this.renderSavedMaps();
     this.draw();
   }
 
@@ -594,7 +645,7 @@ function drawMap(
   if (detailed) {
     context.strokeStyle = 'rgba(47, 74, 40, 0.12)';
     context.lineWidth = 1;
-    for (let x = -GAME_CONFIG.arenaHalfWidth; x <= GAME_CONFIG.arenaHalfWidth; x += 1) {
+    for (let x = -GAME_CONFIG.arenaHalfWidth; x <= GAME_CONFIG.arenaHalfWidth; x += 5) {
       const start = toScreen({ x, z: -GAME_CONFIG.arenaHalfDepth });
       const end = toScreen({ x, z: GAME_CONFIG.arenaHalfDepth });
       context.beginPath();
@@ -602,7 +653,7 @@ function drawMap(
       context.lineTo(end.x, end.y);
       context.stroke();
     }
-    for (let z = -GAME_CONFIG.arenaHalfDepth; z <= GAME_CONFIG.arenaHalfDepth; z += 1) {
+    for (let z = -GAME_CONFIG.arenaHalfDepth; z <= GAME_CONFIG.arenaHalfDepth; z += 5) {
       const start = toScreen({ x: -GAME_CONFIG.arenaHalfWidth, z });
       const end = toScreen({ x: GAME_CONFIG.arenaHalfWidth, z });
       context.beginPath();
@@ -610,6 +661,28 @@ function drawMap(
       context.lineTo(end.x, end.y);
       context.stroke();
     }
+  }
+
+  for (const zone of map.terrainZones) {
+    const screen = toScreen(zone);
+    context.beginPath();
+    context.ellipse(
+      screen.x,
+      screen.y,
+      zone.radiusX * transform.scale,
+      zone.radiusZ * transform.scale,
+      -zone.rotationY,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = zone.kind === 'orchard'
+      ? '#a58b5c'
+      : zone.kind === 'wildflowers'
+        ? '#8faa67'
+        : '#a8be72';
+    context.globalAlpha = detailed ? 0.82 : 0.72;
+    context.fill();
+    context.globalAlpha = 1;
   }
 
   context.lineCap = 'round';
@@ -638,6 +711,10 @@ function drawMap(
     context.arc(screen.x, screen.y, clearing.radius * transform.scale, 0, Math.PI * 2);
     context.fillStyle = '#ad8f66';
     context.fill();
+  }
+
+  for (const landmark of map.landmarks) {
+    drawLandmark(context, landmark, toScreen(landmark), transform.scale, detailed);
   }
 
   for (const tree of map.trees) drawTree(context, tree, toScreen(tree), transform.scale, detailed);
@@ -688,6 +765,74 @@ function drawMap(
   );
 }
 
+function drawLandmark(
+  context: CanvasRenderingContext2D,
+  landmark: OrchardLandmark,
+  screen: { x: number; y: number },
+  scale: number,
+  detailed: boolean,
+): void {
+  if (landmark.kind === 'pond') {
+    context.beginPath();
+    context.ellipse(
+      screen.x,
+      screen.y,
+      landmark.radiusX * scale,
+      landmark.radiusZ * scale,
+      -landmark.rotationY,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = '#71885b';
+    context.fill();
+    context.beginPath();
+    context.ellipse(
+      screen.x,
+      screen.y,
+      landmark.radiusX * scale * 0.84,
+      landmark.radiusZ * scale * 0.8,
+      -landmark.rotationY,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = '#58a6a4';
+    context.fill();
+    if (detailed) {
+      context.strokeStyle = 'rgba(225, 241, 207, 0.72)';
+      context.lineWidth = 1.5;
+      context.stroke();
+    }
+    return;
+  }
+
+  context.save();
+  context.translate(screen.x, screen.y);
+  context.rotate(-landmark.rotationY);
+  const width = landmark.radiusX * 2 * scale;
+  const depth = landmark.radiusZ * 2 * scale;
+  context.fillStyle = '#a58b5c';
+  context.fillRect(-width / 2, -depth / 2, width, depth);
+  context.strokeStyle = '#755036';
+  context.lineWidth = detailed ? 2 : 1;
+  context.strokeRect(-width / 2, -depth / 2, width, depth);
+  const houseWidth = width * 0.52;
+  const houseDepth = depth * 0.48;
+  context.fillStyle = '#e3c887';
+  context.fillRect(-houseWidth / 2, -depth * 0.22 - houseDepth / 2, houseWidth, houseDepth);
+  context.fillStyle = '#b85f43';
+  context.beginPath();
+  context.moveTo(-houseWidth * 0.58, -depth * 0.22 - houseDepth / 2);
+  context.lineTo(0, -depth * 0.22 - houseDepth * 0.78);
+  context.lineTo(houseWidth * 0.58, -depth * 0.22 - houseDepth / 2);
+  context.closePath();
+  context.fill();
+  if (detailed) {
+    context.fillStyle = '#4d3425';
+    context.fillRect(-houseWidth * 0.1, -depth * 0.22 + houseDepth * 0.08, houseWidth * 0.2, houseDepth * 0.42);
+  }
+  context.restore();
+}
+
 function drawTree(
   context: CanvasRenderingContext2D,
   tree: OrchardTree,
@@ -695,7 +840,27 @@ function drawTree(
   scale: number,
   detailed: boolean,
 ): void {
-  const radius = Math.max(2.2, 0.45 * scale * tree.scale);
+  if (tree.variant === 'stump') {
+    const radius = Math.max(1.6, 0.4 * scale * tree.scale);
+    context.beginPath();
+    context.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+    context.fillStyle = '#6a4630';
+    context.fill();
+    if (detailed) {
+      context.beginPath();
+      context.arc(screen.x, screen.y - radius * 0.12, radius * 0.68, 0, Math.PI * 2);
+      context.fillStyle = '#b78652';
+      context.fill();
+      context.beginPath();
+      context.arc(screen.x, screen.y - radius * 0.12, radius * 0.34, 0, Math.PI * 2);
+      context.strokeStyle = '#7d5837';
+      context.lineWidth = 1;
+      context.stroke();
+    }
+    return;
+  }
+
+  const radius = Math.max(2.6, 0.58 * scale * tree.scale);
   context.beginPath();
   context.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
   context.fillStyle = tree.variant === 'cherry'
@@ -714,6 +879,15 @@ function drawTree(
     context.fillStyle = '#5e422e';
     context.fill();
   }
+}
+
+function largeTreeCount(map: OrchardMap): number {
+  return map.trees.reduce((count, tree) => count + (tree.variant === 'stump' ? 0 : 1), 0);
+}
+
+function treeMixLabel(map: OrchardMap): string {
+  const largeTrees = largeTreeCount(map);
+  return `${map.trees.length - largeTrees} 桩 / ${largeTrees} 树`;
 }
 
 function drawMarker(

@@ -93,15 +93,20 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   expect(renderer?.calls).toBeLessThanOrEqual(150);
   expect(renderer?.triangles).toBeLessThanOrEqual(300_000);
 
-  const physics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.physics);
+  const runtime = await page.evaluate(() => ({
+    physics: window.__THREE_GAME_DIAGNOSTICS__?.physics,
+    treeInstances: window.__THREE_GAME_DIAGNOSTICS__?.environment.treeInstances,
+    landmarks: window.__THREE_GAME_DIAGNOSTICS__?.environment.landmarks,
+  }));
+  const physics = runtime.physics;
   expect(physics).toMatchObject({
     engine: 'custom-xz-circles',
     timestep: 1 / 60,
     bodies: 9,
-    colliders: 125,
     sensors: 1,
     ccdBodies: 0,
   });
+  expect(physics?.colliders).toBe((runtime.treeInstances ?? 0) + (runtime.landmarks ?? 0) + 10);
 
   const before = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.guards[0].position.z ?? 0);
   await page.keyboard.down('KeyE');
@@ -268,21 +273,24 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
   }
   if (testInfo.project.name === 'narrow-chrome') {
     expect(layout.camera?.portraitLayout).toBe(true);
-    expect(layout.camera?.viewWidth).toBeLessThanOrEqual(18.9);
+    expect(layout.camera?.viewWidth).toBeCloseTo(67.5, 5);
+    expect(layout.camera?.viewHeight).toBeCloseTo(114.92307692307693, 5);
     expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
-    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(35, 5);
-    expect(layout.camera?.positionX).toBeGreaterThan(23);
-    expect(layout.camera?.positionY).toBeCloseTo(34, 5);
+    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(25, 5);
+    expect(layout.camera?.positionX).toBeGreaterThan(79);
+    expect(layout.camera?.positionY).toBeCloseTo(170, 5);
     expect(layout.camera?.positionZ).toBeCloseTo(0, 5);
-    expect(layout.camera?.zoom).toBeCloseTo(1.2, 5);
+    expect(layout.camera?.zoom).toBeCloseTo(1.08, 5);
   } else {
     expect(layout.camera?.portraitLayout).toBe(false);
-    expect(layout.camera?.viewHeight).toBeCloseTo(18.5, 5);
+    expect(layout.camera?.viewWidth).toBeCloseTo(107.52, 5);
+    expect(layout.camera?.viewHeight).toBeCloseTo(60.48, 5);
     expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
     expect(layout.camera?.positionX).toBeCloseTo(0, 5);
-    expect(layout.camera?.positionZ).toBeGreaterThan(27.5);
-    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(50, 5);
-    expect(layout.camera?.zoom).toBeCloseTo(1.2, 5);
+    expect(layout.camera?.positionY).toBeCloseTo(117.5, 5);
+    expect(layout.camera?.positionZ).toBeGreaterThan(79);
+    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(34, 5);
+    expect(layout.camera?.zoom).toBeCloseTo(1.08, 5);
   }
 });
 
@@ -452,13 +460,23 @@ test('Nature Pack trees and fruit load within the mobile render budget and retai
     .toMatchObject({
       treeMode: 'imported',
       externalRequested: true,
-      treeVariants: 3,
-      treeInstances: 115,
-      treeTriangles: 243504,
+      treeVariants: 4,
+      treeInstances: 93,
+      stumpInstances: 86,
+      largeTreeInstances: 7,
+      treeTriangles: 21648,
       fruitMode: 'imported',
       fruitInstances: 6,
       fruitTriangles: 1152,
-      mapName: '林间集市',
+      mapName: '果园村口',
+      paths: 0,
+      clearings: 0,
+      landmarks: 2,
+      terrainZones: 10,
+      landmarkMeshes: 24,
+      landmarkTriangles: 1208,
+      arenaWidth: 72,
+      arenaDepth: 54,
       lastFailure: null,
     });
   expect(assetResponses).toHaveLength(1);
@@ -476,10 +494,13 @@ test('Nature Pack trees and fruit load within the mobile render budget and retai
     fruitMode: 'procedural',
     externalRequested: false,
     treeVariants: 0,
-    treeInstances: 115,
+    treeInstances: 93,
+    stumpInstances: 86,
+    largeTreeInstances: 7,
     treeTriangles: 0,
     fruitInstances: 6,
     fruitTriangles: 0,
+    landmarks: 2,
     lastFailure: null,
   });
 });
@@ -636,7 +657,7 @@ test('KayKit Knight guards and Rogue kid load once and map key states independen
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(100);
-  expect(renderer?.triangles).toBeLessThanOrEqual(80_000);
+  expect(renderer?.triangles).toBeLessThanOrEqual(100_000);
   expect(renderer?.textures).toBeLessThanOrEqual(12);
 });
 

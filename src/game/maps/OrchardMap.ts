@@ -1,15 +1,22 @@
-import { GAME_CONFIG } from '../config';
+import { ARENA_SCALE, GAME_CONFIG } from '../config';
 import type { Vec2 } from '../types';
+import { createSeededRandom } from '../../utils/random';
 
-export const ORCHARD_MAP_VERSION = 1;
+export const ORCHARD_MAP_VERSION = 4;
 export const MIN_MAP_APPLES = 6;
 export const MAX_MAP_APPLES = 12;
-export const MAX_MAP_TREES = 180;
-export const TREE_COLLIDER_RADIUS = 0.42;
+export const MAX_MAP_TREES = 2000;
+export const MAX_MAP_LANDMARKS = 48;
+export const MAX_TERRAIN_ZONES = 64;
+export const TREE_COLLIDER_RADIUS = 0.31;
 
-export const TREE_VARIANTS = ['broadleaf', 'pine', 'cherry'] as const;
+export const TREE_VARIANTS = ['stump', 'broadleaf', 'pine', 'cherry'] as const;
+export const LANDMARK_KINDS = ['homestead', 'pond'] as const;
+export const TERRAIN_ZONE_KINDS = ['meadow', 'orchard', 'wildflowers'] as const;
 
 export type TreeVariant = typeof TREE_VARIANTS[number];
+export type LandmarkKind = typeof LANDMARK_KINDS[number];
+export type TerrainZoneKind = typeof TERRAIN_ZONE_KINDS[number];
 
 export type OrchardTree = Vec2 & {
   id: string;
@@ -29,6 +36,22 @@ export type OrchardClearing = Vec2 & {
   radius: number;
 };
 
+export type OrchardLandmark = Vec2 & {
+  id: string;
+  kind: LandmarkKind;
+  rotationY: number;
+  radiusX: number;
+  radiusZ: number;
+};
+
+export type OrchardTerrainZone = Vec2 & {
+  id: string;
+  kind: TerrainZoneKind;
+  rotationY: number;
+  radiusX: number;
+  radiusZ: number;
+};
+
 export type OrchardMap = {
   version: typeof ORCHARD_MAP_VERSION;
   id: string;
@@ -37,6 +60,8 @@ export type OrchardMap = {
   trees: OrchardTree[];
   paths: OrchardPath[];
   clearings: OrchardClearing[];
+  landmarks: OrchardLandmark[];
+  terrainZones: OrchardTerrainZone[];
   appleSpawns: Vec2[];
   kidStart: Vec2;
   guardStarts: [Vec2, Vec2];
@@ -52,6 +77,19 @@ export type MapValidation = {
 };
 
 type UnknownRecord = Record<string, unknown>;
+type IndexedTree = { index: number; tree: OrchardTree };
+type TreeSpatialIndex = {
+  cellSize: number;
+  buckets: Map<string, IndexedTree[]>;
+};
+
+const TREE_COLLIDER_RADII: Record<TreeVariant, number> = {
+  stump: TREE_COLLIDER_RADIUS,
+  broadleaf: 0.58,
+  pine: 0.52,
+  cherry: 0.6,
+};
+const MAX_TREE_COLLIDER_RADIUS = Math.max(...Object.values(TREE_COLLIDER_RADII)) * 1.35;
 
 export function cloneOrchardMap(map: OrchardMap): OrchardMap {
   return {
@@ -62,6 +100,8 @@ export function cloneOrchardMap(map: OrchardMap): OrchardMap {
       points: path.points.map((point) => ({ ...point })),
     })),
     clearings: map.clearings.map((clearing) => ({ ...clearing })),
+    landmarks: map.landmarks.map((landmark) => ({ ...landmark })),
+    terrainZones: map.terrainZones.map((zone) => ({ ...zone })),
     appleSpawns: map.appleSpawns.map((apple) => ({ ...apple })),
     kidStart: { ...map.kidStart },
     guardStarts: [{ ...map.guardStarts[0] }, { ...map.guardStarts[1] }],
@@ -70,20 +110,29 @@ export function cloneOrchardMap(map: OrchardMap): OrchardMap {
 }
 
 export function parseOrchardMap(value: unknown): OrchardMap | null {
-  if (!isRecord(value) || value.version !== ORCHARD_MAP_VERSION) return null;
+  if (!isRecord(value) || ![1, 2, 3, ORCHARD_MAP_VERSION].includes(Number(value.version))) return null;
+  const sourceVersion = Number(value.version);
   const trees = parseArray(value.trees, parseTree);
-  const paths = parseArray(value.paths, parsePath);
-  const clearings = parseArray(value.clearings, parseClearing);
+  const paths = parseArray(value.paths, (entry, index) => parsePath(entry, index, sourceVersion));
+  const clearings = parseArray(value.clearings, (entry, index) => parseClearing(entry, index, sourceVersion));
+  const landmarks = sourceVersion >= 4
+    ? parseArray(value.landmarks, parseLandmark)
+    : [];
+  const terrainZones = sourceVersion >= 4
+    ? parseArray(value.terrainZones, parseTerrainZone)
+    : [];
   const appleSpawns = parseArray(value.appleSpawns, parseVec2);
   const kidStart = parseVec2(value.kidStart, 0);
   const deliveryZone = parseVec2(value.deliveryZone, 0);
-  if (!trees || !paths || !clearings || !appleSpawns || !kidStart || !deliveryZone) return null;
+  if (!trees || !paths || !clearings || !landmarks || !terrainZones || !appleSpawns || !kidStart || !deliveryZone) {
+    return null;
+  }
   if (!Array.isArray(value.guardStarts) || value.guardStarts.length !== 2) return null;
   const guard1 = parseVec2(value.guardStarts[0], 0);
   const guard2 = parseVec2(value.guardStarts[1], 1);
   if (!guard1 || !guard2) return null;
 
-  return {
+  const parsed: OrchardMap = {
     version: ORCHARD_MAP_VERSION,
     id: text(value.id, `map-${Date.now()}`),
     name: text(value.name, '未命名果园'),
@@ -91,11 +140,16 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
     trees: trees.slice(0, MAX_MAP_TREES),
     paths,
     clearings,
+    landmarks: landmarks.slice(0, MAX_MAP_LANDMARKS),
+    terrainZones: terrainZones.slice(0, MAX_TERRAIN_ZONES),
     appleSpawns: appleSpawns.slice(0, MAX_MAP_APPLES),
     kidStart,
     guardStarts: [guard1, guard2],
     deliveryZone,
   };
+  if (sourceVersion === 1) return migrateVersionOneMap(parsed);
+  if (sourceVersion === 2) return migrateVersionTwoMap(parsed);
+  return parsed;
 }
 
 export function validateOrchardMap(map: OrchardMap): MapValidation {
@@ -110,7 +164,13 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   if (map.trees.length > MAX_MAP_TREES) {
     errors.push(`树木不能超过 ${MAX_MAP_TREES} 棵。`);
   }
-  if (map.trees.length < 24) warnings.push('树木较少，地图可能缺少树林小路的感觉。');
+  if (map.landmarks.length > MAX_MAP_LANDMARKS) {
+    errors.push(`地标不能超过 ${MAX_MAP_LANDMARKS} 个。`);
+  }
+  if (map.terrainZones.length > MAX_TERRAIN_ZONES) {
+    errors.push(`地表区域不能超过 ${MAX_TERRAIN_ZONES} 个。`);
+  }
+  if (map.trees.length > 360) warnings.push('树木较多，可能切碎开放地形并遮挡角色。');
 
   const importantPoints = [
     map.kidStart,
@@ -121,32 +181,47 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   if (importantPoints.some((point) => !insideArena(point, 0.65))) {
     errors.push('出生点、果实或投递区超出了可玩边界。');
   }
+  const outOfBoundsLandmarks = map.landmarks.filter((landmark) => !landmarkInsideArena(landmark)).length;
+  if (outOfBoundsLandmarks > 0) errors.push(`有 ${outOfBoundsLandmarks} 个地标超出了可玩边界。`);
 
+  const treeIndex = createTreeSpatialIndex(map.trees);
   const blockedImportantPoints = importantPoints.filter((point) =>
-    map.trees.some((tree) => circlesOverlap(
-      point,
-      0.64,
-      tree,
-      TREE_COLLIDER_RADIUS * tree.scale,
-    )),
+    pointBlockedByTree(treeIndex, point, 0.64) ||
+      map.landmarks.some((landmark) => landmarkBlocksPoint(landmark, point, 0.64)),
   ).length;
   if (blockedImportantPoints > 0) {
-    errors.push(`有 ${blockedImportantPoints} 个关键点被树木挡住。`);
+    errors.push(`有 ${blockedImportantPoints} 个关键点被障碍挡住。`);
   }
 
-  const reachability = measureReachability(map);
+  if (map.landmarks.length > 0) {
+    const crampedImportantPoints = importantPoints.filter((point) =>
+      pointBlockedByTree(treeIndex, point, 1.5) ||
+        map.landmarks.some((landmark) => landmarkBlocksPoint(landmark, point, 1.5)),
+    ).length;
+    if (crampedImportantPoints > 0) {
+      errors.push(`有 ${crampedImportantPoints} 个关键点缺少宽阔活动空间。`);
+    }
+  }
+
+  const reachability = measureReachability(map, treeIndex);
   if (reachability.reachableTargets < reachability.totalTargets) {
     errors.push(
       `只有 ${reachability.reachableTargets}/${reachability.totalTargets} 个目标可从小偷出生点到达。`,
     );
   }
+  if (map.landmarks.length > 0 && reachability.openRatio < 0.58) {
+    errors.push('开放地形不足，地标和树木把地图切得过于拥挤。');
+  } else if (map.landmarks.length > 0 && reachability.openRatio < 0.68) {
+    warnings.push('可行走面积偏紧，建议减少地标覆盖率或树木。');
+  }
 
-  const closeTreePairs = countCloseTreePairs(map.trees);
+  const closeTreePairs = countCloseTreePairs(map.trees, treeIndex);
   if (closeTreePairs > Math.max(6, map.trees.length * 0.12)) {
     warnings.push('部分树木过度重叠，建议用擦除工具整理边缘。');
   }
-  if (map.paths.length === 0) warnings.push('还没有地面小路，可使用“小路”工具绘制。');
-  if (map.clearings.length === 0) warnings.push('还没有标记空地，可用“空地”工具快速开辟。');
+  if (map.landmarks.length === 0 && map.terrainZones.length > 0) {
+    warnings.push('地图还没有语义地标，可加入小院或池塘作为方向参照。');
+  }
 
   return {
     valid: errors.length === 0,
@@ -163,11 +238,70 @@ export function insideArena(point: Vec2, padding = 0): boolean {
 }
 
 export function treeColliderRadius(tree: OrchardTree): number {
-  return TREE_COLLIDER_RADIUS * tree.scale;
+  return TREE_COLLIDER_RADII[tree.variant] * tree.scale;
 }
 
-function measureReachability(map: OrchardMap): { reachableTargets: number; totalTargets: number } {
-  const cellSize = 0.5;
+export function landmarkBlocksPoint(
+  landmark: OrchardLandmark,
+  point: Vec2,
+  padding = 0,
+): boolean {
+  const local = worldToLandmark(point, landmark);
+  const radiusX = landmark.radiusX + padding;
+  const radiusZ = landmark.radiusZ + padding;
+  if (landmark.kind === 'homestead') {
+    return Math.abs(local.x) < radiusX && Math.abs(local.z) < radiusZ;
+  }
+  return (local.x / radiusX) ** 2 + (local.z / radiusZ) ** 2 < 1;
+}
+
+export function landmarkInsideArena(landmark: OrchardLandmark, padding = 0.4): boolean {
+  const cosine = Math.abs(Math.cos(landmark.rotationY));
+  const sine = Math.abs(Math.sin(landmark.rotationY));
+  const extentX = cosine * landmark.radiusX + sine * landmark.radiusZ;
+  const extentZ = sine * landmark.radiusX + cosine * landmark.radiusZ;
+  return Math.abs(landmark.x) + extentX <= GAME_CONFIG.arenaHalfWidth - padding &&
+    Math.abs(landmark.z) + extentZ <= GAME_CONFIG.arenaHalfDepth - padding;
+}
+
+export function resolveCircleAgainstLandmark(
+  position: Vec2,
+  radius: number,
+  landmark: OrchardLandmark,
+): void {
+  const local = worldToLandmark(position, landmark);
+  const radiusX = landmark.radiusX + radius;
+  const radiusZ = landmark.radiusZ + radius;
+  if (landmark.kind === 'homestead') {
+    if (Math.abs(local.x) >= radiusX || Math.abs(local.z) >= radiusZ) return;
+    const pushX = radiusX - Math.abs(local.x);
+    const pushZ = radiusZ - Math.abs(local.z);
+    if (pushX < pushZ) local.x = (local.x < 0 ? -1 : 1) * radiusX;
+    else local.z = (local.z < 0 ? -1 : 1) * radiusZ;
+  } else {
+    const normalized = Math.hypot(local.x / radiusX, local.z / radiusZ);
+    if (normalized >= 1) return;
+    if (normalized <= 0.000001) local.x = radiusX;
+    else {
+      local.x /= normalized;
+      local.z /= normalized;
+    }
+  }
+  const world = landmarkToWorld(local, landmark);
+  position.x = world.x;
+  position.z = world.z;
+}
+
+export function upgradeSparseLegacyMap(map: OrchardMap): OrchardMap {
+  if ((!map.id.endsWith('-expanded') && !map.id.endsWith('-compact')) || map.trees.length >= 240) return map;
+  return fillExpandedLegacyMap(map);
+}
+
+function measureReachability(
+  map: OrchardMap,
+  treeIndex: TreeSpatialIndex,
+): { reachableTargets: number; totalTargets: number; openRatio: number } {
+  const cellSize = 1;
   const minX = -GAME_CONFIG.arenaHalfWidth + GAME_CONFIG.kidRadius;
   const minZ = -GAME_CONFIG.arenaHalfDepth + GAME_CONFIG.kidRadius;
   const columns = Math.floor((GAME_CONFIG.arenaHalfWidth * 2 - GAME_CONFIG.kidRadius * 2) / cellSize) + 1;
@@ -178,16 +312,15 @@ function measureReachability(map: OrchardMap): { reachableTargets: number; total
     x: minX + column * cellSize,
     z: minZ + row * cellSize,
   });
+  let openCells = 0;
 
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const point = pointAt(column, row);
-      blocked[key(column, row)] = map.trees.some((tree) => circlesOverlap(
-        point,
-        GAME_CONFIG.kidRadius,
-        tree,
-        treeColliderRadius(tree),
-      )) ? 1 : 0;
+      const isBlocked = pointBlockedByTree(treeIndex, point, GAME_CONFIG.kidRadius) ||
+        map.landmarks.some((landmark) => landmarkBlocksPoint(landmark, point, GAME_CONFIG.kidRadius));
+      blocked[key(column, row)] = isBlocked ? 1 : 0;
+      if (!isBlocked) openCells += 1;
     }
   }
 
@@ -222,17 +355,64 @@ function measureReachability(map: OrchardMap): { reachableTargets: number; total
     const [column, row] = nearestCell(target);
     return visited[key(column, row)] === 1;
   }).length;
-  return { reachableTargets, totalTargets: targets.length };
+  return {
+    reachableTargets,
+    totalTargets: targets.length,
+    openRatio: openCells / Math.max(1, columns * rows),
+  };
 }
 
-function countCloseTreePairs(trees: readonly OrchardTree[]): number {
+function countCloseTreePairs(
+  trees: readonly OrchardTree[],
+  treeIndex: TreeSpatialIndex,
+): number {
   let count = 0;
   for (let first = 0; first < trees.length; first += 1) {
-    for (let second = first + 1; second < trees.length; second += 1) {
-      if (circlesOverlap(trees[first], 0.34, trees[second], 0.34)) count += 1;
+    const tree = trees[first];
+    for (const candidate of nearbyTrees(treeIndex, tree, 1.2)) {
+      if (candidate.index <= first) continue;
+      if (circlesOverlap(tree, 0.34 * tree.scale, candidate.tree, 0.34 * candidate.tree.scale)) {
+        count += 1;
+      }
     }
   }
   return count;
+}
+
+function createTreeSpatialIndex(trees: readonly OrchardTree[]): TreeSpatialIndex {
+  const index: TreeSpatialIndex = { cellSize: 2, buckets: new Map() };
+  trees.forEach((tree, treeIndex) => {
+    const key = spatialKey(tree.x, tree.z, index.cellSize);
+    const bucket = index.buckets.get(key) ?? [];
+    bucket.push({ index: treeIndex, tree });
+    index.buckets.set(key, bucket);
+  });
+  return index;
+}
+
+function nearbyTrees(index: TreeSpatialIndex, point: Vec2, radius: number): IndexedTree[] {
+  const result: IndexedTree[] = [];
+  const minimumX = Math.floor((point.x - radius) / index.cellSize);
+  const maximumX = Math.floor((point.x + radius) / index.cellSize);
+  const minimumZ = Math.floor((point.z - radius) / index.cellSize);
+  const maximumZ = Math.floor((point.z + radius) / index.cellSize);
+  for (let x = minimumX; x <= maximumX; x += 1) {
+    for (let z = minimumZ; z <= maximumZ; z += 1) {
+      const bucket = index.buckets.get(`${x}:${z}`);
+      if (bucket) result.push(...bucket);
+    }
+  }
+  return result;
+}
+
+function pointBlockedByTree(index: TreeSpatialIndex, point: Vec2, radius: number): boolean {
+  return nearbyTrees(index, point, radius + MAX_TREE_COLLIDER_RADIUS).some(({ tree }) =>
+    circlesOverlap(point, radius, tree, treeColliderRadius(tree)),
+  );
+}
+
+function spatialKey(x: number, z: number, cellSize: number): string {
+  return `${Math.floor(x / cellSize)}:${Math.floor(z / cellSize)}`;
 }
 
 function circlesOverlap(first: Vec2, firstRadius: number, second: Vec2, secondRadius: number): boolean {
@@ -258,25 +438,67 @@ function parseTree(value: unknown, index: number): OrchardTree | null {
   };
 }
 
-function parsePath(value: unknown, index: number): OrchardPath | null {
+function parsePath(value: unknown, index: number, sourceVersion: number): OrchardPath | null {
   if (!isRecord(value)) return null;
   const points = parseArray(value.points, parseVec2);
   if (!points || points.length < 2) return null;
   return {
     id: text(value.id, `path-${index}`),
-    width: clamp(finiteNumber(value.width, 2.4), 1.4, 5),
+    width: sourceVersion === 1
+      ? clamp(finiteNumber(value.width, 2.4), 1.4, 5)
+      : sourceVersion === 2
+        ? clamp(finiteNumber(value.width, 12), 6, 25)
+        : clamp(finiteNumber(value.width, 7.2), 3.6, 15),
     points,
   };
 }
 
-function parseClearing(value: unknown, index: number): OrchardClearing | null {
+function parseClearing(value: unknown, index: number, sourceVersion: number): OrchardClearing | null {
   if (!isRecord(value)) return null;
   const point = parseVec2(value, index);
   if (!point) return null;
   return {
     ...point,
     id: text(value.id, `clearing-${index}`),
-    radius: clamp(finiteNumber(value.radius, 1.8), 1, 4),
+    radius: sourceVersion === 1
+      ? clamp(finiteNumber(value.radius, 1.8), 1, 4)
+      : sourceVersion === 2
+        ? clamp(finiteNumber(value.radius, 8), 3, 24)
+        : clamp(finiteNumber(value.radius, 4.8), 1.8, 15),
+  };
+}
+
+function parseLandmark(value: unknown, index: number): OrchardLandmark | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point) return null;
+  const kind = LANDMARK_KINDS.includes(value.kind as LandmarkKind)
+    ? value.kind as LandmarkKind
+    : LANDMARK_KINDS[index % LANDMARK_KINDS.length];
+  return {
+    ...point,
+    id: text(value.id, `landmark-${index}`),
+    kind,
+    rotationY: finiteNumber(value.rotationY, 0),
+    radiusX: clamp(finiteNumber(value.radiusX, kind === 'homestead' ? 5 : 4), 2.4, 9),
+    radiusZ: clamp(finiteNumber(value.radiusZ, kind === 'homestead' ? 4 : 3.2), 2, 7),
+  };
+}
+
+function parseTerrainZone(value: unknown, index: number): OrchardTerrainZone | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point) return null;
+  const kind = TERRAIN_ZONE_KINDS.includes(value.kind as TerrainZoneKind)
+    ? value.kind as TerrainZoneKind
+    : TERRAIN_ZONE_KINDS[index % TERRAIN_ZONE_KINDS.length];
+  return {
+    ...point,
+    id: text(value.id, `terrain-${index}`),
+    kind,
+    rotationY: finiteNumber(value.rotationY, 0),
+    radiusX: clamp(finiteNumber(value.radiusX, 6), 2.5, 18),
+    radiusZ: clamp(finiteNumber(value.radiusZ, 4.5), 2.5, 14),
   };
 }
 
@@ -310,6 +532,191 @@ function finiteNumber(value: unknown, fallback: number): number {
 
 function text(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 80) : fallback;
+}
+
+function worldToLandmark(point: Vec2, landmark: OrchardLandmark): Vec2 {
+  const deltaX = point.x - landmark.x;
+  const deltaZ = point.z - landmark.z;
+  const cosine = Math.cos(landmark.rotationY);
+  const sine = Math.sin(landmark.rotationY);
+  return {
+    x: deltaX * cosine - deltaZ * sine,
+    z: deltaX * sine + deltaZ * cosine,
+  };
+}
+
+function landmarkToWorld(point: Vec2, landmark: OrchardLandmark): Vec2 {
+  const cosine = Math.cos(landmark.rotationY);
+  const sine = Math.sin(landmark.rotationY);
+  return {
+    x: landmark.x + point.x * cosine + point.z * sine,
+    z: landmark.z - point.x * sine + point.z * cosine,
+  };
+}
+
+function migrateVersionOneMap(map: OrchardMap): OrchardMap {
+  const scalePoint = (point: Vec2): Vec2 => ({
+    x: point.x * ARENA_SCALE,
+    z: point.z * ARENA_SCALE,
+  });
+  const migrated: OrchardMap = {
+    ...map,
+    id: `${map.id}-expanded`,
+    name: `${map.name} · 扩展版`,
+    trees: map.trees.map((tree, index) => ({
+      ...tree,
+      ...scalePoint(tree),
+      variant: index % 20 === 0 ? tree.variant : 'stump',
+    })),
+    paths: map.paths.map((path) => ({
+      ...path,
+      width: path.width * ARENA_SCALE,
+      points: path.points.map(scalePoint),
+    })),
+    clearings: map.clearings.map((clearing) => ({
+      ...clearing,
+      ...scalePoint(clearing),
+      radius: clearing.radius * ARENA_SCALE,
+    })),
+    appleSpawns: map.appleSpawns.map(scalePoint),
+    kidStart: scalePoint(map.kidStart),
+    guardStarts: [scalePoint(map.guardStarts[0]), scalePoint(map.guardStarts[1])],
+    deliveryZone: scalePoint(map.deliveryZone),
+  };
+  return fillExpandedLegacyMap(migrated);
+}
+
+function migrateVersionTwoMap(map: OrchardMap): OrchardMap {
+  const scale = ARENA_SCALE / 5;
+  const scalePoint = (point: Vec2): Vec2 => ({
+    x: point.x * scale,
+    z: point.z * scale,
+  });
+  const scaled: OrchardMap = {
+    ...map,
+    id: `${map.id}-compact`,
+    name: `${map.name} · 三倍版`,
+    trees: map.trees.map((tree) => ({ ...tree, ...scalePoint(tree) })),
+    paths: map.paths.map((path) => ({
+      ...path,
+      width: path.width * scale,
+      points: path.points.map(scalePoint),
+    })),
+    clearings: map.clearings.map((clearing) => ({
+      ...clearing,
+      ...scalePoint(clearing),
+      radius: clearing.radius * scale,
+    })),
+    appleSpawns: map.appleSpawns.map(scalePoint),
+    kidStart: scalePoint(map.kidStart),
+    guardStarts: [scalePoint(map.guardStarts[0]), scalePoint(map.guardStarts[1])],
+    deliveryZone: scalePoint(map.deliveryZone),
+  };
+  return fillExpandedLegacyMap({
+    ...scaled,
+    trees: thinTreesForCompactMap(scaled),
+  });
+}
+
+function thinTreesForCompactMap(map: OrchardMap): OrchardTree[] {
+  const selected: OrchardTree[] = [];
+  const treeIndex = createTreeSpatialIndex(selected);
+  const importantPoints = [map.kidStart, ...map.guardStarts, map.deliveryZone, ...map.appleSpawns];
+  const ordered = [
+    ...map.trees.filter((tree) => tree.variant !== 'stump'),
+    ...map.trees.filter((tree) => tree.variant === 'stump'),
+  ];
+
+  for (const tree of ordered) {
+    if (!insideArena(tree, 0.8)) continue;
+    const radius = treeColliderRadius(tree);
+    if (importantPoints.some((point) => circlesOverlap(point, 0.7, tree, radius))) continue;
+    if (nearbyTrees(treeIndex, tree, radius + MAX_TREE_COLLIDER_RADIUS).some(({ tree: existing }) =>
+      circlesOverlap(tree, radius * 1.18, existing, treeColliderRadius(existing) * 1.18),
+    )) continue;
+    const copy = { ...tree };
+    const index = selected.length;
+    selected.push(copy);
+    addTreeToSpatialIndex(treeIndex, copy, index);
+  }
+
+  return selected;
+}
+
+function fillExpandedLegacyMap(map: OrchardMap): OrchardMap {
+  const trees = map.trees.map((tree) => ({ ...tree }));
+  const treeIndex = createTreeSpatialIndex(trees);
+  const random = createSeededRandom(map.seed ^ 0x5f3759df);
+  const importantPoints = [map.kidStart, ...map.guardStarts, map.deliveryZone, ...map.appleSpawns];
+  const spacing = 2.15;
+  let serial = 0;
+
+  for (let z = -GAME_CONFIG.arenaHalfDepth + 1.6; z <= GAME_CONFIG.arenaHalfDepth - 1.6; z += spacing) {
+    for (let x = -GAME_CONFIG.arenaHalfWidth + 1.6; x <= GAME_CONFIG.arenaHalfWidth - 1.6; x += spacing) {
+      if (trees.length >= MAX_MAP_TREES || random() > 0.94) continue;
+      const position = {
+        x: x + (random() - 0.5) * spacing * 0.34,
+        z: z + (random() - 0.5) * spacing * 0.34,
+      };
+      if (map.paths.some((path) => distanceToPath(position, path) < path.width / 2 + 0.55)) continue;
+      if (map.clearings.some((clearing) => distance(position, clearing) < clearing.radius + 0.55)) continue;
+      if (importantPoints.some((point) => distance(position, point) < 1.7)) continue;
+      const scale = 0.82 + random() * 0.3;
+      const minimumDistance = TREE_COLLIDER_RADIUS * (scale + 1.35) * 1.35;
+      if (nearbyTrees(treeIndex, position, minimumDistance).some(({ tree }) =>
+        distance(position, tree) < TREE_COLLIDER_RADIUS * (scale + tree.scale) * 1.35,
+      )) continue;
+
+      const tree: OrchardTree = {
+        ...position,
+        id: `legacy-fill-${serial}`,
+        variant: 'stump',
+        rotationY: random() * Math.PI * 2,
+        scale,
+      };
+      const index = trees.length;
+      trees.push(tree);
+      addTreeToSpatialIndex(treeIndex, tree, index);
+      serial += 1;
+    }
+  }
+
+  return { ...map, trees };
+}
+
+function addTreeToSpatialIndex(index: TreeSpatialIndex, tree: OrchardTree, treeIndex: number): void {
+  const key = spatialKey(tree.x, tree.z, index.cellSize);
+  const bucket = index.buckets.get(key) ?? [];
+  bucket.push({ index: treeIndex, tree });
+  index.buckets.set(key, bucket);
+}
+
+function distanceToPath(point: Vec2, path: OrchardPath): number {
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < path.points.length; index += 1) {
+    minimum = Math.min(minimum, distanceToSegment(point, path.points[index - 1], path.points[index]));
+  }
+  return minimum;
+}
+
+function distanceToSegment(point: Vec2, start: Vec2, end: Vec2): number {
+  const deltaX = end.x - start.x;
+  const deltaZ = end.z - start.z;
+  const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+  if (lengthSquared === 0) return distance(point, start);
+  const projection = clamp(
+    ((point.x - start.x) * deltaX + (point.z - start.z) * deltaZ) / lengthSquared,
+    0,
+    1,
+  );
+  return Math.hypot(
+    point.x - (start.x + deltaX * projection),
+    point.z - (start.z + deltaZ * projection),
+  );
+}
+
+function distance(first: Vec2, second: Vec2): number {
+  return Math.hypot(first.x - second.x, first.z - second.z);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

@@ -2,6 +2,7 @@ import type { Vec2 } from './types';
 
 export const TICKS_PER_SECOND = 60;
 export const FIXED_DELTA_SECONDS = 1 / TICKS_PER_SECOND;
+export const ARENA_SCALE = 3;
 
 export type MovementTuning = {
   baseSpeed: number;
@@ -16,8 +17,8 @@ export const DEFAULT_MOVEMENT_TUNING: Readonly<MovementTuning> = {
 };
 
 export const GAME_CONFIG = {
-  arenaHalfWidth: 12,
-  arenaHalfDepth: 9,
+  arenaHalfWidth: 12 * ARENA_SCALE,
+  arenaHalfDepth: 9 * ARENA_SCALE,
   countdownTicks: 3 * TICKS_PER_SECOND,
   catchTarget: 3,
   kidRadius: 0.48,
@@ -41,7 +42,7 @@ export const GAME_CONFIG = {
   pounceCooldownTicks: 36,
   simultaneousPounceTicks: 9,
   stunTicks: 60,
-  deliveryRadius: 2,
+  deliveryRadius: 3.2,
   maxFrameRate: 60,
   maxFrameDelta: 0.1,
   maxDpr: 2,
@@ -53,22 +54,22 @@ export type Obstacle = Vec2 & {
 };
 
 export const OBSTACLES: readonly Obstacle[] = [
-  { x: -4.1, z: -0.8, halfWidth: 1.45, halfDepth: 0.72 },
-  { x: 2.6, z: 1.55, halfWidth: 1.35, halfDepth: 0.72 },
-  { x: 0.1, z: -4.15, halfWidth: 1.65, halfDepth: 0.68 },
+  { x: -4.1 * ARENA_SCALE, z: -0.8 * ARENA_SCALE, halfWidth: 1.45 * ARENA_SCALE, halfDepth: 0.72 * ARENA_SCALE },
+  { x: 2.6 * ARENA_SCALE, z: 1.55 * ARENA_SCALE, halfWidth: 1.35 * ARENA_SCALE, halfDepth: 0.72 * ARENA_SCALE },
+  { x: 0.1 * ARENA_SCALE, z: -4.15 * ARENA_SCALE, halfWidth: 1.65 * ARENA_SCALE, halfDepth: 0.68 * ARENA_SCALE },
 ];
 
-export const DELIVERY_ZONE: Vec2 = { x: 8.1, z: 5.35 };
+export const DELIVERY_ZONE: Vec2 = { x: 8.1 * ARENA_SCALE, z: 5.35 * ARENA_SCALE };
 
-export const KID_START: Vec2 = { x: -9.1, z: 6.25 };
-export const GUARD1_START: Vec2 = { x: -6.8, z: -6.4 };
-export const GUARD2_START: Vec2 = { x: 6.6, z: -6.3 };
+export const KID_START: Vec2 = { x: -9.1 * ARENA_SCALE, z: 6.25 * ARENA_SCALE };
+export const GUARD1_START: Vec2 = { x: -7.6 * ARENA_SCALE, z: -6.25 * ARENA_SCALE };
+export const GUARD2_START: Vec2 = { x: 7.3 * ARENA_SCALE, z: -6.25 * ARENA_SCALE };
 
 export const APPLE_SPAWNS: readonly Vec2[] = [
-  { x: -8.1, z: 3.95 },
-  { x: -3.9, z: 3.45 },
-  { x: 0.15, z: 3.7 },
-  { x: 5.8, z: 1.05 },
-  { x: 8.35, z: -3.55 },
-  { x: -7.65, z: -4.65 },
+  { x: -8.1 * ARENA_SCALE, z: 3.95 * ARENA_SCALE },
+  { x: -3.9 * ARENA_SCALE, z: 3.45 * ARENA_SCALE },
+  { x: 0.15 * ARENA_SCALE, z: 3.7 * ARENA_SCALE },
+  { x: 5.8 * ARENA_SCALE, z: 1.05 * ARENA_SCALE },
+  { x: 8.35 * ARENA_SCALE, z: -3.55 * ARENA_SCALE },
+  { x: -7.65 * ARENA_SCALE, z: -4.65 * ARENA_SCALE },
 ];

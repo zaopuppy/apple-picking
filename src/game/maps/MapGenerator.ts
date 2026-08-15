@@ -1,50 +1,86 @@
 import { createSeededRandom } from '../../utils/random';
+import { ARENA_SCALE, GAME_CONFIG } from '../config';
 import type { Vec2 } from '../types';
 import {
   cloneOrchardMap,
+  insideArena,
+  landmarkBlocksPoint,
+  landmarkInsideArena,
   MAX_MAP_TREES,
   ORCHARD_MAP_VERSION,
-  type OrchardClearing,
+  treeColliderRadius,
+  type LandmarkKind,
+  type OrchardLandmark,
   type OrchardMap,
-  type OrchardPath,
+  type OrchardTerrainZone,
   type OrchardTree,
-  TREE_COLLIDER_RADIUS,
-  TREE_VARIANTS,
+  type TerrainZoneKind,
+  type TreeVariant,
+  validateOrchardMap,
 } from './OrchardMap';
 
-export const MAP_PRESETS = ['winding', 'clearings', 'crossroads'] as const;
+export const MAP_PRESETS = ['village', 'pond-garden', 'open-orchard'] as const;
 export type MapPreset = typeof MAP_PRESETS[number];
 
 export type MapGenerationOptions = {
   seed: number;
   preset: MapPreset;
-  density: number;
-  pathWidth: number;
+  openness: number;
+  landmarkDensity: number;
   name?: string;
 };
 
-const KID_START: Vec2 = { x: -9.1, z: 6.25 };
-const GUARD_STARTS: [Vec2, Vec2] = [
+const BASE_KID_START: Vec2 = { x: -9.1, z: 6.25 };
+const BASE_GUARD_STARTS: [Vec2, Vec2] = [
   { x: -7.6, z: -6.25 },
   { x: 7.3, z: -6.25 },
 ];
-const DELIVERY_ZONE: Vec2 = { x: 8.1, z: 5.35 };
+const BASE_DELIVERY_ZONE: Vec2 = { x: 8.1, z: 5.35 };
+const KID_START = scalePoint(BASE_KID_START, ARENA_SCALE);
+const GUARD_STARTS: [Vec2, Vec2] = [
+  scalePoint(BASE_GUARD_STARTS[0], ARENA_SCALE),
+  scalePoint(BASE_GUARD_STARTS[1], ARENA_SCALE),
+];
+const DELIVERY_ZONE = scalePoint(BASE_DELIVERY_ZONE, ARENA_SCALE);
+
+const LANDMARK_CLEARANCE = 3;
+const TREE_IMPORTANT_CLEARANCE = 2.8;
 
 export const DEFAULT_ORCHARD_MAP = generateOrchardMap({
   seed: 20260815,
-  preset: 'clearings',
-  density: 0.78,
-  pathWidth: 2.35,
-  name: '林间集市',
+  preset: 'village',
+  openness: 0.82,
+  landmarkDensity: 0.13,
+  name: '果园村口',
 });
 
 export function generateMapCandidates(
   options: MapGenerationOptions,
   count = 4,
 ): OrchardMap[] {
-  return Array.from({ length: count }, (_, index) => generateOrchardMap({
+  const poolSize = Math.max(12, count * 3);
+  const pool = Array.from({ length: poolSize }, (_, index) => generateOrchardMap({
     ...options,
     seed: normalizeSeed(options.seed + index * 7919),
+  })).sort((first, second) => candidateScore(second, options) - candidateScore(first, options));
+
+  const selected: OrchardMap[] = [];
+  const signatures = new Set<string>();
+  for (const candidate of pool) {
+    const signature = candidateSignature(candidate);
+    if (signatures.has(signature) && selected.length < Math.ceil(count / 2)) continue;
+    signatures.add(signature);
+    selected.push(candidate);
+    if (selected.length >= count) break;
+  }
+  for (const candidate of pool) {
+    if (selected.length >= count) break;
+    if (selected.includes(candidate)) continue;
+    selected.push(candidate);
+  }
+
+  return selected.map((candidate, index) => ({
+    ...cloneOrchardMap(candidate),
     name: `${presetName(options.preset)} ${index + 1}`,
   }));
 }
@@ -52,19 +88,35 @@ export function generateMapCandidates(
 export function generateOrchardMap(options: MapGenerationOptions): OrchardMap {
   const seed = normalizeSeed(options.seed);
   const random = createSeededRandom(seed);
-  const density = clamp(options.density, 0.35, 1);
-  const pathWidth = clamp(options.pathWidth, 1.8, 4.2);
-  const layout = createLayout(options.preset, pathWidth, random);
-  const trees = plantForest(layout.paths, layout.clearings, density, random);
+  const openness = clamp(options.openness, 0.65, 0.94);
+  const landmarkDensity = clamp(options.landmarkDensity, 0.06, 0.2);
+  const appleSpawns = createAppleSpawns(options.preset, random);
+  const importantPoints = [KID_START, ...GUARD_STARTS, DELIVERY_ZONE, ...appleSpawns];
+  const terrainZones = createTerrainZones(options.preset, random);
+  const landmarks = createLandmarks(
+    options.preset,
+    landmarkDensity,
+    importantPoints,
+    random,
+  );
+  const trees = plantOpenLandscape(
+    terrainZones,
+    landmarks,
+    importantPoints,
+    openness,
+    random,
+  );
   const map: OrchardMap = {
     version: ORCHARD_MAP_VERSION,
     id: `orchard-${seed}-${options.preset}`,
     name: options.name?.trim() || `${presetName(options.preset)} · ${seed}`,
     seed,
     trees,
-    paths: layout.paths,
-    clearings: layout.clearings,
-    appleSpawns: layout.apples,
+    paths: [],
+    clearings: [],
+    landmarks,
+    terrainZones,
+    appleSpawns,
     kidStart: { ...KID_START },
     guardStarts: [{ ...GUARD_STARTS[0] }, { ...GUARD_STARTS[1] }],
     deliveryZone: { ...DELIVERY_ZONE },
@@ -74,232 +126,295 @@ export function generateOrchardMap(options: MapGenerationOptions): OrchardMap {
 
 export function presetName(preset: MapPreset): string {
   switch (preset) {
-    case 'winding':
-      return '蜿蜒果径';
-    case 'clearings':
-      return '林间空地';
-    case 'crossroads':
-      return '交错林路';
+    case 'village':
+      return '果园村口';
+    case 'pond-garden':
+      return '池塘花园';
+    case 'open-orchard':
+      return '开阔果园';
   }
 }
 
-function createLayout(
+function createAppleSpawns(preset: MapPreset, random: () => number): Vec2[] {
+  const layouts: Record<MapPreset, Vec2[]> = {
+    village: [
+      { x: -6.2, z: 3.15 },
+      { x: -2.2, z: 4.25 },
+      { x: 2.25, z: 3.45 },
+      { x: 5.8, z: 1.2 },
+      { x: 3.95, z: -3.75 },
+      { x: -4.35, z: -3.55 },
+    ],
+    'pond-garden': [
+      { x: -6.4, z: 2.65 },
+      { x: -2.6, z: 4.55 },
+      { x: 1.35, z: 3.75 },
+      { x: 5.55, z: 1.55 },
+      { x: 4.5, z: -3.5 },
+      { x: -3.85, z: -4.2 },
+    ],
+    'open-orchard': [
+      { x: -6.7, z: 3.2 },
+      { x: -2.7, z: 2.5 },
+      { x: 1.0, z: 4.3 },
+      { x: 5.9, z: 2.2 },
+      { x: 4.9, z: -3.9 },
+      { x: -4.8, z: -3.8 },
+    ],
+  };
+  return layouts[preset].map((point) => scalePoint({
+    x: point.x + jitter(random, 0.38),
+    z: point.z + jitter(random, 0.32),
+  }, ARENA_SCALE));
+}
+
+function createTerrainZones(
   preset: MapPreset,
-  pathWidth: number,
   random: () => number,
-): { paths: OrchardPath[]; clearings: OrchardClearing[]; apples: Vec2[] } {
-  switch (preset) {
-    case 'winding':
-      return windingLayout(pathWidth, random);
-    case 'clearings':
-      return clearingsLayout(pathWidth, random);
-    case 'crossroads':
-      return crossroadsLayout(pathWidth, random);
+): OrchardTerrainZone[] {
+  const arenaArea = GAME_CONFIG.arenaHalfWidth * 2 * GAME_CONFIG.arenaHalfDepth * 2;
+  const targetCoverage = arenaArea * (preset === 'open-orchard' ? 0.28 : 0.23);
+  const zones: OrchardTerrainZone[] = [];
+  let covered = 0;
+  let attempts = 0;
+  while (covered < targetCoverage && attempts < 120) {
+    attempts += 1;
+    const radiusX = lerp(5.2, 10.2, random());
+    const radiusZ = lerp(3.7, 7.2, random());
+    const x = jitter(random, GAME_CONFIG.arenaHalfWidth - radiusX - 1.5);
+    const z = jitter(random, GAME_CONFIG.arenaHalfDepth - radiusZ - 1.5);
+    const kind = terrainKind(preset, random());
+    zones.push({
+      id: `terrain-${zones.length}`,
+      kind,
+      x,
+      z,
+      rotationY: jitter(random, Math.PI * 0.18),
+      radiusX,
+      radiusZ,
+    });
+    covered += Math.PI * radiusX * radiusZ * 0.72;
   }
+  return zones;
 }
 
-function windingLayout(
-  width: number,
-  random: () => number,
-): { paths: OrchardPath[]; clearings: OrchardClearing[]; apples: Vec2[] } {
-  const upper = { x: -3.6 + jitter(random, 0.8), z: 3.7 + jitter(random, 0.45) };
-  const heart = { x: 0.1 + jitter(random, 0.8), z: 0.15 + jitter(random, 0.7) };
-  const east = { x: 4.5 + jitter(random, 0.55), z: 2.1 + jitter(random, 0.7) };
-  const westLow = { x: -5.2 + jitter(random, 0.6), z: -3.6 + jitter(random, 0.55) };
-  const eastLow = { x: 4.1 + jitter(random, 0.6), z: -3.75 + jitter(random, 0.5) };
-  return {
-    paths: [
-      path('main', width, [KID_START, upper, heart, east, DELIVERY_ZONE]),
-      path('west-branch', width * 0.92, [heart, westLow, GUARD_STARTS[0]]),
-      path('east-branch', width * 0.92, [heart, eastLow, GUARD_STARTS[1]]),
-      path('low-link', width * 0.78, [westLow, { x: -0.5, z: -5.4 }, eastLow]),
-    ],
-    clearings: clearingsFrom([
-      [KID_START, 1.35],
-      [upper, 1.65],
-      [heart, 2.05],
-      [east, 1.55],
-      [westLow, 1.45],
-      [eastLow, 1.5],
-      [DELIVERY_ZONE, 2.35],
-      [GUARD_STARTS[0], 1.25],
-      [GUARD_STARTS[1], 1.25],
-    ]),
-    apples: [
-      offset(upper, -0.45, 0.2),
-      offset(heart, -0.7, 0.25),
-      offset(heart, 0.75, -0.35),
-      offset(east, 0.2, -0.4),
-      offset(westLow, 0.25, 0.2),
-      offset(eastLow, -0.3, 0.25),
-    ],
-  };
+function terrainKind(preset: MapPreset, roll: number): TerrainZoneKind {
+  if (preset === 'open-orchard') return roll < 0.58 ? 'orchard' : roll < 0.83 ? 'meadow' : 'wildflowers';
+  if (preset === 'pond-garden') return roll < 0.5 ? 'meadow' : roll < 0.76 ? 'wildflowers' : 'orchard';
+  return roll < 0.48 ? 'orchard' : roll < 0.82 ? 'meadow' : 'wildflowers';
 }
 
-function clearingsLayout(
-  width: number,
-  random: () => number,
-): { paths: OrchardPath[]; clearings: OrchardClearing[]; apples: Vec2[] } {
-  const west = { x: -5.2 + jitter(random, 0.45), z: 1.6 + jitter(random, 0.6) };
-  const north = { x: 0.1 + jitter(random, 0.6), z: 3.6 + jitter(random, 0.4) };
-  const center = { x: -0.2 + jitter(random, 0.55), z: -0.5 + jitter(random, 0.5) };
-  const east = { x: 5.0 + jitter(random, 0.45), z: 0.45 + jitter(random, 0.7) };
-  const southWest = { x: -4.7 + jitter(random, 0.55), z: -4.7 + jitter(random, 0.45) };
-  const southEast = { x: 4.3 + jitter(random, 0.5), z: -4.5 + jitter(random, 0.5) };
-  return {
-    paths: [
-      path('north-arc', width, [KID_START, west, north, DELIVERY_ZONE]),
-      path('center-crossing', width * 0.95, [west, center, east, DELIVERY_ZONE]),
-      path('south-arc', width * 0.88, [GUARD_STARTS[0], southWest, center, southEast, GUARD_STARTS[1]]),
-      path('vertical-link', width * 0.78, [north, center]),
-    ],
-    clearings: clearingsFrom([
-      [KID_START, 1.3],
-      [west, 1.8],
-      [north, 1.65],
-      [center, 2.15],
-      [east, 1.75],
-      [southWest, 1.4],
-      [southEast, 1.4],
-      [DELIVERY_ZONE, 2.35],
-      [GUARD_STARTS[0], 1.2],
-      [GUARD_STARTS[1], 1.2],
-    ]),
-    apples: [
-      offset(west, -0.45, 0.1),
-      offset(north, 0.25, 0.35),
-      offset(center, -0.7, 0.3),
-      offset(center, 0.7, -0.25),
-      offset(east, 0.25, 0.25),
-      offset(southWest, 0.2, 0.15),
-    ],
-  };
-}
-
-function crossroadsLayout(
-  width: number,
-  random: () => number,
-): { paths: OrchardPath[]; clearings: OrchardClearing[]; apples: Vec2[] } {
-  const hub = { x: jitter(random, 0.6), z: jitter(random, 0.5) };
-  const west = { x: -5.8 + jitter(random, 0.45), z: -0.2 + jitter(random, 0.5) };
-  const east = { x: 5.7 + jitter(random, 0.45), z: 0.2 + jitter(random, 0.5) };
-  const north = { x: -0.5 + jitter(random, 0.55), z: 5.25 + jitter(random, 0.35) };
-  const south = { x: 0.6 + jitter(random, 0.55), z: -5.25 + jitter(random, 0.35) };
-  return {
-    paths: [
-      path('west-east', width, [west, hub, east]),
-      path('north-south', width, [north, hub, south]),
-      path('kid-route', width * 0.88, [KID_START, north, hub]),
-      path('delivery-route', width * 0.88, [hub, east, DELIVERY_ZONE]),
-      path('guard-route', width * 0.82, [GUARD_STARTS[0], south, GUARD_STARTS[1]]),
-    ],
-    clearings: clearingsFrom([
-      [KID_START, 1.3],
-      [west, 1.55],
-      [east, 1.55],
-      [north, 1.55],
-      [south, 1.55],
-      [hub, 2.25],
-      [DELIVERY_ZONE, 2.35],
-      [GUARD_STARTS[0], 1.2],
-      [GUARD_STARTS[1], 1.2],
-    ]),
-    apples: [
-      offset(west, -0.25, 0.35),
-      offset(north, 0.3, -0.2),
-      offset(hub, -0.75, 0.35),
-      offset(hub, 0.75, -0.35),
-      offset(east, 0.2, 0.35),
-      offset(south, -0.25, 0.25),
-    ],
-  };
-}
-
-function plantForest(
-  paths: readonly OrchardPath[],
-  clearings: readonly OrchardClearing[],
+function createLandmarks(
+  preset: MapPreset,
   density: number,
+  importantPoints: readonly Vec2[],
+  random: () => number,
+): OrchardLandmark[] {
+  const arenaArea = GAME_CONFIG.arenaHalfWidth * 2 * GAME_CONFIG.arenaHalfDepth * 2;
+  const targetBudget = arenaArea * density;
+  const landmarks: OrchardLandmark[] = [];
+  let usedBudget = 0;
+  let attempts = 0;
+  while (usedBudget < targetBudget && attempts < 240) {
+    const kind = landmarkKind(preset, landmarks.length, random());
+    const radiusX = kind === 'homestead' ? lerp(4.5, 5.7, random()) : lerp(3.4, 5, random());
+    const radiusZ = kind === 'homestead' ? lerp(3.5, 4.5, random()) : lerp(2.6, 4, random());
+    const candidate: OrchardLandmark = {
+      id: `landmark-${landmarks.length}`,
+      kind,
+      x: jitter(random, GAME_CONFIG.arenaHalfWidth - radiusX - 2),
+      z: kind === 'homestead'
+        ? lerp(-GAME_CONFIG.arenaHalfDepth + radiusZ + 2, -5.5, random())
+        : jitter(random, GAME_CONFIG.arenaHalfDepth - radiusZ - 2),
+      rotationY: Math.round(random() * 3) * Math.PI / 2 + jitter(random, 0.08),
+      radiusX,
+      radiusZ,
+    };
+    attempts += 1;
+    if (!landmarkInsideArena(candidate, 1)) continue;
+    if (importantPoints.some((point) => landmarkBlocksPoint(candidate, point, LANDMARK_CLEARANCE))) {
+      continue;
+    }
+    if (landmarks.some((existing) => landmarksOverlap(candidate, existing, 2.4))) continue;
+    const cost = (radiusX * 2 + 6) * (radiusZ * 2 + 6);
+    if (landmarks.length > 0 && usedBudget + cost > targetBudget * 1.22) break;
+    landmarks.push(candidate);
+    usedBudget += cost;
+  }
+  return landmarks;
+}
+
+function landmarkKind(preset: MapPreset, index: number, roll: number): LandmarkKind {
+  if (index === 0) return preset === 'pond-garden' ? 'pond' : 'homestead';
+  if (preset === 'village') return roll < 0.62 ? 'homestead' : 'pond';
+  if (preset === 'pond-garden') return roll < 0.68 ? 'pond' : 'homestead';
+  return roll < 0.48 ? 'homestead' : 'pond';
+}
+
+function plantOpenLandscape(
+  terrainZones: readonly OrchardTerrainZone[],
+  landmarks: readonly OrchardLandmark[],
+  importantPoints: readonly Vec2[],
+  openness: number,
   random: () => number,
 ): OrchardTree[] {
-  const spacing = lerp(1.52, 1.02, density);
+  const arenaArea = GAME_CONFIG.arenaHalfWidth * 2 * GAME_CONFIG.arenaHalfDepth * 2;
+  const targetCount = Math.min(
+    MAX_MAP_TREES,
+    Math.round(arenaArea * (0.014 + (1 - openness) * 0.055)),
+  );
   const trees: OrchardTree[] = [];
-  let serial = 0;
-  for (let z = -8.3; z <= 8.3; z += spacing) {
-    for (let x = -11.35; x <= 11.35; x += spacing) {
-      if (random() > lerp(0.84, 0.97, density)) continue;
-      const position = {
-        x: x + jitter(random, spacing * 0.18),
-        z: z + jitter(random, spacing * 0.18),
-      };
-      if (clearings.some((clearing) => distance(position, clearing) < clearing.radius + 0.25)) continue;
-      if (paths.some((candidate) => distanceToPath(position, candidate) < candidate.width / 2 + 0.28)) continue;
-      if (distance(position, DELIVERY_ZONE) < 2.55) continue;
-      const variantRoll = random();
-      const variant = variantRoll < 0.5
-        ? TREE_VARIANTS[0]
-        : variantRoll < 0.72
-          ? TREE_VARIANTS[1]
-          : TREE_VARIANTS[2];
-      const scale = 0.82 + random() * 0.3;
-      if (trees.some((tree) => distance(position, tree) < TREE_COLLIDER_RADIUS * (scale + tree.scale) * 1.35)) {
-        continue;
+
+  const orchardZones = terrainZones.filter((zone) => zone.kind === 'orchard');
+  for (const zone of orchardZones) {
+    const rowSpacing = 3.25;
+    const columnSpacing = 3.6;
+    for (let localZ = -zone.radiusZ + 1.4; localZ <= zone.radiusZ - 1.4; localZ += rowSpacing) {
+      for (let localX = -zone.radiusX + 1.4; localX <= zone.radiusX - 1.4; localX += columnSpacing) {
+        if (trees.length >= targetCount * 0.54 || random() < 0.42) continue;
+        tryAddTree(
+          trees,
+          terrainLocalToWorld(zone, {
+            x: localX + jitter(random, 0.24),
+            z: localZ + jitter(random, 0.2),
+          }),
+          landmarks,
+          importantPoints,
+          random,
+        );
       }
-      trees.push({
-        id: `tree-${serial}`,
-        ...position,
-        variant,
-        rotationY: random() * Math.PI * 2,
-        scale,
-      });
-      serial += 1;
     }
   }
-  if (trees.length <= MAX_MAP_TREES) return trees;
-  for (let index = trees.length - 1; index > 0; index -= 1) {
-    const target = Math.floor(random() * (index + 1));
-    [trees[index], trees[target]] = [trees[target], trees[index]];
+
+  let attempts = 0;
+  while (trees.length < targetCount && attempts < targetCount * 35) {
+    attempts += 1;
+    const roll = random();
+    let position: Vec2;
+    if (roll < 0.56) position = edgePosition(random);
+    else if (roll < 0.78 && landmarks.length > 0) {
+      position = landmarkRimPosition(landmarks[Math.floor(random() * landmarks.length)], random);
+    } else {
+      position = {
+        x: jitter(random, GAME_CONFIG.arenaHalfWidth - 1.4),
+        z: jitter(random, GAME_CONFIG.arenaHalfDepth - 1.4),
+      };
+    }
+    tryAddTree(trees, position, landmarks, importantPoints, random);
   }
-  return trees
-    .slice(0, MAX_MAP_TREES)
-    .sort((first, second) => first.id.localeCompare(second.id));
+  return trees;
 }
 
-function path(id: string, width: number, points: Vec2[]): OrchardPath {
-  return { id, width, points: points.map((point) => ({ ...point })) };
+function tryAddTree(
+  trees: OrchardTree[],
+  position: Vec2,
+  landmarks: readonly OrchardLandmark[],
+  importantPoints: readonly Vec2[],
+  random: () => number,
+): void {
+  if (!insideArena(position, 0.75)) return;
+  if (importantPoints.some((point) => distance(point, position) < TREE_IMPORTANT_CLEARANCE)) return;
+  if (landmarks.some((landmark) => landmarkBlocksPoint(landmark, position, 1))) return;
+  const variant = treeVariant(random());
+  const scale = 0.86 + random() * 0.26;
+  const candidate: OrchardTree = {
+    id: `tree-${trees.length}`,
+    ...position,
+    variant,
+    rotationY: random() * Math.PI * 2,
+    scale,
+  };
+  const minimumSpacing = variant === 'stump' ? 1.38 : 2.25;
+  if (trees.some((tree) => distance(tree, candidate) < Math.max(
+    minimumSpacing,
+    treeColliderRadius(tree) + treeColliderRadius(candidate) + 0.46,
+  ))) return;
+  trees.push(candidate);
 }
 
-function clearingsFrom(entries: Array<[Vec2, number]>): OrchardClearing[] {
-  return entries.map(([point, radius], index) => ({
-    id: `clearing-${index}`,
-    ...point,
-    radius,
-  }));
+function treeVariant(roll: number): TreeVariant {
+  if (roll < 0.88) return 'stump';
+  if (roll < 0.925) return 'broadleaf';
+  if (roll < 0.9625) return 'pine';
+  return 'cherry';
 }
 
-function distanceToPath(point: Vec2, candidate: OrchardPath): number {
-  let minimum = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < candidate.points.length; index += 1) {
-    minimum = Math.min(minimum, distanceToSegment(point, candidate.points[index - 1], candidate.points[index]));
+function edgePosition(random: () => number): Vec2 {
+  const inset = lerp(1.1, 4.2, random());
+  switch (Math.floor(random() * 4)) {
+    case 0:
+      return { x: jitter(random, GAME_CONFIG.arenaHalfWidth - 1), z: -GAME_CONFIG.arenaHalfDepth + inset };
+    case 1:
+      return { x: jitter(random, GAME_CONFIG.arenaHalfWidth - 1), z: GAME_CONFIG.arenaHalfDepth - inset };
+    case 2:
+      return { x: -GAME_CONFIG.arenaHalfWidth + inset, z: jitter(random, GAME_CONFIG.arenaHalfDepth - 1) };
+    default:
+      return { x: GAME_CONFIG.arenaHalfWidth - inset, z: jitter(random, GAME_CONFIG.arenaHalfDepth - 1) };
   }
-  return minimum;
 }
 
-function distanceToSegment(point: Vec2, start: Vec2, end: Vec2): number {
-  const deltaX = end.x - start.x;
-  const deltaZ = end.z - start.z;
-  const denominator = deltaX * deltaX + deltaZ * deltaZ;
-  const t = denominator <= 0.00001
-    ? 0
-    : clamp(((point.x - start.x) * deltaX + (point.z - start.z) * deltaZ) / denominator, 0, 1);
-  return Math.hypot(point.x - (start.x + deltaX * t), point.z - (start.z + deltaZ * t));
+function landmarkRimPosition(landmark: OrchardLandmark, random: () => number): Vec2 {
+  const angle = random() * Math.PI * 2;
+  const local = {
+    x: Math.cos(angle) * (landmark.radiusX + lerp(1.2, 2.8, random())),
+    z: Math.sin(angle) * (landmark.radiusZ + lerp(1.2, 2.8, random())),
+  };
+  const cosine = Math.cos(landmark.rotationY);
+  const sine = Math.sin(landmark.rotationY);
+  return {
+    x: landmark.x + local.x * cosine + local.z * sine,
+    z: landmark.z - local.x * sine + local.z * cosine,
+  };
+}
+
+function terrainLocalToWorld(zone: OrchardTerrainZone, point: Vec2): Vec2 {
+  const cosine = Math.cos(zone.rotationY);
+  const sine = Math.sin(zone.rotationY);
+  return {
+    x: zone.x + point.x * cosine + point.z * sine,
+    z: zone.z - point.x * sine + point.z * cosine,
+  };
+}
+
+function landmarksOverlap(first: OrchardLandmark, second: OrchardLandmark, padding: number): boolean {
+  const firstRadius = Math.hypot(first.radiusX, first.radiusZ);
+  const secondRadius = Math.hypot(second.radiusX, second.radiusZ);
+  return distance(first, second) < firstRadius + secondRadius + padding;
+}
+
+function candidateScore(map: OrchardMap, options: MapGenerationOptions): number {
+  const validation = validateOrchardMap(map);
+  if (!validation.valid) return -1_000_000 + validation.reachableTargets * 100;
+  const arenaArea = GAME_CONFIG.arenaHalfWidth * 2 * GAME_CONFIG.arenaHalfDepth * 2;
+  const targetTrees = arenaArea * (0.014 + (1 - clamp(options.openness, 0.65, 0.94)) * 0.055);
+  const treeFit = 120 - Math.abs(map.trees.length - targetTrees);
+  const landmarkKinds = new Set(map.landmarks.map((landmark) => landmark.kind)).size;
+  const centralOccluders = map.landmarks.filter((landmark) =>
+    landmark.kind === 'homestead' && Math.hypot(landmark.x, landmark.z) < 10,
+  ).length;
+  const tallCentralTrees = map.trees.filter((tree) =>
+    tree.variant !== 'stump' && Math.hypot(tree.x, tree.z) < 8,
+  ).length;
+  return 1000 + treeFit + landmarkKinds * 24 + map.terrainZones.length * 3 -
+    centralOccluders * 45 - tallCentralTrees * 10;
+}
+
+function candidateSignature(map: OrchardMap): string {
+  const kinds = map.landmarks.map((landmark) => landmark.kind[0]).sort().join('');
+  const centroid = map.landmarks.reduce(
+    (total, landmark) => ({ x: total.x + landmark.x, z: total.z + landmark.z }),
+    { x: 0, z: 0 },
+  );
+  const divisor = Math.max(1, map.landmarks.length);
+  return `${kinds}:${Math.sign(centroid.x / divisor)}:${Math.sign(centroid.z / divisor)}`;
+}
+
+function scalePoint(point: Vec2, scale: number): Vec2 {
+  return { x: point.x * scale, z: point.z * scale };
 }
 
 function distance(first: Vec2, second: Vec2): number {
   return Math.hypot(first.x - second.x, first.z - second.z);
-}
-
-function offset(point: Vec2, x: number, z: number): Vec2 {
-  return { x: point.x + x, z: point.z + z };
 }
 
 function jitter(random: () => number, amount: number): number {

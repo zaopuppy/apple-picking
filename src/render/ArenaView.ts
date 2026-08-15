@@ -26,6 +26,7 @@ import {
   syncImportedKidView,
   type ImportedKidView,
 } from './ImportedKidView';
+import { createWorldLandmarks } from './WorldLandmarks';
 
 type AppleTransition = {
   kind: 'pickup' | 'drop' | 'delivery';
@@ -44,7 +45,10 @@ type AppleView = {
   transition: AppleTransition | null;
 };
 
-const FIELD_GROUND_SIZE = 44;
+const FIELD_GROUND_SIZE = Math.max(
+  GAME_CONFIG.arenaHalfWidth * 2,
+  GAME_CONFIG.arenaHalfDepth * 2,
+) + 40;
 
 export type EnvironmentAssetDiagnostics = {
   treeMode: 'loading' | 'imported' | 'procedural';
@@ -52,6 +56,8 @@ export type EnvironmentAssetDiagnostics = {
   externalRequested: boolean;
   treeVariants: number;
   treeInstances: number;
+  stumpInstances: number;
+  largeTreeInstances: number;
   treeTriangles: number;
   fruitInstances: number;
   fruitTriangles: number;
@@ -59,6 +65,12 @@ export type EnvironmentAssetDiagnostics = {
   mapName: string;
   paths: number;
   clearings: number;
+  landmarks: number;
+  terrainZones: number;
+  landmarkMeshes: number;
+  landmarkTriangles: number;
+  arenaWidth: number;
+  arenaDepth: number;
   lastFailure: string | null;
 };
 
@@ -108,6 +120,8 @@ export class ArenaView {
     externalRequested: false,
     treeVariants: 0,
     treeInstances: 0,
+    stumpInstances: 0,
+    largeTreeInstances: 0,
     treeTriangles: 0,
     fruitInstances: 0,
     fruitTriangles: 0,
@@ -115,6 +129,12 @@ export class ArenaView {
     mapName: '',
     paths: 0,
     clearings: 0,
+    landmarks: 0,
+    terrainZones: 0,
+    landmarkMeshes: 0,
+    landmarkTriangles: 0,
+    arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
+    arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
   };
   private characterDiagnostics: CharacterAssetDiagnostics = {
@@ -140,11 +160,15 @@ export class ArenaView {
     this.environmentDiagnostics = {
       ...this.environmentDiagnostics,
       treeInstances: map.trees.length,
+      stumpInstances: map.trees.filter((tree) => tree.variant === 'stump').length,
+      largeTreeInstances: map.trees.filter((tree) => tree.variant !== 'stump').length,
       fruitInstances: map.appleSpawns.length,
       mapId: map.id,
       mapName: map.name,
       paths: map.paths.length,
       clearings: map.clearings.length,
+      landmarks: map.landmarks.length,
+      terrainZones: map.terrainZones.length,
     };
     this.createWorld();
     void this.installImportedGuard('guard1');
@@ -348,30 +372,87 @@ export class ArenaView {
     floor.receiveShadow = true;
     this.root.add(floor);
 
-    this.createFurrows();
+    this.createTerrainZones();
     this.createGroundPaths();
     this.createFence();
+    this.createLandmarks();
     this.createForest();
     this.createDeliveryZone();
   }
 
-  private createFurrows(): void {
-    const count = 11;
-    const furrows = new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(GAME_CONFIG.arenaHalfWidth * 2 - 1, 0.12),
-      this.materials.soil,
-      count,
-    );
-    for (let index = 0; index < count; index += 1) {
-      const z = -7.5 + index * 1.5;
-      this.matrixDummy.position.set(0, 0.009, z);
-      this.matrixDummy.rotation.set(-Math.PI / 2, 0, 0);
-      this.matrixDummy.scale.set(1, 1, 1);
-      this.matrixDummy.updateMatrix();
-      furrows.setMatrixAt(index, this.matrixDummy.matrix);
+  private createTerrainZones(): void {
+    for (const kind of ['meadow', 'orchard', 'wildflowers'] as const) {
+      const zones = this.map.terrainZones.filter((zone) => zone.kind === kind);
+      if (zones.length === 0) continue;
+      const material = kind === 'meadow'
+        ? this.materials.meadow
+        : kind === 'orchard'
+          ? this.materials.orchardGround
+          : this.materials.wildflowersGround;
+      const zoneMeshes = new THREE.InstancedMesh(
+        new THREE.CircleGeometry(1, 32),
+        material,
+        zones.length,
+      );
+      zoneMeshes.name = `terrain-zones-${kind}`;
+      zoneMeshes.receiveShadow = true;
+      const layerHeight = kind === 'meadow' ? 0.01 : kind === 'orchard' ? 0.013 : 0.016;
+      zones.forEach((zone, index) => {
+        this.setInstance(
+          zoneMeshes,
+          index,
+          new THREE.Vector3(zone.x, layerHeight + index * 0.00002, zone.z),
+          new THREE.Vector3(zone.radiusX, zone.radiusZ, 1),
+          new THREE.Euler(-Math.PI / 2, 0, -zone.rotationY),
+        );
+      });
+      zoneMeshes.instanceMatrix.needsUpdate = true;
+      this.root.add(zoneMeshes);
     }
+
+    const orchardZones = this.map.terrainZones.filter((zone) => zone.kind === 'orchard');
+    const furrowParts = orchardZones.flatMap((zone) => {
+      const parts: Array<{ x: number; z: number; width: number; rotationY: number }> = [];
+      for (let localZ = -zone.radiusZ + 1.15; localZ <= zone.radiusZ - 1.15; localZ += 2.25) {
+        const cosine = Math.cos(zone.rotationY);
+        const sine = Math.sin(zone.rotationY);
+        parts.push({
+          x: zone.x + localZ * sine,
+          z: zone.z + localZ * cosine,
+          width: zone.radiusX * 1.78,
+          rotationY: zone.rotationY,
+        });
+      }
+      return parts;
+    });
+    if (furrowParts.length === 0) return;
+    const furrows = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 0.12),
+      this.materials.soilDark,
+      furrowParts.length,
+    );
+    furrows.name = 'orchard-zone-furrows';
+    furrowParts.forEach((part, index) => {
+      this.setInstance(
+        furrows,
+        index,
+        new THREE.Vector3(part.x, 0.018, part.z),
+        new THREE.Vector3(part.width, 1, 1),
+        new THREE.Euler(-Math.PI / 2, 0, -part.rotationY),
+      );
+    });
     furrows.instanceMatrix.needsUpdate = true;
     this.root.add(furrows);
+  }
+
+  private createLandmarks(): void {
+    const visuals = createWorldLandmarks(this.map.landmarks, this.materials);
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      landmarkMeshes: visuals.meshes,
+      landmarkTriangles: visuals.triangles,
+    };
+    this.root.add(visuals.root);
   }
 
   private createFence(): void {
@@ -394,12 +475,12 @@ export class ArenaView {
         });
       }
     }
-    for (let x = -halfWidth; x <= halfWidth; x += 3) {
+    for (let x = -halfWidth; x <= halfWidth; x += 5) {
       for (const z of [-halfDepth - 0.18, halfDepth + 0.18]) {
         parts.push({ position: new THREE.Vector3(x, 0.45, z), scale: new THREE.Vector3(0.18, 0.9, 0.18) });
       }
     }
-    for (let z = -halfDepth; z <= halfDepth; z += 3) {
+    for (let z = -halfDepth; z <= halfDepth; z += 5) {
       for (const x of [-halfWidth - 0.18, halfWidth + 0.18]) {
         parts.push({ position: new THREE.Vector3(x, 0.45, z), scale: new THREE.Vector3(0.18, 0.9, 0.18) });
       }
@@ -476,20 +557,37 @@ export class ArenaView {
   }
 
   private createForest(): void {
-    const treeCount = this.map.trees.length;
+    const stumps = this.map.trees.filter((tree) => tree.variant === 'stump');
+    const largeTrees = this.map.trees.filter((tree) => tree.variant !== 'stump');
+    const stumpMeshes = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.25, 0.32, 0.42, 8),
+      this.materials.wood,
+      stumps.length,
+    );
     const trunks = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(0.16, 0.22, 1, 7),
       this.materials.wood,
-      treeCount,
+      largeTrees.length,
     );
     const crowns = new THREE.InstancedMesh(
       new THREE.DodecahedronGeometry(0.78, 0),
       this.materials.leaf,
-      treeCount,
+      largeTrees.length,
     );
+    stumpMeshes.name = 'procedural-orchard-stumps';
+    stumpMeshes.receiveShadow = true;
     trunks.castShadow = true;
     crowns.castShadow = true;
-    this.map.trees.forEach((tree, index) => {
+    stumps.forEach((tree, index) => {
+      this.setInstance(
+        stumpMeshes,
+        index,
+        new THREE.Vector3(tree.x, 0.21 * tree.scale, tree.z),
+        new THREE.Vector3(tree.scale, tree.scale, tree.scale),
+        new THREE.Euler(0, tree.rotationY, 0),
+      );
+    });
+    largeTrees.forEach((tree, index) => {
       const trunkHeight = tree.variant === 'pine' ? 1.45 : 1.25;
       const crownScale = proceduralCrownScale(tree.variant, tree.scale);
       this.setInstance(
@@ -508,11 +606,12 @@ export class ArenaView {
       );
       crowns.setColorAt(index, proceduralTreeColor(tree.variant));
     });
+    stumpMeshes.instanceMatrix.needsUpdate = true;
     trunks.instanceMatrix.needsUpdate = true;
     crowns.instanceMatrix.needsUpdate = true;
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
     this.proceduralTreeVisuals.name = 'procedural-orchard-trees';
-    this.proceduralTreeVisuals.add(trunks, crowns);
+    this.proceduralTreeVisuals.add(stumpMeshes, trunks, crowns);
     this.root.add(this.proceduralTreeVisuals);
 
     if (new URLSearchParams(window.location.search).get('trees') === 'procedural') return;
@@ -835,6 +934,8 @@ export class ArenaView {
 
 function proceduralCrownScale(variant: TreeVariant, scale: number): THREE.Vector3 {
   switch (variant) {
+    case 'stump':
+      return new THREE.Vector3(scale, scale, scale);
     case 'broadleaf':
       return new THREE.Vector3(1.05, 0.9, 1.02).multiplyScalar(scale);
     case 'pine':
@@ -846,6 +947,8 @@ function proceduralCrownScale(variant: TreeVariant, scale: number): THREE.Vector
 
 function proceduralTreeColor(variant: TreeVariant): THREE.Color {
   switch (variant) {
+    case 'stump':
+      return new THREE.Color('#6b4a31');
     case 'broadleaf':
       return new THREE.Color(ORCHARD_COLORS.leaf);
     case 'pine':

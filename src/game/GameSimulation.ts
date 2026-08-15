@@ -7,6 +7,7 @@ import {
 } from './config';
 import { DEFAULT_ORCHARD_MAP } from './maps/MapGenerator';
 import {
+  resolveCircleAgainstLandmark,
   treeColliderRadius,
   type OrchardMap,
   type OrchardTree,
@@ -564,6 +565,9 @@ export class GameSimulation {
     );
     for (const tree of this.map.trees) {
       resolveCircleAgainstTree(position, radius, tree);
+    }
+    for (const landmark of this.map.landmarks) {
+      resolveCircleAgainstLandmark(position, radius, landmark);
     }
     position.x = clamp(
       position.x,
