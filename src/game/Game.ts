@@ -222,6 +222,7 @@ export class Game {
         ccdBodies: 0,
       },
       audio: this.audio.getDiagnostics(),
+      environment: this.view.getEnvironmentDiagnostics(),
       renderer: {
         calls: info.render.calls,
         triangles: info.render.triangles,

@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  loadForestTreeVisuals,
+  type TreePlacement,
+} from '../assets/ForestTreeAssets';
 import { APPLE_SPAWNS, DELIVERY_ZONE, GAME_CONFIG, OBSTACLES } from '../game/config';
 import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../game/types';
 import { VfxSystem } from '../systems/VfxSystem';
@@ -45,6 +49,15 @@ const DELIVERY_SLOTS = [
 
 const FIELD_GROUND_SIZE = 44;
 
+export type EnvironmentAssetDiagnostics = {
+  treeMode: 'loading' | 'imported' | 'procedural';
+  externalRequested: boolean;
+  treeVariants: number;
+  treeInstances: number;
+  treeTriangles: number;
+  lastFailure: string | null;
+};
+
 export class ArenaView {
   readonly root = new THREE.Group();
 
@@ -56,6 +69,16 @@ export class ArenaView {
   private readonly vfx: VfxSystem;
   private readonly matrixDummy = new THREE.Object3D();
   private readonly appleTarget = new THREE.Vector3();
+  private readonly proceduralTreeVisuals = new THREE.Group();
+  private disposed = false;
+  private environmentDiagnostics: EnvironmentAssetDiagnostics = {
+    treeMode: 'procedural',
+    externalRequested: false,
+    treeVariants: 0,
+    treeInstances: OBSTACLES.length * 3,
+    treeTriangles: 0,
+    lastFailure: null,
+  };
   private deliveryApples!: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
   constructor(scene: THREE.Scene) {
@@ -192,7 +215,12 @@ export class ArenaView {
     this.vfx.update(renderTime, reducedMotion);
   }
 
+  getEnvironmentDiagnostics(): EnvironmentAssetDiagnostics {
+    return { ...this.environmentDiagnostics };
+  }
+
   dispose(): void {
+    this.disposed = true;
     disposeObject3D(this.root);
     this.root.removeFromParent();
   }
@@ -350,7 +378,58 @@ export class ArenaView {
     trunks.instanceMatrix.needsUpdate = true;
     crowns.instanceMatrix.needsUpdate = true;
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
-    this.root.add(patches, trunks, crowns);
+    this.proceduralTreeVisuals.name = 'procedural-orchard-trees';
+    this.proceduralTreeVisuals.add(trunks, crowns);
+    this.root.add(patches, this.proceduralTreeVisuals);
+
+    if (new URLSearchParams(window.location.search).get('trees') === 'procedural') return;
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      treeMode: 'loading',
+      externalRequested: true,
+    };
+    void this.installImportedTrees(this.createTreePlacements());
+  }
+
+  private createTreePlacements(): TreePlacement[] {
+    const placements: TreePlacement[] = [];
+    OBSTACLES.forEach((obstacle, rowIndex) => {
+      for (let index = 0; index < 3; index += 1) {
+        placements.push({
+          variant: index,
+          x: obstacle.x + (index - 1) * obstacle.halfWidth * 0.72,
+          z: obstacle.z,
+          rotationY: rowIndex * 0.74 + index * 1.91,
+        });
+      }
+    });
+    return placements;
+  }
+
+  private async installImportedTrees(placements: readonly TreePlacement[]): Promise<void> {
+    try {
+      const imported = await loadForestTreeVisuals(placements);
+      if (this.disposed) {
+        disposeObject3D(imported.root);
+        return;
+      }
+      this.proceduralTreeVisuals.visible = false;
+      this.root.add(imported.root);
+      this.environmentDiagnostics = {
+        treeMode: 'imported',
+        externalRequested: true,
+        treeVariants: imported.variants,
+        treeInstances: imported.instances,
+        treeTriangles: imported.triangles,
+        lastFailure: null,
+      };
+    } catch (error) {
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        treeMode: 'procedural',
+        lastFailure: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   private createDeliveryZone(): void {

@@ -341,6 +341,47 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
   });
 });
 
+test('CC0 orchard trees load within the mobile render budget and retain the procedural fallback', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Tree asset loading only needs one installed Chrome run.');
+  const assetResponses: Array<{ path: string; status: number }> = [];
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.includes('/assets/models/kaykit-forest/')) {
+      assetResponses.push({ path: url.pathname, status: response.status() });
+    }
+  });
+
+  await page.goto('/');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
+    .toMatchObject({
+      treeMode: 'imported',
+      externalRequested: true,
+      treeVariants: 3,
+      treeInstances: 9,
+      treeTriangles: 9750,
+      lastFailure: null,
+    });
+  expect(assetResponses.length).toBeGreaterThanOrEqual(7);
+  expect(assetResponses.every((response) => response.status === 200), JSON.stringify(assetResponses)).toBe(true);
+
+  const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
+  expect(renderer?.calls).toBeLessThanOrEqual(75);
+  expect(renderer?.triangles).toBeLessThanOrEqual(25_000);
+  expect(renderer?.textures).toBeLessThanOrEqual(5);
+
+  await page.goto('/?trees=procedural');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment)).toMatchObject({
+    treeMode: 'procedural',
+    externalRequested: false,
+    treeVariants: 0,
+    treeInstances: 9,
+    treeTriangles: 0,
+    lastFailure: null,
+  });
+});
+
 test('character state presentation stays readable across key gameplay moments', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'The presentation state matrix only needs one browser target.');
   await page.goto('/');

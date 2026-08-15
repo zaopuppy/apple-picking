@@ -41,6 +41,14 @@ declare global {
       samplePlays: number;
       fallbackPlays: number;
     };
+    environment: {
+      treeMode: 'loading' | 'imported' | 'procedural';
+      externalRequested: boolean;
+      treeVariants: number;
+      treeInstances: number;
+      treeTriangles: number;
+      lastFailure: string | null;
+    };
     renderer: {
       calls: number;
       triangles: number;
