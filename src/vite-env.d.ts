@@ -36,6 +36,13 @@ declare global {
       geometries: number;
       textures: number;
     };
+    camera: {
+      viewWidth: number;
+      viewHeight: number;
+      verticalOffset: number;
+      positionY: number;
+      positionZ: number;
+    };
     canvas: {
       clientWidth: number;
       clientHeight: number;

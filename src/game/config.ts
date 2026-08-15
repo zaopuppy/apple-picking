@@ -10,6 +10,7 @@ export const GAME_CONFIG = {
   catchTarget: 3,
   kidRadius: 0.48,
   guardRadius: 0.55,
+  appleRadius: 0.34,
   kidBaseSpeed: 4.8,
   guardSpeed: 4.2,
   slowdownPerApple: 0.1,

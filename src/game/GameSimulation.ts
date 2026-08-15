@@ -149,6 +149,9 @@ export class GameSimulation {
       this.deliverOneApple();
     }
 
+    this.resolveActorCollisions();
+    this.resolveGroundAppleCollisions();
+
     return this.result();
   }
 
@@ -231,6 +234,16 @@ export class GameSimulation {
         this.guards[0].facing = { x: 0, z: -1 };
         this.guards[0].state = 'Pounce';
         this.guards[0].stateTicks = Math.ceil(GAME_CONFIG.pounceTicks / 2);
+        this.kid.position = { x: 1.2, z: -0.7 };
+        this.kid.previousPosition = copy(this.kid.position);
+        return;
+      case 'guard-recover':
+        this.moveGuardsAway();
+        this.guards[0].position = { x: -1.4, z: 0 };
+        this.guards[0].previousPosition = copy(this.guards[0].position);
+        this.guards[0].facing = { x: 0, z: -1 };
+        this.guards[0].state = 'Recover';
+        this.guards[0].stateTicks = Math.ceil(GAME_CONFIG.recoverTicks * 0.72);
         this.kid.position = { x: 1.2, z: -0.7 };
         this.kid.previousPosition = copy(this.kid.position);
         return;
@@ -368,6 +381,95 @@ export class GameSimulation {
   private moveWithCollisions(position: Vec2, direction: Vec2, speed: number, radius: number): void {
     position.x += direction.x * speed / TICKS_PER_SECOND;
     position.z += direction.z * speed / TICKS_PER_SECOND;
+    this.constrainPosition(position, radius);
+  }
+
+  private resolveActorCollisions(): void {
+    const [guard1, guard2] = this.guards;
+    for (let iteration = 0; iteration < 3; iteration += 1) {
+      resolveCirclePair(
+        guard1.position,
+        GAME_CONFIG.guardRadius,
+        guard2.position,
+        GAME_CONFIG.guardRadius,
+        0.5,
+      );
+      resolveCirclePair(
+        guard1.position,
+        GAME_CONFIG.guardRadius,
+        this.kid.position,
+        GAME_CONFIG.kidRadius,
+        0.5,
+      );
+      resolveCirclePair(
+        guard2.position,
+        GAME_CONFIG.guardRadius,
+        this.kid.position,
+        GAME_CONFIG.kidRadius,
+        0.5,
+      );
+      this.constrainPosition(guard1.position, GAME_CONFIG.guardRadius);
+      this.constrainPosition(guard2.position, GAME_CONFIG.guardRadius);
+      this.constrainPosition(this.kid.position, GAME_CONFIG.kidRadius);
+    }
+  }
+
+  private resolveGroundAppleCollisions(): void {
+    const [guard1, guard2] = this.guards;
+    const pickingTargetId = this.kid.state === 'Picking' ? this.kid.pickingTargetId : null;
+    for (let iteration = 0; iteration < 4; iteration += 1) {
+      for (const apple of this.apples) {
+        if (apple.state !== 'Ground') continue;
+        resolveCirclePair(
+          guard1.position,
+          GAME_CONFIG.guardRadius,
+          apple.position,
+          GAME_CONFIG.appleRadius,
+          0,
+        );
+        resolveCirclePair(
+          guard2.position,
+          GAME_CONFIG.guardRadius,
+          apple.position,
+          GAME_CONFIG.appleRadius,
+          0,
+        );
+        if (apple.id !== pickingTargetId) {
+          resolveCirclePair(
+            this.kid.position,
+            GAME_CONFIG.kidRadius,
+            apple.position,
+            GAME_CONFIG.appleRadius,
+            0,
+          );
+        }
+        this.constrainPosition(apple.position, GAME_CONFIG.appleRadius);
+      }
+
+      for (let firstIndex = 0; firstIndex < this.apples.length; firstIndex += 1) {
+        const first = this.apples[firstIndex];
+        if (first.state !== 'Ground') continue;
+        for (let secondIndex = firstIndex + 1; secondIndex < this.apples.length; secondIndex += 1) {
+          const second = this.apples[secondIndex];
+          if (second.state !== 'Ground') continue;
+          resolveCirclePair(
+            first.position,
+            GAME_CONFIG.appleRadius,
+            second.position,
+            GAME_CONFIG.appleRadius,
+            0.5,
+          );
+        }
+      }
+      for (const apple of this.apples) {
+        if (apple.state === 'Ground') {
+          this.constrainPosition(apple.position, GAME_CONFIG.appleRadius);
+        }
+      }
+    }
+  }
+
+  private constrainPosition(position: Vec2, radius: number): void {
     position.x = clamp(
       position.x,
       -GAME_CONFIG.arenaHalfWidth + radius,
@@ -381,6 +483,16 @@ export class GameSimulation {
     for (const obstacle of OBSTACLES) {
       resolveCircleAgainstObstacle(position, radius, obstacle);
     }
+    position.x = clamp(
+      position.x,
+      -GAME_CONFIG.arenaHalfWidth + radius,
+      GAME_CONFIG.arenaHalfWidth - radius,
+    );
+    position.z = clamp(
+      position.z,
+      -GAME_CONFIG.arenaHalfDepth + radius,
+      GAME_CONFIG.arenaHalfDepth - radius,
+    );
   }
 
   private checkGuardPounceCollision(): void {
@@ -543,8 +655,7 @@ export class GameSimulation {
   }
 
   private clampApplePosition(position: Vec2): void {
-    position.x = clamp(position.x, -GAME_CONFIG.arenaHalfWidth + 0.4, GAME_CONFIG.arenaHalfWidth - 0.4);
-    position.z = clamp(position.z, -GAME_CONFIG.arenaHalfDepth + 0.4, GAME_CONFIG.arenaHalfDepth - 0.4);
+    this.constrainPosition(position, GAME_CONFIG.appleRadius);
   }
 
   private guardSnapshot(guard: GuardModel): GuardSnapshot {
@@ -637,6 +748,30 @@ function movingPointDistanceSquared(
 
 function movingCirclesOverlap(first: GuardModel, second: GuardModel, radius: number): boolean {
   return movingPointDistanceSquared(first, second) <= radius * radius;
+}
+
+function resolveCirclePair(
+  first: Vec2,
+  firstRadius: number,
+  second: Vec2,
+  secondRadius: number,
+  firstShare: number,
+): boolean {
+  const deltaX = second.x - first.x;
+  const deltaZ = second.z - first.z;
+  const minimumDistance = firstRadius + secondRadius;
+  const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+  if (distanceSq >= minimumDistance * minimumDistance) return false;
+
+  const distance = Math.sqrt(distanceSq);
+  const normalX = distance > 0.000001 ? deltaX / distance : 1;
+  const normalZ = distance > 0.000001 ? deltaZ / distance : 0;
+  const overlap = minimumDistance - distance;
+  first.x -= normalX * overlap * firstShare;
+  first.z -= normalZ * overlap * firstShare;
+  second.x += normalX * overlap * (1 - firstShare);
+  second.z += normalZ * overlap * (1 - firstShare);
+  return true;
 }
 
 function resolveCircleAgainstObstacle(position: Vec2, radius: number, obstacle: Obstacle): void {

@@ -261,9 +261,16 @@ export function syncGuardCharacter(
     view.rightLeg.pivot.rotation.set(-0.55, 0, 0.25);
   } else if (guard.state === 'Recover') {
     const remaining = THREE.MathUtils.clamp(guard.stateTicks / GAME_CONFIG.recoverTicks, 0, 1);
-    view.model.position.y = 0.08 * remaining;
-    view.model.rotation.z = view.variantSign * 1.02 * remaining;
-    view.model.scale.set(1.03, 0.95, 1);
+    const down = THREE.MathUtils.smoothstep(remaining, 0, 1);
+    view.model.position.y = 0.04 * down;
+    view.model.rotation.set(0.92 * down, 0, view.variantSign * 0.12 * down);
+    view.model.scale.set(1.03, 1 - down * 0.1, 1.04);
+    view.headPivot.rotation.x = -0.22 * down;
+    view.leftArm.pivot.rotation.set(-1.05 * down, 0, -0.18 - down * 0.18);
+    view.rightArm.pivot.rotation.set(-1.05 * down, 0, 0.18 + down * 0.18);
+    view.leftLeg.pivot.rotation.x = 0.5 * down;
+    view.rightLeg.pivot.rotation.x = 0.5 * down;
+    view.hat.rotation.x = -0.14 * down;
   }
 
   view.stateRing.visible = guard.state !== 'Move' || !guard.pounceReady;
@@ -271,7 +278,7 @@ export function syncGuardCharacter(
     guard.state === 'Stunned'
       ? ORCHARD_COLORS.reward
       : guard.state === 'Recover'
-        ? ORCHARD_COLORS.danger
+        ? '#e2a43a'
         : guard.state === 'Pounce'
           ? '#b8d9ff'
           : '#d7d5b0',

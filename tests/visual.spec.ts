@@ -71,6 +71,16 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   expect(renderer?.calls).toBeLessThanOrEqual(150);
   expect(renderer?.triangles).toBeLessThanOrEqual(100_000);
 
+  const physics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.physics);
+  expect(physics).toMatchObject({
+    engine: 'custom-xz-circle-aabb',
+    timestep: 1 / 60,
+    bodies: 9,
+    colliders: 13,
+    sensors: 1,
+    ccdBodies: 0,
+  });
+
   const before = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.guards[0].position.z ?? 0);
   await page.keyboard.down('KeyE');
   await page.waitForTimeout(450);
@@ -81,7 +91,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
     .toBeLessThan(before - 0.3);
 
   const hudOverflow = await page.evaluate(() => {
-    const elements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #state-strip, #controls')];
+    const elements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #carried-badge, #controls')];
     return elements.some((element) => element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1);
   });
   expect(hudOverflow).toBe(false);
@@ -166,24 +176,64 @@ test('render loop adapts to the available refresh rate and caps at 60 FPS', asyn
   expect(samples.lowRefresh.fps).toBeLessThanOrEqual(30);
 });
 
-test('restart announcement stays horizontally centered during its animation', async ({ page }) => {
+test('responsive HUD keeps objective and inventory clear of the playfield', async ({ page }, testInfo) => {
   await page.goto('/');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('active-play'));
-
-  const statusLine = page.locator('#status-line');
-  const centerOffset = async () => statusLine.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return Math.abs(rect.left + rect.width / 2 - window.innerWidth / 2);
+  await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true);
+    window.__THREE_GAME_TEST_HOOKS__?.scenario('heavy-carry');
   });
 
-  expect(await centerOffset()).toBeLessThanOrEqual(1);
-  await page.keyboard.press('KeyR');
-  await expect(statusLine).toHaveText('重新开局');
-  await page.waitForTimeout(40);
-  expect(await centerOffset()).toBeLessThanOrEqual(1);
-  await page.waitForTimeout(180);
-  expect(await centerOffset()).toBeLessThanOrEqual(1);
+  await expect(page.locator('#carried-value')).toHaveText('6');
+  await expect(page.locator('#state-strip')).toHaveCount(0);
+  await expect(page.locator('#status-line')).toHaveCount(0);
+
+  const layout = await page.evaluate(() => {
+    const rect = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) throw new Error(`Missing HUD element: ${selector}`);
+      const bounds = element.getBoundingClientRect();
+      return {
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        left: bounds.left,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    };
+    const hudElements = [...document.querySelectorAll<HTMLElement>(
+      '#score-ribbon, #carried-badge, #controls',
+    )];
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      score: rect('#score-ribbon'),
+      carried: rect('#carried-badge'),
+      controls: rect('#controls'),
+      overflow: hudElements.some((element) =>
+        element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1),
+      camera: window.__THREE_GAME_DIAGNOSTICS__?.camera,
+    };
+  });
+
+  expect(layout.overflow).toBe(false);
+  for (const bounds of [layout.score, layout.carried, layout.controls]) {
+    expect(bounds.left).toBeGreaterThanOrEqual(-1);
+    expect(bounds.right).toBeLessThanOrEqual(layout.viewport.width + 1);
+    expect(bounds.top).toBeGreaterThanOrEqual(-1);
+    expect(bounds.bottom).toBeLessThanOrEqual(layout.viewport.height + 1);
+  }
+  expect(layout.score.bottom).toBeLessThanOrEqual(layout.carried.top - 4);
+
+  if (testInfo.project.name === 'narrow-chrome') {
+    expect(layout.camera?.viewWidth).toBeLessThanOrEqual(25.1);
+    expect(layout.camera?.verticalOffset).toBeGreaterThan(0.6);
+    expect(layout.camera?.positionY).toBeCloseTo(29, 5);
+    expect(layout.camera?.positionZ).toBeCloseTo(13, 5);
+  } else {
+    expect(layout.camera?.viewHeight).toBeCloseTo(23, 5);
+    expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
+  }
 });
 
 test('right shift delivers exactly one apple through the real input path', async ({ page }, testInfo) => {
@@ -207,6 +257,7 @@ test('character state presentation stays readable across key gameplay moments', 
   const scenarios = [
     { name: 'heavy-carry', kidState: 'Normal', carried: 6 },
     { name: 'guard-pounce', guardState: 'Pounce' },
+    { name: 'guard-recover', guardState: 'Recover' },
     { name: 'guard-stunned', guardState: 'Stunned' },
     { name: 'delivery-progress', carried: 2, delivered: 3 },
     { name: 'captured', kidState: 'Invincible' },

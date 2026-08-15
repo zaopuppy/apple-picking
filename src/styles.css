@@ -148,55 +148,6 @@ body {
   text-align: right;
 }
 
-#state-strip {
-  position: absolute;
-  top: max(98px, calc(env(safe-area-inset-top) + 88px));
-  left: max(14px, env(safe-area-inset-left));
-  display: grid;
-  gap: 7px;
-  width: min(230px, calc(50vw - 18px));
-  color: var(--ink);
-  pointer-events: none;
-}
-
-#state-strip > div {
-  display: grid;
-  grid-template-columns: 12px 64px 1fr;
-  align-items: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 5px 9px;
-  border: 1px solid rgba(36, 48, 27, 0.32);
-  border-radius: 9px;
-  background: rgba(255, 245, 205, 0.78);
-  box-shadow: 0 4px 0 rgba(68, 83, 42, 0.16);
-  font-size: 0.7rem;
-  backdrop-filter: blur(6px);
-}
-
-#state-strip b {
-  font-size: 0.67rem;
-}
-
-#state-strip span:last-child {
-  overflow: hidden;
-  font-weight: 800;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dot {
-  width: 10px;
-  height: 10px;
-  border: 1px solid rgba(36, 48, 27, 0.45);
-  border-radius: 50%;
-}
-
-.guard1-dot { background: var(--guard-blue); }
-.guard2-dot { background: var(--guard-green); }
-.kid-dot { background: var(--kid-orange); }
-
 #carried-badge {
   position: absolute;
   top: max(98px, calc(env(safe-area-inset-top) + 88px));
@@ -218,25 +169,6 @@ body {
   margin-left: 8px;
   font-size: 1.2rem;
   font-variant-numeric: tabular-nums;
-}
-
-#status-line {
-  position: absolute;
-  bottom: max(64px, calc(env(safe-area-inset-bottom) + 56px));
-  left: 50%;
-  min-width: 260px;
-  max-width: calc(100vw - 32px);
-  padding: 8px 16px;
-  border: 1px solid rgba(36, 48, 27, 0.42);
-  border-radius: 999px;
-  color: var(--ink);
-  background: rgba(255, 245, 205, 0.86);
-  box-shadow: 0 5px 0 rgba(68, 83, 42, 0.18);
-  font-size: 0.76rem;
-  font-weight: 900;
-  text-align: center;
-  transform: translateX(-50%);
-  pointer-events: none;
 }
 
 #controls {
@@ -336,64 +268,104 @@ body {
 
 @media (max-width: 720px) {
   #score-ribbon {
-    grid-template-columns: 1fr 62px 1fr;
-    min-height: 60px;
+    top: max(8px, env(safe-area-inset-top));
+    grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1fr);
+    width: calc(100vw - 20px);
+    min-height: 54px;
+    border-radius: 14px 14px 18px 18px;
+    box-shadow: 0 6px 0 rgba(68, 83, 42, 0.24), 0 12px 24px rgba(36, 48, 27, 0.18);
   }
 
   .team-score {
-    gap: 2px 6px;
-    padding: 8px 9px 11px;
+    gap: 2px 5px;
+    padding: 6px 7px 8px;
   }
 
   .team-score strong {
-    min-width: 2.7rem;
-    font-size: 1.05rem;
+    min-width: 2.45rem;
+    font-size: 0.98rem;
   }
 
   .team-name {
-    font-size: 0.57rem;
-    letter-spacing: 0.05em;
+    overflow: hidden;
+    font-size: 0.53rem;
+    letter-spacing: 0.035em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .progress-track {
+    height: 5px;
   }
 
   .round-clock {
-    min-width: 62px;
+    min-width: 56px;
   }
 
-  #state-strip {
-    top: max(84px, calc(env(safe-area-inset-top) + 74px));
-    width: min(190px, calc(62vw - 14px));
+  .round-clock span {
+    font-size: 0.52rem;
   }
 
-  #state-strip > div {
-    grid-template-columns: 10px 54px 1fr;
-    gap: 4px;
-    min-height: 26px;
-    padding: 4px 7px;
-    font-size: 0.59rem;
+  .round-clock strong {
+    margin-top: 2px;
+    font-size: 0.88rem;
   }
 
-  #state-strip b {
-    font-size: 0.57rem;
+  .fps-readout {
+    margin-top: 3px;
+    font-size: 0.46rem;
   }
 
   #carried-badge {
-    top: max(84px, calc(env(safe-area-inset-top) + 74px));
-    min-width: 78px;
-    padding: 6px 8px;
-    font-size: 0.62rem;
+    top: max(70px, calc(env(safe-area-inset-top) + 62px));
+    right: max(10px, env(safe-area-inset-right));
+    display: grid;
+    grid-template-columns: auto auto;
+    align-content: center;
+    justify-content: center;
+    gap: 5px;
+    width: 68px;
+    min-width: 68px;
+    min-height: 44px;
+    padding: 4px 6px;
+    border-radius: 14px 11px 13px 10px;
+    font-size: 0.54rem;
+  }
+
+  #carried-badge strong {
+    margin-left: 0;
+    font-size: 1.02rem;
   }
 
   #controls {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px 10px;
-    font-size: 0.54rem;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 3px 8px;
+    min-height: 36px;
+    padding: 7px max(10px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    font-size: 0.52rem;
+    line-height: 1.2;
   }
 
-  #status-line {
-    bottom: max(76px, calc(env(safe-area-inset-bottom) + 68px));
-    min-width: min(250px, calc(100vw - 24px));
-    font-size: 0.66rem;
+  #controls span:nth-child(1) {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  #controls span:nth-child(2) {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  #controls span:nth-child(3) {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    text-align: center;
+  }
+
+  #controls span:nth-child(4) {
+    grid-row: 1;
+    grid-column: 3;
   }
 
   #match-message {

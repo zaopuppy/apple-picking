@@ -1,5 +1,20 @@
 import * as THREE from 'three';
 
+const LANDSCAPE_WORLD_WIDTH = 29;
+const PORTRAIT_WORLD_WIDTH = 25;
+const MINIMUM_WORLD_HEIGHT = 23;
+const PORTRAIT_BLEND_START = 0.9;
+const PORTRAIT_BLEND_END = 0.62;
+const PORTRAIT_VERTICAL_OFFSET = 0.65;
+
+export function getPortraitFramingAmount(aspect: number): number {
+  return THREE.MathUtils.clamp(
+    (PORTRAIT_BLEND_START - aspect) / (PORTRAIT_BLEND_START - PORTRAIT_BLEND_END),
+    0,
+    1,
+  );
+}
+
 export function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -32,14 +47,19 @@ export function resizeRenderer(
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     const aspect = width / height;
-    const minimumWorldWidth = 29;
-    const minimumWorldHeight = 23;
-    const viewHeight = Math.max(minimumWorldHeight, minimumWorldWidth / aspect);
+    const portraitAmount = getPortraitFramingAmount(aspect);
+    const minimumWorldWidth = THREE.MathUtils.lerp(
+      LANDSCAPE_WORLD_WIDTH,
+      PORTRAIT_WORLD_WIDTH,
+      portraitAmount,
+    );
+    const viewHeight = Math.max(MINIMUM_WORLD_HEIGHT, minimumWorldWidth / aspect);
     const viewWidth = viewHeight * aspect;
+    const verticalOffset = PORTRAIT_VERTICAL_OFFSET * portraitAmount;
     camera.left = -viewWidth / 2;
     camera.right = viewWidth / 2;
-    camera.top = viewHeight / 2;
-    camera.bottom = -viewHeight / 2;
+    camera.top = verticalOffset + viewHeight / 2;
+    camera.bottom = verticalOffset - viewHeight / 2;
     camera.updateProjectionMatrix();
   }
 

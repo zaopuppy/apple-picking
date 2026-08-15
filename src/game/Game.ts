@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { InputRouter } from '../core/InputRouter';
 import { Loop } from '../core/Loop';
-import { createRenderer, resizeRenderer } from '../core/Renderer';
+import { createRenderer, getPortraitFramingAmount, resizeRenderer } from '../core/Renderer';
 import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
 import { Hud } from '../systems/Hud';
@@ -45,6 +45,7 @@ export class Game {
     this.createLighting();
     this.view = new ArenaView(this.scene);
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
+    this.updateCameraComposition();
     this.syncPresentation();
     this.installTestHooks();
     this.publishDiagnostics();
@@ -67,7 +68,9 @@ export class Game {
   private update(delta: number, elapsed: number, fps: number): void {
     this.frame += 1;
     this.fps = fps;
-    resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
+    if (resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr)) {
+      this.updateCameraComposition();
+    }
     this.renderTime = elapsed;
     if (this.pausedForScreenshot) {
       this.syncPresentation();
@@ -91,7 +94,6 @@ export class Game {
     const presentationTime = this.reducedMotion ? step.snapshot.elapsedSeconds : this.renderTime;
     for (const event of step.events) {
       this.view.handleEvent(event, step.snapshot, presentationTime);
-      this.hud.announce(event);
       this.audio.play(event);
     }
   }
@@ -105,6 +107,18 @@ export class Game {
 
   private render(): void {
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private updateCameraComposition(): void {
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
+    const portraitAmount = getPortraitFramingAmount(width / height);
+    this.camera.position.set(
+      0,
+      THREE.MathUtils.lerp(23.5, 29, portraitAmount),
+      THREE.MathUtils.lerp(19.5, 13, portraitAmount),
+    );
+    this.camera.lookAt(0, 0, 0);
   }
 
   private createLighting(): void {
@@ -180,6 +194,7 @@ export class Game {
   private publishDiagnostics(): void {
     const snapshot = this.simulation.getSnapshot();
     const info = this.renderer.info;
+    const groundAppleCount = snapshot.apples.filter((apple) => apple.state === 'Ground').length;
     window.__THREE_GAME_DIAGNOSTICS__ = {
       frame: this.frame,
       frameRate: {
@@ -195,15 +210,15 @@ export class Game {
       kid: snapshot.kid,
       guards: snapshot.guards,
       apples: {
-        ground: snapshot.apples.filter((apple) => apple.state === 'Ground').length,
+        ground: groundAppleCount,
         carried: snapshot.apples.filter((apple) => apple.state === 'Carried').length,
         delivered: snapshot.apples.filter((apple) => apple.state === 'Delivered').length,
       },
       physics: {
         engine: 'custom-xz-circle-aabb',
         timestep: FIXED_DELTA_SECONDS,
-        bodies: 3,
-        colliders: 7,
+        bodies: 3 + groundAppleCount,
+        colliders: 7 + groundAppleCount,
         sensors: 1,
         ccdBodies: 0,
       },
@@ -212,6 +227,13 @@ export class Game {
         triangles: info.render.triangles,
         geometries: info.memory.geometries,
         textures: info.memory.textures,
+      },
+      camera: {
+        viewWidth: this.camera.right - this.camera.left,
+        viewHeight: this.camera.top - this.camera.bottom,
+        verticalOffset: (this.camera.top + this.camera.bottom) / 2,
+        positionY: this.camera.position.y,
+        positionZ: this.camera.position.z,
       },
       canvas: {
         clientWidth: this.canvas.clientWidth,
