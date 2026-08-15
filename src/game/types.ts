@@ -77,6 +77,7 @@ export type GameEvent =
   | { type: 'dropped'; appleId: number; reason: 'manual' | 'capture' }
   | { type: 'captured'; catches: number }
   | { type: 'delivered'; appleId: number; count: number; total: number }
+  | { type: 'delivery-lost'; appleId: number; total: number }
   | { type: 'match-ended'; winner: 'kid' | 'guards' };
 
 export type SimulationStep = {

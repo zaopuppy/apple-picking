@@ -9,6 +9,7 @@ export class Hud {
   private readonly catchesTotal = this.getElement('#catches-total');
   private readonly catchesFill = this.getElement('#catches-fill');
   private readonly carriedValue = this.getElement('#carried-value');
+  private readonly carriedTotal = this.getElement('#carried-total');
   private readonly timerValue = this.getElement('#timer-value');
   private readonly matchMessage = this.getElement('#match-message');
   private readonly resultOverlay = this.getElement('#result-overlay');
@@ -22,6 +23,7 @@ export class Hud {
     this.catchesTotal.textContent = String(GAME_CONFIG.catchTarget);
     this.catchesFill.style.width = `${snapshot.catches / GAME_CONFIG.catchTarget * 100}%`;
     this.carriedValue.textContent = String(snapshot.kid.carriedAppleIds.length);
+    this.carriedTotal.textContent = String(GAME_CONFIG.maxCarriedApples);
     const minutes = Math.floor(snapshot.elapsedSeconds / 60).toString().padStart(2, '0');
     const seconds = Math.floor(snapshot.elapsedSeconds % 60).toString().padStart(2, '0');
     this.timerValue.textContent = `${minutes}:${seconds}`;

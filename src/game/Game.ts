@@ -4,6 +4,7 @@ import { Loop } from '../core/Loop';
 import { createRenderer, resizeRenderer, usesPortraitArenaLayout } from '../core/Renderer';
 import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
+import type { DebugPanel, DebugTuning } from '../systems/DebugPanel';
 import { Hud } from '../systems/Hud';
 import { FIXED_DELTA_SECONDS, GAME_CONFIG } from './config';
 import { GameSimulation } from './GameSimulation';
@@ -14,12 +15,24 @@ import {
   type SimulationStep,
 } from './types';
 
+const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
+  portraitCameraAngle: 35,
+  landscapeCameraAngle: 40,
+  cameraZoom: 1,
+  hemisphereIntensity: 2.1,
+  sunIntensity: 3.1,
+  reducedMotion: false,
+};
+
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-14, 14, 11, -11, 0.1, 100);
   private readonly input = new InputRouter();
   private readonly simulation = new GameSimulation();
+  private readonly hemisphere = new THREE.HemisphereLight('#fff7db', '#55743d', 2.1);
+  private readonly sun = new THREE.DirectionalLight('#fff0bd', 3.1);
+  private readonly debugTuning: DebugTuning = { ...DEFAULT_DEBUG_TUNING };
   private readonly view: ArenaView;
   private readonly audio = new AudioSystem();
   private readonly hud = new Hud();
@@ -35,6 +48,9 @@ export class Game {
   private pausedForScreenshot = false;
   private reducedMotion = false;
   private renderTime = 0;
+  private debugPanel: DebugPanel | null = null;
+  private debugUiHidden = false;
+  private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = createRenderer(canvas);
@@ -48,6 +64,7 @@ export class Game {
     this.syncPresentation();
     this.installTestHooks();
     this.publishDiagnostics();
+    if (import.meta.env.DEV) void this.installDebugPanel();
   }
 
   start(): void {
@@ -55,10 +72,13 @@ export class Game {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.loop.stop();
     this.input.dispose();
     this.audio.dispose();
     this.view.dispose();
+    this.debugPanel?.dispose();
+    this.debugPanel = null;
     this.renderer.dispose();
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
     window.__THREE_GAME_TEST_HOOKS__ = undefined;
@@ -112,29 +132,64 @@ export class Game {
     const width = Math.max(1, this.canvas.clientWidth);
     const height = Math.max(1, this.canvas.clientHeight);
     const portraitLayout = usesPortraitArenaLayout(width / height);
+    const cameraHeight = portraitLayout ? 34 : 23.5;
+    const angleDegrees = portraitLayout
+      ? this.debugTuning.portraitCameraAngle
+      : this.debugTuning.landscapeCameraAngle;
+    const horizontalDistance = cameraHeight * Math.tan(THREE.MathUtils.degToRad(angleDegrees));
     if (portraitLayout) {
-      this.camera.position.set(10.5, 34, 0);
+      this.camera.position.set(horizontalDistance, cameraHeight, 0);
     } else {
-      this.camera.position.set(0, 23.5, 19.5);
+      this.camera.position.set(0, cameraHeight, horizontalDistance);
     }
+    this.camera.zoom = this.debugTuning.cameraZoom;
     this.camera.lookAt(0, 0, 0);
+    this.camera.updateProjectionMatrix();
   }
 
   private createLighting(): void {
-    const hemisphere = new THREE.HemisphereLight('#fff7db', '#55743d', 2.1);
-    this.scene.add(hemisphere);
-    const sun = new THREE.DirectionalLight('#fff0bd', 3.1);
-    sun.position.set(-9, 18, 10);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(1536, 1536);
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 48;
-    sun.shadow.camera.left = -16;
-    sun.shadow.camera.right = 16;
-    sun.shadow.camera.top = 14;
-    sun.shadow.camera.bottom = -14;
-    sun.shadow.bias = -0.0004;
-    this.scene.add(sun);
+    this.scene.add(this.hemisphere);
+    this.sun.position.set(-9, 18, 10);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(1536, 1536);
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 48;
+    this.sun.shadow.camera.left = -16;
+    this.sun.shadow.camera.right = 16;
+    this.sun.shadow.camera.top = 14;
+    this.sun.shadow.camera.bottom = -14;
+    this.sun.shadow.bias = -0.0004;
+    this.scene.add(this.sun);
+  }
+
+  private async installDebugPanel(): Promise<void> {
+    const { DebugPanel: DebugPanelClass } = await import('../systems/DebugPanel');
+    if (this.disposed) return;
+    this.debugPanel = new DebugPanelClass(this.debugTuning, {
+      cameraChanged: () => {
+        this.updateCameraComposition();
+        this.publishDiagnostics();
+      },
+      lightingChanged: () => {
+        this.hemisphere.intensity = this.debugTuning.hemisphereIntensity;
+        this.sun.intensity = this.debugTuning.sunIntensity;
+      },
+      motionChanged: () => {
+        this.reducedMotion = this.debugTuning.reducedMotion;
+        this.syncPresentation();
+      },
+      reset: () => {
+        Object.assign(this.debugTuning, DEFAULT_DEBUG_TUNING);
+        this.reducedMotion = this.debugTuning.reducedMotion;
+        this.hemisphere.intensity = this.debugTuning.hemisphereIntensity;
+        this.sun.intensity = this.debugTuning.sunIntensity;
+        this.updateCameraComposition();
+        this.syncPresentation();
+        this.publishDiagnostics();
+        this.debugPanel?.refresh();
+      },
+    });
+    this.debugPanel.setHidden(this.debugUiHidden);
   }
 
   private installTestHooks(): void {
@@ -171,10 +226,13 @@ export class Game {
       },
       setReducedMotion: (enabled: boolean) => {
         this.reducedMotion = enabled;
+        this.debugTuning.reducedMotion = enabled;
+        this.debugPanel?.refresh();
         this.syncPresentation();
       },
-      hideDebugUi: (_hidden: boolean) => {
-        // The greybox has no player-facing debug panel.
+      hideDebugUi: (hidden: boolean) => {
+        this.debugUiHidden = hidden;
+        this.debugPanel?.setHidden(hidden);
       },
     };
   }
@@ -194,6 +252,7 @@ export class Game {
     const snapshot = this.simulation.getSnapshot();
     const info = this.renderer.info;
     const groundAppleCount = snapshot.apples.filter((apple) => apple.state === 'Ground').length;
+    const looseAppleCount = snapshot.apples.filter((apple) => apple.state !== 'Carried').length;
     window.__THREE_GAME_DIAGNOSTICS__ = {
       frame: this.frame,
       frameRate: {
@@ -216,8 +275,8 @@ export class Game {
       physics: {
         engine: 'custom-xz-circle-aabb',
         timestep: FIXED_DELTA_SECONDS,
-        bodies: 3 + groundAppleCount,
-        colliders: 7 + groundAppleCount,
+        bodies: 3 + looseAppleCount,
+        colliders: 7 + looseAppleCount,
         sensors: 1,
         ccdBodies: 0,
       },
@@ -238,6 +297,10 @@ export class Game {
         positionX: this.camera.position.x,
         positionY: this.camera.position.y,
         positionZ: this.camera.position.z,
+        angleFromGroundNormal: usesPortraitArenaLayout(this.canvas.clientWidth / this.canvas.clientHeight)
+          ? this.debugTuning.portraitCameraAngle
+          : this.debugTuning.landscapeCameraAngle,
+        zoom: this.camera.zoom,
       },
       canvas: {
         clientWidth: this.canvas.clientWidth,

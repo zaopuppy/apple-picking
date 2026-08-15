@@ -31,7 +31,6 @@ type AppleTransition = {
   startedAt: number;
   duration: number;
   from: THREE.Vector3;
-  deliveryIndex?: number;
 };
 
 type AppleView = {
@@ -43,15 +42,6 @@ type AppleView = {
   baseRotation: number;
   transition: AppleTransition | null;
 };
-
-const DELIVERY_SLOTS = [
-  [-0.42, 0.48, 0.04],
-  [0, 0.45, -0.18],
-  [0.43, 0.47, 0.06],
-  [-0.24, 0.66, -0.08],
-  [0.26, 0.67, -0.04],
-  [0, 0.82, 0.06],
-] as const;
 
 const FIELD_GROUND_SIZE = 44;
 
@@ -129,8 +119,6 @@ export class ArenaView {
     lastFailure: null,
     lastFailures: { guard1: null, guard2: null, kid: null },
   };
-  private deliveryApples!: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-
   constructor(scene: THREE.Scene) {
     this.createWorld();
     void this.installImportedGuard('guard1');
@@ -203,14 +191,28 @@ export class ArenaView {
           startedAt: time,
           duration: 0.44,
           from: view.root.position.clone(),
-          deliveryIndex: event.total - 1,
         };
+        const apple = snapshot.apples.find((candidate) => candidate.id === event.appleId);
         this.vfx.emit(
           'delivery',
-          new THREE.Vector3(DELIVERY_ZONE.x, 0.12, DELIVERY_ZONE.z),
+          new THREE.Vector3(apple?.position.x ?? DELIVERY_ZONE.x, 0.12, apple?.position.z ?? DELIVERY_ZONE.z),
           time + 0.34,
           event.total,
         );
+        return;
+      }
+      case 'delivery-lost': {
+        const view = this.appleViews.get(event.appleId);
+        const apple = snapshot.apples.find((candidate) => candidate.id === event.appleId);
+        if (view) view.transition = null;
+        if (apple) {
+          this.vfx.emit(
+            'drop',
+            new THREE.Vector3(apple.position.x, 0.03, apple.position.z),
+            time,
+            event.appleId,
+          );
+        }
         return;
       }
       case 'pounce': {
@@ -261,7 +263,6 @@ export class ArenaView {
       };
     }
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);
-    this.syncDeliveryPile(snapshot, renderTime);
 
     this.pickingRing.visible = snapshot.kid.state === 'Picking';
     if (this.pickingRing.visible) {
@@ -580,58 +581,31 @@ export class ArenaView {
   }
 
   private createDeliveryZone(): void {
-    const marker = new THREE.Mesh(
-      new THREE.RingGeometry(1.72, 2.03, 36),
+    const fill = new THREE.Mesh(
+      new THREE.CircleGeometry(GAME_CONFIG.deliveryRadius, 48),
       new THREE.MeshBasicMaterial({
         color: '#f3d46d',
         transparent: true,
-        opacity: 0.58,
+        opacity: 0.14,
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
     );
-    marker.rotation.x = -Math.PI / 2;
-    marker.position.set(DELIVERY_ZONE.x, 0.025, DELIVERY_ZONE.z);
-    this.root.add(marker);
-
-    const basket = new THREE.Group();
-    basket.position.set(DELIVERY_ZONE.x, 0, DELIVERY_ZONE.z);
-    const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.82, 0.42, 10), this.materials.basketCloth);
-    inner.position.y = 0.23;
-    inner.receiveShadow = true;
-    basket.add(inner);
-
-    const slats = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.materials.wood, 10);
-    slats.castShadow = true;
-    for (let index = 0; index < 10; index += 1) {
-      const angle = index * Math.PI * 2 / 10;
-      this.matrixDummy.position.set(Math.cos(angle) * 0.77, 0.28, Math.sin(angle) * 0.77);
-      this.matrixDummy.rotation.set(0, -angle, Math.sin(angle) * 0.045);
-      this.matrixDummy.scale.set(0.14, 0.54, 0.08);
-      this.matrixDummy.updateMatrix();
-      slats.setMatrixAt(index, this.matrixDummy.matrix);
-    }
-    slats.instanceMatrix.needsUpdate = true;
-    basket.add(slats);
-
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.07, 5, 16), this.materials.woodDark);
-    rim.rotation.x = Math.PI / 2;
-    rim.position.y = 0.55;
-    rim.castShadow = true;
-    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.055, 5, 16, Math.PI), this.materials.woodDark);
-    handle.position.y = 0.5;
-    handle.castShadow = true;
-    basket.add(rim, handle);
-
-    this.deliveryApples = new THREE.InstancedMesh(
-      createAppleGeometry(1, 0.23),
-      createAppleMaterial(0),
-      DELIVERY_SLOTS.length,
+    const outline = new THREE.Mesh(
+      new THREE.RingGeometry(GAME_CONFIG.deliveryRadius - 0.12, GAME_CONFIG.deliveryRadius + 0.04, 48),
+      new THREE.MeshBasicMaterial({
+        color: '#f3d46d',
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
     );
-    this.deliveryApples.count = 0;
-    this.deliveryApples.castShadow = true;
-    basket.add(this.deliveryApples);
-    this.root.add(basket);
+    fill.rotation.x = -Math.PI / 2;
+    outline.rotation.x = -Math.PI / 2;
+    fill.position.set(DELIVERY_ZONE.x, 0.021, DELIVERY_ZONE.z);
+    outline.position.set(DELIVERY_ZONE.x, 0.026, DELIVERY_ZONE.z);
+    this.root.add(fill, outline);
   }
 
   private createApple(id: number): void {
@@ -699,16 +673,13 @@ export class ArenaView {
     view.targetRing.visible = snapshot.kid.pickingTargetId === apple.id && apple.state === 'Ground';
     view.body.material.transparent = apple.lockTicks > 0;
     view.body.material.opacity = apple.lockTicks > 0 ? 0.62 : 1;
-    view.body.material.emissiveIntensity = view.targetRing.visible ? 0.22 : 0.1;
+    view.body.material.emissiveIntensity = view.targetRing.visible ? 0.22 : apple.state === 'Delivered' ? 0.16 : 0.1;
     view.root.scale.setScalar(1);
 
     const target = this.appleTarget;
     if (apple.state === 'Carried') {
       const index = snapshot.kid.carriedAppleIds.indexOf(apple.id);
       this.getCarriedTarget(snapshot.kid, Math.max(0, index), target);
-    } else if (apple.state === 'Delivered') {
-      const deliveryIndex = view.transition?.deliveryIndex ?? Math.max(0, snapshot.delivered - 1);
-      this.getDeliveryTarget(deliveryIndex, target);
     } else {
       target.set(apple.position.x, 0, apple.position.z);
     }
@@ -730,11 +701,6 @@ export class ArenaView {
       view.transition = null;
     }
 
-    if (apple.state === 'Delivered') {
-      view.root.visible = false;
-      return;
-    }
-
     view.root.visible = true;
     view.root.position.copy(target);
     if (apple.state === 'Carried') {
@@ -750,28 +716,6 @@ export class ArenaView {
     }
   }
 
-  private syncDeliveryPile(snapshot: GameSnapshot, time: number): void {
-    let pending = 0;
-    for (const apple of snapshot.apples) {
-      const transition = this.appleViews.get(apple.id)?.transition;
-      if (apple.state === 'Delivered' && transition?.kind === 'delivery') {
-        const progress = (time - transition.startedAt) / transition.duration;
-        if (progress < 1) pending += 1;
-      }
-    }
-    const visibleCount = THREE.MathUtils.clamp(snapshot.delivered - pending, 0, DELIVERY_SLOTS.length);
-    this.deliveryApples.count = visibleCount;
-    for (let index = 0; index < visibleCount; index += 1) {
-      const slot = DELIVERY_SLOTS[index];
-      this.matrixDummy.position.set(slot[0], slot[1], slot[2]);
-      this.matrixDummy.rotation.set(index * 0.21, index * 1.17, index % 2 === 0 ? 0.12 : -0.16);
-      this.matrixDummy.scale.set(1, 1, 1);
-      this.matrixDummy.updateMatrix();
-      this.deliveryApples.setMatrixAt(index, this.matrixDummy.matrix);
-    }
-    this.deliveryApples.instanceMatrix.needsUpdate = true;
-  }
-
   private getCarriedTarget(kid: KidSnapshot, index: number, target: THREE.Vector3): void {
     const column = index % 2 === 0 ? -1 : 1;
     const row = Math.floor(index / 2);
@@ -783,11 +727,6 @@ export class ArenaView {
       0.98 + row * 0.25,
       kid.position.z - kid.facing.z * backDistance + rightZ * column * 0.2,
     );
-  }
-
-  private getDeliveryTarget(index: number, target: THREE.Vector3): void {
-    const slot = DELIVERY_SLOTS[THREE.MathUtils.clamp(index, 0, DELIVERY_SLOTS.length - 1)];
-    target.set(DELIVERY_ZONE.x + slot[0], slot[1], DELIVERY_ZONE.z + slot[2]);
   }
 
   private setInstance(

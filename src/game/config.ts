@@ -15,6 +15,7 @@ export const GAME_CONFIG = {
   guardSpeed: 4.2,
   slowdownPerApple: 0.1,
   minimumCarryMultiplier: 0.55,
+  maxCarriedApples: 3,
   pickupRadius: 1.15,
   pickingTicks: 24,
   invincibleTicks: 72,

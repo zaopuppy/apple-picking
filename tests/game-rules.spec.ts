@@ -112,6 +112,23 @@ test.describe('deterministic apple-picking rules', () => {
     expect(result.afterDropInput.kid.stateTicks).toBe(result.began.kid.stateTicks - 1);
   });
 
+  test('kid cannot pick up a fourth apple', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('carry-limit');
+      const before = hooks.getSnapshot();
+      const after = hooks.step({
+        kid: { moveX: 0, moveZ: 0, actionPressed: true, dropPressed: false },
+      }, 30);
+      return { before, after };
+    });
+
+    expect(result.before.kid.carriedAppleIds).toHaveLength(3);
+    expect(result.after.kid.carriedAppleIds).toHaveLength(3);
+    expect(result.after.kid.state).toBe('Normal');
+    expect(result.after.apples[3].state).toBe('Ground');
+  });
+
   test('delivery requires one active throw per apple', async ({ page }) => {
     const result = await page.evaluate(() => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;
@@ -130,6 +147,36 @@ test.describe('deterministic apple-picking rules', () => {
     expect(result.secondThrow.apples[0].state).toBe('Delivered');
     expect(result.secondThrow.apples[2].state).toBe('Ground');
     expect(result.secondThrow.kid.state).toBe('Normal');
+  });
+
+  test('a scored apple remains physical and stops counting when pushed outside the circle', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('delivery-edge');
+      const before = hooks.getSnapshot();
+      const after = hooks.step({}, 1);
+      return { before, after };
+    });
+
+    expect(result.before.delivered).toBe(1);
+    expect(result.before.apples[0].state).toBe('Delivered');
+    expect(result.after.delivered).toBe(0);
+    expect(result.after.apples[0].state).toBe('Ground');
+    expect(distance(result.after.apples[0].position, { x: 8.1, z: 5.35 })).toBeGreaterThan(2);
+  });
+
+  test('the sixth apple wins only after collision resolution leaves every apple in the circle', async ({ page }) => {
+    const snapshot = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('delivery-final');
+      return hooks.step({
+        kid: { moveX: 0, moveZ: 0, actionPressed: false, dropPressed: true },
+      }, 1);
+    });
+
+    expect(snapshot.delivered).toBe(6);
+    expect(snapshot.apples.every((apple) => apple.state === 'Delivered')).toBe(true);
+    expect(snapshot.matchState).toBe('KidWin');
   });
 
   test('third capture takes priority over final delivery', async ({ page }) => {

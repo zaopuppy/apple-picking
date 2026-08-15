@@ -173,7 +173,7 @@ export function syncImportedKidView(
   view.root.rotation.y = Math.atan2(kid.facing.x, kid.facing.z);
 
   const load = kid.carriedAppleIds.length;
-  const loadRatio = THREE.MathUtils.clamp(load / 6, 0, 1);
+  const loadRatio = THREE.MathUtils.clamp(load / GAME_CONFIG.maxCarriedApples, 0, 1);
   const motion = reducedMotion ? 0 : kid.movementAmount;
   const gait = Math.sin(time * (8.5 + motion * 3));
   const breath = reducedMotion
@@ -329,13 +329,13 @@ function updateSweat(
   time: number,
   reducedMotion: boolean,
 ): void {
-  const active = load >= 4 && movementAmount > 0.2;
+  const active = load >= GAME_CONFIG.maxCarriedApples && movementAmount > 0.2;
   if (!active) {
     view.sweat.count = 0;
     return;
   }
 
-  const count = reducedMotion ? 1 : load >= 6 ? 4 : 2;
+  const count = reducedMotion ? 1 : 4;
   view.sweat.count = count;
   for (let index = 0; index < count; index += 1) {
     const phase = reducedMotion ? 0.22 : (time * 1.6 + index / count) % 1;

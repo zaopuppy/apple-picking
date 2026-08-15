@@ -88,6 +88,19 @@ body {
   letter-spacing: 0.12em;
 }
 
+.carried-inline {
+  margin-left: 0.2em;
+  font-size: 0.92em;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.carried-inline b {
+  color: var(--apple-red);
+  font: 900 1.08em/1 ui-rounded, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
 .progress-track {
   position: relative;
   display: block;
@@ -134,28 +147,6 @@ body {
 .round-clock strong {
   margin-top: 3px;
   font: 900 1.08rem/1 ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-}
-
-#carried-badge {
-  position: absolute;
-  z-index: 2;
-  top: max(72px, calc(env(safe-area-inset-top) + 68px));
-  right: max(14px, env(safe-area-inset-right));
-  min-width: 86px;
-  padding: 4px 6px;
-  color: var(--ink);
-  background: transparent;
-  font-size: 0.72rem;
-  font-weight: 900;
-  text-align: center;
-  text-shadow: 0 1px 0 rgba(255, 245, 205, 0.95), 0 2px 5px rgba(36, 48, 27, 0.28);
-  pointer-events: none;
-}
-
-#carried-badge strong {
-  margin-left: 8px;
-  font-size: 1.2rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -271,19 +262,6 @@ body {
   .round-clock strong {
     margin-top: 2px;
     font-size: 0.88rem;
-  }
-
-  #carried-badge {
-    top: max(56px, calc(env(safe-area-inset-top) + 54px));
-    right: max(6px, env(safe-area-inset-right));
-    min-width: 62px;
-    padding: 2px 4px;
-    font-size: 0.54rem;
-  }
-
-  #carried-badge strong {
-    margin-left: 0;
-    font-size: 1.02rem;
   }
 
   #match-message {

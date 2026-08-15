@@ -77,7 +77,7 @@
 
 - guard1 与 guard2 改用 `Knight_Guard.glb`：保留 Knight 原生头盔和面罩，删除旧 Ranger 上额外叠加的帽顶和帽檐；蓝/绿披风、反向斜带和状态环继续区分两名 guard；
 - kid 改用 `Rogue_Kid.glb`：`Idle_A` 提供待机动作并叠加轻微呼吸，`Running_A` 根据负重降低播放速度，`PickUp` 表达拾取，`Hit_A` 表达被抓后的短暂受击；
-- 程序化 kid 身体已删除，但苹果篮、篮子负重膨胀、身体前倾、重载摇摆、苹果堆、4/6 个苹果时的滴汗和状态环仍由状态驱动；
+- 程序化 kid 身体已删除，但背包、负重膨胀、身体前倾、重载摇摆、苹果堆、满载三个苹果时的滴汗和状态环仍由状态驱动；
 - `Knight_Guard.glb` 为 458,152 bytes、9 meshes、5,800 triangles、1 个 256 × 256 图集和 5 个动画；`Rogue_Kid.glb` 为 503,252 bytes、7 meshes、7,562 triangles、1 个 256 × 256 图集和 4 个动画；
 - 三名角色合计 25 meshes、19,162 triangles、5 个运行时材质和 2 个逻辑纹理；两名 guard 共享 Knight 的 geometry、texture 和骨骼数据，只发起一次 Knight 请求；
 - `heavy-carry` 实测桌面与 390 × 664 手机均为 62 draw calls、31,164 triangles、57 geometries、9 textures；`picking` 手机状态峰值为 67 draw calls、31,436 triangles、60 geometries、9 textures；

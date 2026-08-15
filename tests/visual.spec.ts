@@ -112,7 +112,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
     .toBeLessThan(before - 0.3);
 
   const hudOverflow = await page.evaluate(() => {
-    const elements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #carried-badge')];
+    const elements = [...document.querySelectorAll<HTMLElement>('#score-ribbon')];
     return elements.some((element) => element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1);
   });
   expect(hudOverflow).toBe(false);
@@ -205,7 +205,9 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
     window.__THREE_GAME_TEST_HOOKS__?.scenario('heavy-carry');
   });
 
-  await expect(page.locator('#carried-value')).toHaveText('6');
+  await expect(page.locator('#carried-value')).toHaveText('3');
+  await expect(page.locator('#carried-total')).toHaveText('3');
+  await expect(page.locator('#carried-badge')).toHaveCount(0);
   await expect(page.locator('#state-strip')).toHaveCount(0);
   await expect(page.locator('#status-line')).toHaveCount(0);
   await expect(page.locator('#controls')).toHaveCount(0);
@@ -225,7 +227,7 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
         height: bounds.height,
       };
     };
-    const hudElements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #carried-badge')];
+    const hudElements = [...document.querySelectorAll<HTMLElement>('#score-ribbon')];
     const background = (selector: string) => {
       const element = document.querySelector<HTMLElement>(selector);
       if (!element) throw new Error(`Missing HUD element: ${selector}`);
@@ -239,15 +241,12 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       score: rect('#score-ribbon'),
-      carried: rect('#carried-badge'),
       backgrounds: {
         score: background('#score-ribbon'),
-        carried: background('#carried-badge'),
       },
       layers: {
         canvas: layer('#game-canvas'),
         score: layer('#score-ribbon'),
-        carried: layer('#carried-badge'),
       },
       overflow: hudElements.some((element) =>
         element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1),
@@ -258,23 +257,20 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
   expect(layout.overflow).toBe(false);
   expect(layout.backgrounds).toEqual({
     score: 'rgba(0, 0, 0, 0)',
-    carried: 'rgba(0, 0, 0, 0)',
   });
   expect(layout.layers.score).toBeGreaterThan(layout.layers.canvas);
-  expect(layout.layers.carried).toBeGreaterThan(layout.layers.canvas);
-  for (const bounds of [layout.score, layout.carried]) {
+  for (const bounds of [layout.score]) {
     expect(bounds.left).toBeGreaterThanOrEqual(-1);
     expect(bounds.right).toBeLessThanOrEqual(layout.viewport.width + 1);
     expect(bounds.top).toBeGreaterThanOrEqual(-1);
     expect(bounds.bottom).toBeLessThanOrEqual(layout.viewport.height + 1);
   }
-  expect(layout.score.bottom).toBeLessThanOrEqual(layout.carried.top + 1);
-
   if (testInfo.project.name === 'narrow-chrome') {
     expect(layout.camera?.portraitLayout).toBe(true);
     expect(layout.camera?.viewWidth).toBeLessThanOrEqual(18.9);
     expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
-    expect(layout.camera?.positionX).toBeCloseTo(10.5, 5);
+    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(35, 5);
+    expect(layout.camera?.positionX).toBeGreaterThan(23);
     expect(layout.camera?.positionY).toBeCloseTo(34, 5);
     expect(layout.camera?.positionZ).toBeCloseTo(0, 5);
   } else {
@@ -282,8 +278,20 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
     expect(layout.camera?.viewHeight).toBeCloseTo(18.5, 5);
     expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
     expect(layout.camera?.positionX).toBeCloseTo(0, 5);
-    expect(layout.camera?.positionZ).toBeCloseTo(19.5, 5);
+    expect(layout.camera?.positionZ).toBeGreaterThan(19.5);
+    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(40, 5);
   }
+});
+
+test('development tuning panel is live and can be hidden by the visual test hook', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'The development panel only needs one browser target.');
+  await page.goto('/');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+
+  const panel = page.locator('[data-testid="debug-panel"]');
+  await expect(panel).toBeVisible();
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true));
+  await expect(panel).toBeHidden();
 });
 
 test('right shift delivers exactly one apple through the real input path', async ({ page }, testInfo) => {
@@ -579,7 +587,7 @@ test('character state presentation stays readable across key gameplay moments', 
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
 
   const scenarios = [
-    { name: 'heavy-carry', kidState: 'Normal', carried: 6 },
+    { name: 'heavy-carry', kidState: 'Normal', carried: 3 },
     { name: 'guard-pounce', guardState: 'Pounce' },
     { name: 'guard-recover', guardState: 'Recover' },
     { name: 'guard-stunned', guardState: 'Stunned' },

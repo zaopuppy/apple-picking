@@ -95,6 +95,8 @@ declare global {
       positionX: number;
       positionY: number;
       positionZ: number;
+      angleFromGroundNormal: number;
+      zoom: number;
     };
     canvas: {
       clientWidth: number;
