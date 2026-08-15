@@ -4,9 +4,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const TREE_ASSET_ROOT = `${import.meta.env.BASE_URL}assets/models/kaykit-forest/`;
 
 const TREE_VARIANTS = [
-  'Tree_1_A_Color1.gltf',
-  'Tree_2_B_Color1.gltf',
-  'Tree_3_C_Color1.gltf',
+  'Tree_1_A_Color1.glb',
+  'Tree_2_B_Color1.glb',
+  'Tree_3_C_Color1.glb',
 ] as const;
 
 export type TreePlacement = {
@@ -35,9 +35,12 @@ export async function loadForestTreeVisuals(
   placements: readonly TreePlacement[],
 ): Promise<LoadedTreeVisuals> {
   const loader = new GLTFLoader();
-  const gltfs = await Promise.all(
-    TREE_VARIANTS.map((file) => loader.loadAsync(`${TREE_ASSET_ROOT}${file}`)),
-  );
+  const gltfs = [];
+  // The procedural trees remain visible while these arrive, so favour a small,
+  // predictable request queue over a burst of model dependencies.
+  for (const file of TREE_VARIANTS) {
+    gltfs.push(await loader.loadAsync(`${TREE_ASSET_ROOT}${file}`));
+  }
   const prototypes = gltfs.map((gltf, index) => extractPrototype(gltf.scene, TREE_VARIANTS[index]));
   shareTreeMaterial(prototypes);
 

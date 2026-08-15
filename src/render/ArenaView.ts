@@ -19,6 +19,12 @@ import {
   createOrchardMaterials,
   ORCHARD_COLORS,
 } from './OrchardMaterials';
+import {
+  disposeImportedGuardView,
+  loadImportedGuardView,
+  syncImportedGuardView,
+  type ImportedGuardView,
+} from './ImportedGuardView';
 
 type AppleTransition = {
   kind: 'pickup' | 'drop' | 'delivery';
@@ -58,6 +64,19 @@ export type EnvironmentAssetDiagnostics = {
   lastFailure: string | null;
 };
 
+export type CharacterAssetDiagnostics = {
+  guard1Mode: 'loading' | 'imported' | 'procedural';
+  externalRequested: boolean;
+  meshes: number;
+  triangles: number;
+  materials: number;
+  textures: number;
+  animations: string[];
+  currentAnimation: string | null;
+  sockets: string[];
+  lastFailure: string | null;
+};
+
 export class ArenaView {
   readonly root = new THREE.Group();
 
@@ -70,6 +89,7 @@ export class ArenaView {
   private readonly matrixDummy = new THREE.Object3D();
   private readonly appleTarget = new THREE.Vector3();
   private readonly proceduralTreeVisuals = new THREE.Group();
+  private importedGuardView: ImportedGuardView | null = null;
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
     treeMode: 'procedural',
@@ -79,6 +99,18 @@ export class ArenaView {
     treeTriangles: 0,
     lastFailure: null,
   };
+  private characterDiagnostics: CharacterAssetDiagnostics = {
+    guard1Mode: 'procedural',
+    externalRequested: false,
+    meshes: 0,
+    triangles: 0,
+    materials: 0,
+    textures: 0,
+    animations: [],
+    currentAnimation: null,
+    sockets: [],
+    lastFailure: null,
+  };
   private deliveryApples!: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
   constructor(scene: THREE.Scene) {
@@ -86,6 +118,14 @@ export class ArenaView {
     this.guardViews.set('guard1', createGuardCharacter('guard1', this.materials));
     this.guardViews.set('guard2', createGuardCharacter('guard2', this.materials));
     for (const view of this.guardViews.values()) this.root.add(view.root);
+    if (new URLSearchParams(window.location.search).get('guard') !== 'procedural') {
+      this.characterDiagnostics = {
+        ...this.characterDiagnostics,
+        guard1Mode: 'loading',
+        externalRequested: true,
+      };
+      void this.installImportedGuard();
+    }
     this.kidView = createKidCharacter(this.materials);
     this.root.add(this.kidView.root);
     for (let id = 0; id < APPLE_SPAWNS.length; id += 1) this.createApple(id);
@@ -196,6 +236,11 @@ export class ArenaView {
 
   sync(snapshot: GameSnapshot, renderTime: number, reducedMotion: boolean): void {
     for (const guard of snapshot.guards) {
+      if (guard.id === 'guard1' && this.importedGuardView) {
+        syncImportedGuardView(this.importedGuardView, guard, renderTime, reducedMotion);
+        this.characterDiagnostics.currentAnimation = this.importedGuardView.currentAnimation;
+        continue;
+      }
       const view = this.guardViews.get(guard.id);
       if (view) syncGuardCharacter(view, guard, renderTime, reducedMotion);
     }
@@ -219,8 +264,17 @@ export class ArenaView {
     return { ...this.environmentDiagnostics };
   }
 
+  getCharacterDiagnostics(): CharacterAssetDiagnostics {
+    return {
+      ...this.characterDiagnostics,
+      animations: [...this.characterDiagnostics.animations],
+      sockets: [...this.characterDiagnostics.sockets],
+    };
+  }
+
   dispose(): void {
     this.disposed = true;
+    if (this.importedGuardView) disposeImportedGuardView(this.importedGuardView);
     disposeObject3D(this.root);
     this.root.removeFromParent();
   }
@@ -427,6 +481,39 @@ export class ArenaView {
       this.environmentDiagnostics = {
         ...this.environmentDiagnostics,
         treeMode: 'procedural',
+        lastFailure: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async installImportedGuard(): Promise<void> {
+    try {
+      const imported = await loadImportedGuardView();
+      if (this.disposed) {
+        disposeImportedGuardView(imported);
+        disposeObject3D(imported.root);
+        return;
+      }
+      const procedural = this.guardViews.get('guard1');
+      if (procedural) procedural.root.visible = false;
+      this.importedGuardView = imported;
+      this.root.add(imported.root);
+      this.characterDiagnostics = {
+        guard1Mode: 'imported',
+        externalRequested: true,
+        meshes: imported.meshes,
+        triangles: imported.triangles,
+        materials: imported.materialCount,
+        textures: imported.textureCount,
+        animations: [...imported.actions.keys()],
+        currentAnimation: imported.currentAnimation,
+        sockets: [...imported.sockets],
+        lastFailure: null,
+      };
+    } catch (error) {
+      this.characterDiagnostics = {
+        ...this.characterDiagnostics,
+        guard1Mode: 'procedural',
         lastFailure: error instanceof Error ? error.message : String(error),
       };
     }

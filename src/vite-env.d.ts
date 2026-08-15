@@ -49,6 +49,18 @@ declare global {
       treeTriangles: number;
       lastFailure: string | null;
     };
+    characters: {
+      guard1Mode: 'loading' | 'imported' | 'procedural';
+      externalRequested: boolean;
+      meshes: number;
+      triangles: number;
+      materials: number;
+      textures: number;
+      animations: string[];
+      currentAnimation: string | null;
+      sockets: string[];
+      lastFailure: string | null;
+    };
     renderer: {
       calls: number;
       triangles: number;

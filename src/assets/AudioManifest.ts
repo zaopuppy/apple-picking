@@ -26,15 +26,15 @@ const KENNEY_AUDIO_ROOT = 'assets/audio/kenney';
 
 export const AUDIO_MANIFEST: Readonly<Record<AudioCue, AudioCueEntry>> = {
   'pick-started': {
-    variants: [`${KENNEY_AUDIO_ROOT}/pick-started.wav`],
+    variants: [`${KENNEY_AUDIO_ROOT}/pick-started.mp3`],
     volume: 0.38,
     playbackRate: [0.98, 1.04],
     fallback: { startFrequency: 280, endFrequency: 360, duration: 0.12, oscillator: 'triangle' },
   },
   picked: {
     variants: [
-      `${KENNEY_AUDIO_ROOT}/picked-01.wav`,
-      `${KENNEY_AUDIO_ROOT}/picked-02.wav`,
+      `${KENNEY_AUDIO_ROOT}/picked-01.mp3`,
+      `${KENNEY_AUDIO_ROOT}/picked-02.mp3`,
     ],
     volume: 0.34,
     playbackRate: [0.97, 1.05],
@@ -42,39 +42,39 @@ export const AUDIO_MANIFEST: Readonly<Record<AudioCue, AudioCueEntry>> = {
   },
   dropped: {
     variants: [
-      `${KENNEY_AUDIO_ROOT}/apple-drop-01.wav`,
-      `${KENNEY_AUDIO_ROOT}/apple-drop-02.wav`,
+      `${KENNEY_AUDIO_ROOT}/apple-drop-01.mp3`,
+      `${KENNEY_AUDIO_ROOT}/apple-drop-02.mp3`,
     ],
     volume: 0.42,
     playbackRate: [0.96, 1.03],
     fallback: { startFrequency: 390, endFrequency: 230, duration: 0.11, oscillator: 'sine' },
   },
   pounce: {
-    variants: [`${KENNEY_AUDIO_ROOT}/guard-pounce.wav`],
+    variants: [`${KENNEY_AUDIO_ROOT}/guard-pounce.mp3`],
     volume: 0.48,
     playbackRate: [0.96, 1.02],
     fallback: { startFrequency: 180, endFrequency: 520, duration: 0.12, oscillator: 'sawtooth' },
   },
   'guards-stunned': {
-    variants: [`${KENNEY_AUDIO_ROOT}/guards-stunned.wav`],
+    variants: [`${KENNEY_AUDIO_ROOT}/guards-stunned.mp3`],
     volume: 0.46,
     playbackRate: [0.98, 1.02],
     fallback: { startFrequency: 150, endFrequency: 90, duration: 0.22, oscillator: 'square' },
   },
   captured: {
-    variants: [`${KENNEY_AUDIO_ROOT}/kid-captured.wav`],
+    variants: [`${KENNEY_AUDIO_ROOT}/kid-captured.mp3`],
     volume: 0.48,
     playbackRate: [0.97, 1.01],
     fallback: { startFrequency: 260, endFrequency: 110, duration: 0.24, oscillator: 'square' },
   },
   delivered: {
-    variants: [`${KENNEY_AUDIO_ROOT}/apple-delivered.wav`],
+    variants: [`${KENNEY_AUDIO_ROOT}/apple-delivered.mp3`],
     volume: 0.42,
     playbackRate: [0.99, 1.05],
     fallback: { startFrequency: 520, endFrequency: 900, duration: 0.22, oscillator: 'triangle' },
   },
   'match-ended': {
-    variants: [`${KENNEY_AUDIO_ROOT}/match-ended.wav`],
+    variants: [`${KENNEY_AUDIO_ROOT}/match-ended.mp3`],
     volume: 0.5,
     playbackRate: [0.94, 1.06],
     fallback: { startFrequency: 620, endFrequency: 1040, duration: 0.42, oscillator: 'triangle' },

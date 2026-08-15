@@ -223,6 +223,7 @@ export class Game {
       },
       audio: this.audio.getDiagnostics(),
       environment: this.view.getEnvironmentDiagnostics(),
+      characters: this.view.getCharacterDiagnostics(),
       renderer: {
         calls: info.render.calls,
         triangles: info.render.triangles,

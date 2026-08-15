@@ -7,6 +7,14 @@ import {
 } from '../assets/AudioManifest';
 import type { GameEvent } from '../game/types';
 
+const AUDIO_PACK_PATH = 'assets/audio/kenney/sfx-pack.json';
+
+type AudioPack = {
+  format: 'base64-audio-pack-v1';
+  mimeType: 'audio/mpeg';
+  samples: Record<string, string>;
+};
+
 export type AudioDiagnostics = {
   externalEnabled: boolean;
   unlocked: boolean;
@@ -100,23 +108,28 @@ export class AudioSystem {
   }
 
   private async preloadSamples(): Promise<void> {
-    await Promise.all(getAudioAssetPaths().map(async (path) => {
-      try {
-        const url = new URL(path, document.baseURI);
-        const response = await fetch(url, {
-          headers: { Accept: 'audio/wav,audio/*;q=0.9,*/*;q=0.1' },
-          signal: this.abortController.signal,
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        this.encodedSamples.set(path, await response.arrayBuffer());
-      } catch (error) {
-        if (!this.abortController.signal.aborted) {
-          this.failedSamples += 1;
-          this.lastFailure = `${path}: ${error instanceof Error ? error.message : String(error)}`;
-          console.warn(`Audio sample unavailable, using procedural fallback: ${path}`, error);
-        }
+    const paths = getAudioAssetPaths();
+    try {
+      const response = await fetch(new URL(AUDIO_PACK_PATH, document.baseURI), {
+        signal: this.abortController.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const pack = await response.json() as AudioPack;
+      if (pack.format !== 'base64-audio-pack-v1' || pack.mimeType !== 'audio/mpeg') {
+        throw new Error('Unsupported audio pack format');
       }
-    }));
+      for (const path of paths) {
+        const encoded = pack.samples[path];
+        if (typeof encoded !== 'string') throw new Error(`Missing sample: ${path}`);
+        this.encodedSamples.set(path, decodeBase64(encoded));
+      }
+    } catch (error) {
+      if (!this.abortController.signal.aborted) {
+        this.failedSamples = paths.length;
+        this.lastFailure = `${AUDIO_PACK_PATH}: ${error instanceof Error ? error.message : String(error)}`;
+        console.warn(`Audio pack unavailable, using procedural fallbacks: ${AUDIO_PACK_PATH}`, error);
+      }
+    }
   }
 
   private async decodePreloadedSamples(context: AudioContext): Promise<void> {
@@ -203,4 +216,13 @@ export class AudioSystem {
     this.context = null;
     this.unlocked = false;
   }
+}
+
+function decodeBase64(encoded: string): ArrayBuffer {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
 }

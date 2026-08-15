@@ -55,6 +55,22 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   await page.goto('/');
   await expect(page.locator('#game-canvas')).toBeVisible();
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10);
+  if (testInfo.project.name === 'desktop-chrome') {
+    await expect
+      .poll(
+        async () => page.evaluate(() => ({
+          audio: window.__THREE_GAME_DIAGNOSTICS__?.audio,
+          environment: window.__THREE_GAME_DIAGNOSTICS__?.environment,
+          characters: window.__THREE_GAME_DIAGNOSTICS__?.characters,
+        })),
+        { timeout: 15_000 },
+      )
+      .toMatchObject({
+        audio: { fetchedSamples: 10, failedSamples: 0 },
+        environment: { treeMode: 'imported', lastFailure: null },
+        characters: { guard1Mode: 'imported', lastFailure: null },
+      });
+  }
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('active-play'));
 
   await expect
@@ -279,24 +295,21 @@ test('right shift delivers exactly one apple through the real input path', async
 
 test('CC0 event samples load after audio unlock and retain the procedural fallback', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Audio loading only needs one installed Chrome run.');
-  const audioResponses: Array<{ path: string; status: number; accept: string | undefined }> = [];
+  const audioResponses: Array<{ path: string; status: number }> = [];
   page.on('response', (response) => {
     const url = new URL(response.url());
     if (url.pathname.includes('/assets/audio/kenney/')) {
       audioResponses.push({
         path: url.pathname,
         status: response.status(),
-        accept: response.request().headers().accept,
       });
     }
   });
-  await page.goto('/');
+  await page.goto('/?trees=procedural&guard=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
-  await expect.poll(() => new Set(audioResponses.map((response) => response.path)).size).toBe(10);
-  expect(
-    audioResponses.every((response) => response.status === 200),
-    JSON.stringify(audioResponses),
-  ).toBe(true);
+  await expect.poll(() => audioResponses).toEqual([
+    { path: '/assets/audio/kenney/sfx-pack.json', status: 200 },
+  ]);
   await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
 
   await expect
@@ -324,7 +337,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio.samplePlays ?? 0))
     .toBeGreaterThan(0);
 
-  await page.goto('/?audio=procedural');
+  await page.goto('/?audio=procedural&trees=procedural&guard=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('delivery'));
@@ -351,7 +364,7 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
     }
   });
 
-  await page.goto('/');
+  await page.goto('/?audio=procedural&guard=procedural');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
     .toMatchObject({
@@ -362,7 +375,7 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
       treeTriangles: 9750,
       lastFailure: null,
     });
-  expect(assetResponses.length).toBeGreaterThanOrEqual(7);
+  expect(assetResponses).toHaveLength(3);
   expect(assetResponses.every((response) => response.status === 200), JSON.stringify(assetResponses)).toBe(true);
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
@@ -370,7 +383,7 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
   expect(renderer?.triangles).toBeLessThanOrEqual(25_000);
   expect(renderer?.textures).toBeLessThanOrEqual(5);
 
-  await page.goto('/?trees=procedural');
+  await page.goto('/?audio=procedural&trees=procedural&guard=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment)).toMatchObject({
     treeMode: 'procedural',
@@ -378,6 +391,77 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
     treeVariants: 0,
     treeInstances: 9,
     treeTriangles: 0,
+    lastFailure: null,
+  });
+});
+
+test('one CC0 guard model maps key states and retains the procedural fallback', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Guard asset loading only needs one installed Chrome run.');
+  const modelResponses: Array<{ path: string; status: number }> = [];
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.includes('/assets/models/kaykit-adventurers/')) {
+      modelResponses.push({ path: url.pathname, status: response.status() });
+    }
+  });
+
+  await page.goto('/?audio=procedural&trees=procedural');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters))
+    .toMatchObject({
+      guard1Mode: 'imported',
+      externalRequested: true,
+      meshes: 7,
+      triangles: 8645,
+      materials: 1,
+      textures: 1,
+      animations: ['Idle_A', 'Running_A', 'Jump_Full_Short', 'Jump_Land', 'Hit_A'],
+      sockets: ['head', 'left-hand', 'right-hand', 'back'],
+      lastFailure: null,
+    });
+  expect(modelResponses).toEqual([
+    { path: '/assets/models/kaykit-adventurers/Ranger_Guard.glb', status: 200 },
+  ]);
+
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('active-play'));
+  await page.keyboard.down('KeyE');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimation))
+    .toBe('Running_A');
+  await page.keyboard.up('KeyE');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimation))
+    .toBe('Idle_A');
+
+  const stateAnimations = [
+    { scenario: 'guard-pounce', animation: 'Jump_Full_Short' },
+    { scenario: 'guard-recover', animation: 'Jump_Land' },
+    { scenario: 'guard-stunned', animation: 'Hit_A' },
+  ];
+  for (const state of stateAnimations) {
+    await page.evaluate((scenario) => window.__THREE_GAME_TEST_HOOKS__?.scenario(scenario), state.scenario);
+    await expect
+      .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimation))
+      .toBe(state.animation);
+  }
+
+  const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
+  expect(renderer?.calls).toBeLessThanOrEqual(100);
+  expect(renderer?.triangles).toBeLessThanOrEqual(80_000);
+  expect(renderer?.textures).toBeLessThanOrEqual(12);
+
+  await page.goto('/?audio=procedural&trees=procedural&guard=procedural');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters)).toMatchObject({
+    guard1Mode: 'procedural',
+    externalRequested: false,
+    meshes: 0,
+    triangles: 0,
+    materials: 0,
+    textures: 0,
+    animations: [],
+    currentAnimation: null,
+    sockets: [],
     lastFailure: null,
   });
 });
