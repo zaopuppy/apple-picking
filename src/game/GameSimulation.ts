@@ -1,6 +1,7 @@
 import { createSeededRandom } from '../utils/random';
 import {
   APPLE_SPAWNS,
+  DEFAULT_MOVEMENT_TUNING,
   DELIVERY_ZONE,
   GAME_CONFIG,
   GUARD1_START,
@@ -8,6 +9,7 @@ import {
   KID_START,
   OBSTACLES,
   TICKS_PER_SECOND,
+  type MovementTuning,
   type Obstacle,
 } from './config';
 import {
@@ -76,9 +78,21 @@ export class GameSimulation {
   private events: GameEvent[] = [];
   private rng = createSeededRandom(1);
   private dropSerial = 0;
+  private readonly movementTuning: MovementTuning;
 
-  constructor() {
+  constructor(movementTuning: MovementTuning = DEFAULT_MOVEMENT_TUNING) {
+    this.movementTuning = { ...movementTuning };
     this.restart(false);
+  }
+
+  setMovementTuning(movementTuning: MovementTuning): void {
+    this.movementTuning.baseSpeed = movementTuning.baseSpeed;
+    this.movementTuning.guardSpeedMultiplier = movementTuning.guardSpeedMultiplier;
+    this.movementTuning.kidSpeedMultiplier = movementTuning.kidSpeedMultiplier;
+  }
+
+  getMovementTuning(): Readonly<MovementTuning> {
+    return { ...this.movementTuning };
   }
 
   restart(skipCountdown = false): void {
@@ -399,7 +413,7 @@ export class GameSimulation {
 
     if (guard.state === 'Move') {
       if (lengthSquared(direction) > 0) guard.facing = direction;
-      this.moveWithCollisions(guard.position, direction, GAME_CONFIG.guardSpeed, GAME_CONFIG.guardRadius);
+      this.moveWithCollisions(guard.position, direction, this.currentGuardSpeed(), GAME_CONFIG.guardRadius);
     } else if (guard.state === 'Pounce') {
       this.moveWithCollisions(
         guard.position,
@@ -627,6 +641,10 @@ export class GameSimulation {
       this.kid.state = 'Normal';
       return;
     }
+    if (this.kid.state === 'Rejecting') {
+      this.kid.state = 'Normal';
+      return;
+    }
 
     const targetId = this.kid.pickingTargetId;
     this.kid.pickingTargetId = null;
@@ -652,22 +670,24 @@ export class GameSimulation {
     if (lengthSquared(direction) === 0) direction = copy(captor.facing);
     this.kid.position.x += direction.x * GAME_CONFIG.kidHitKnockback;
     this.kid.position.z += direction.z * GAME_CONFIG.kidHitKnockback;
-    this.kid.facing = direction;
     this.constrainPosition(this.kid.position, GAME_CONFIG.kidRadius);
   }
 
   private tryStartPicking(): void {
-    if (
-      this.kid.state !== 'Normal' ||
-      this.kid.carriedAppleIds.length >= GAME_CONFIG.maxCarriedApples
-    ) return;
+    if (this.kid.state !== 'Normal') return;
     const candidates = this.apples
       .filter((apple) => apple.state === 'Ground' && apple.lockTicks === 0)
       .map((apple) => ({ apple, distanceSq: distanceSquared(this.kid.position, apple.position) }))
       .filter(({ distanceSq }) => distanceSq <= GAME_CONFIG.pickupRadius * GAME_CONFIG.pickupRadius)
       .sort((a, b) => a.distanceSq - b.distanceSq || a.apple.id - b.apple.id);
     const target = candidates[0]?.apple;
-    if (target) this.startPicking(target);
+    if (!target) return;
+    if (this.kid.carriedAppleIds.length >= GAME_CONFIG.maxCarriedApples) {
+      this.kid.state = 'Rejecting';
+      this.kid.stateTicks = GAME_CONFIG.pickupRejectTicks;
+      return;
+    }
+    this.startPicking(target);
   }
 
   private startPicking(apple: AppleModel): void {
@@ -751,7 +771,14 @@ export class GameSimulation {
       1 - this.kid.carriedAppleIds.length * GAME_CONFIG.slowdownPerApple,
     );
     const invincibleMultiplier = this.kid.state === 'Invincible' ? GAME_CONFIG.invincibleSpeedMultiplier : 1;
-    return GAME_CONFIG.kidBaseSpeed * carryMultiplier * invincibleMultiplier;
+    return this.movementTuning.baseSpeed *
+      this.movementTuning.kidSpeedMultiplier *
+      carryMultiplier *
+      invincibleMultiplier;
+  }
+
+  private currentGuardSpeed(): number {
+    return this.movementTuning.baseSpeed * this.movementTuning.guardSpeedMultiplier;
   }
 
   private clampApplePosition(position: Vec2): void {
@@ -760,6 +787,7 @@ export class GameSimulation {
 
   private guardSnapshot(guard: GuardModel): GuardSnapshot {
     const moved = Math.sqrt(distanceSquared(guard.position, guard.previousPosition));
+    const speed = this.currentGuardSpeed();
     return {
       id: guard.id,
       position: copy(guard.position),
@@ -768,7 +796,7 @@ export class GameSimulation {
       stateTicks: guard.stateTicks,
       cooldownTicks: guard.cooldownTicks,
       pounceReady: guard.state === 'Move' && guard.cooldownTicks === 0,
-      movementAmount: clamp(moved * TICKS_PER_SECOND / GAME_CONFIG.guardSpeed, 0, 1),
+      movementAmount: clamp(moved * TICKS_PER_SECOND / Math.max(speed, 0.001), 0, 1),
     };
   }
 

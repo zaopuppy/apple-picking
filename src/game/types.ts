@@ -5,7 +5,7 @@ export type Vec2 = {
 
 export type MatchState = 'Countdown' | 'Playing' | 'KidWin' | 'GuardWin';
 export type GuardState = 'Move' | 'Pounce' | 'Recover' | 'Stunned';
-export type KidState = 'Normal' | 'Picking' | 'Hit' | 'Invincible';
+export type KidState = 'Normal' | 'Picking' | 'Rejecting' | 'Hit' | 'Invincible';
 export type AppleState = 'Ground' | 'Carried' | 'Delivered';
 
 export type ActorCommand = {

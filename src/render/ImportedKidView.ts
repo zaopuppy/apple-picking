@@ -31,6 +31,9 @@ export type ImportedKidView = {
   backpackBody: THREE.Mesh;
   stateRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   sweat: THREE.InstancedMesh;
+  head: THREE.Object3D | null;
+  headShakeQuaternion: THREE.Quaternion;
+  headShakeAngle: number;
   currentAnimation: KidAnimationName | null;
   lastUpdateTime: number;
   triangles: number;
@@ -41,6 +44,8 @@ export type ImportedKidView = {
 };
 
 const matrixDummy = new THREE.Object3D();
+const headShakeAxis = new THREE.Vector3(0, 1, 0);
+const inverseHeadShake = new THREE.Quaternion();
 
 export async function loadImportedKidView(materials: OrchardMaterials): Promise<ImportedKidView> {
   const gltf = await loadKidAsset();
@@ -154,6 +159,9 @@ export async function loadImportedKidView(materials: OrchardMaterials): Promise<
     backpackBody,
     stateRing,
     sweat,
+    head: findNode(scene, 'head'),
+    headShakeQuaternion: new THREE.Quaternion(),
+    headShakeAngle: 0,
     currentAnimation: null,
     lastUpdateTime: 0,
     triangles,
@@ -172,6 +180,7 @@ export function syncImportedKidView(
 ): void {
   view.root.position.set(kid.position.x, 0, kid.position.z);
   view.root.rotation.y = Math.atan2(kid.facing.x, kid.facing.z);
+  resetHeadShake(view);
 
   const load = kid.carriedAppleIds.length;
   const loadRatio = THREE.MathUtils.clamp(load / GAME_CONFIG.maxCarriedApples, 0, 1);
@@ -213,12 +222,13 @@ export function syncImportedKidView(
     action.time = stateAnimationTime(action.getClip().duration, kid);
     view.mixer.update(0);
   }
+  updateHeadShake(view, kid, reducedMotion);
 
   view.backpack.position.set(0, 0.82 - loadRatio * 0.08, -0.31 - loadRatio * 0.05);
   view.backpack.rotation.set(-lean * 0.28, 0, -wobble * 1.35);
   view.backpackBody.scale.set(1 + loadRatio * 0.24, 1 + loadRatio * 0.12, 1 + loadRatio * 0.32);
 
-  view.stateRing.visible = kid.state !== 'Normal';
+  view.stateRing.visible = kid.state !== 'Normal' && kid.state !== 'Rejecting';
   view.stateRing.material.color.set(
     kid.state === 'Picking'
       ? ORCHARD_COLORS.reward
@@ -279,6 +289,28 @@ function stateAnimationTime(duration: number, kid: KidSnapshot): number {
   return 0;
 }
 
+function resetHeadShake(view: ImportedKidView): void {
+  if (!view.head) return;
+  inverseHeadShake.copy(view.headShakeQuaternion).invert();
+  view.head.quaternion.multiply(inverseHeadShake);
+  view.headShakeQuaternion.identity();
+  view.headShakeAngle = 0;
+}
+
+function updateHeadShake(view: ImportedKidView, kid: KidSnapshot, reducedMotion: boolean): void {
+  if (!view.head || kid.state !== 'Rejecting') return;
+  const progress = THREE.MathUtils.clamp(
+    1 - kid.stateTicks / GAME_CONFIG.pickupRejectTicks,
+    0,
+    1,
+  );
+  const envelope = Math.sin(progress * Math.PI);
+  const oscillation = reducedMotion ? 0.28 : Math.sin(progress * Math.PI * 6);
+  view.headShakeAngle = envelope * oscillation * 0.38;
+  view.headShakeQuaternion.setFromAxisAngle(headShakeAxis, view.headShakeAngle);
+  view.head.quaternion.multiply(view.headShakeQuaternion);
+}
+
 function createBackpack(materials: OrchardMaterials): { root: THREE.Group; body: THREE.Mesh } {
   const root = new THREE.Group();
   root.name = 'kid-apple-basket';
@@ -318,6 +350,14 @@ function findSocketLabels(scene: THREE.Group): string[] {
   if (names.some((name) => name.includes('handslot') && name.endsWith('r'))) sockets.push('right-hand');
   if (names.includes('spine') || names.includes('chest')) sockets.push('back');
   return sockets;
+}
+
+function findNode(scene: THREE.Group, label: string): THREE.Object3D | null {
+  let match: THREE.Object3D | null = null;
+  scene.traverse((object) => {
+    if (!match && object.name.toLowerCase() === label) match = object;
+  });
+  return match;
 }
 
 function loadKidAsset(): ReturnType<GLTFLoader['loadAsync']> {

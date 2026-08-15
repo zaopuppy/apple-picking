@@ -75,6 +75,7 @@ export type CharacterAssetDiagnostics = {
     postureLean: number;
     breathScaleY: number;
     animationPaused: boolean | null;
+    headShakeAngle: number;
   } | null;
   lastFailure: string | null;
   lastFailures: Record<ImportedGuardId | 'kid', string | null>;
@@ -264,6 +265,7 @@ export class ArenaView {
         animationPaused: this.importedKidView.currentAnimation
           ? this.importedKidView.actions.get(this.importedKidView.currentAnimation)?.paused ?? null
           : null,
+        headShakeAngle: this.importedKidView.headShakeAngle,
       };
     }
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);

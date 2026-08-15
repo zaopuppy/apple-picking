@@ -47,6 +47,7 @@ test.describe('deterministic apple-picking rules', () => {
     const result = await page.evaluate(() => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;
       hooks.scenario('pickup-danger');
+      const before = hooks.getSnapshot();
       const captured = hooks.step({}, 1);
       const locked = hooks.step({
         kid: { moveX: 1, moveZ: 0, actionPressed: true, dropPressed: false },
@@ -59,11 +60,12 @@ test.describe('deterministic apple-picking rules', () => {
       }, 1);
       const almostVulnerable = hooks.step({}, 70);
       const vulnerable = hooks.step({}, 1);
-      return { captured, locked, recovered, moving, almostVulnerable, vulnerable };
+      return { before, captured, locked, recovered, moving, almostVulnerable, vulnerable };
     });
 
     expect(result.captured.kid.state).toBe('Hit');
     expect(result.captured.kid.stateTicks).toBe(18);
+    expect(result.captured.kid.facing).toEqual(result.before.kid.facing);
     expect(result.locked.kid.state).toBe('Hit');
     expect(result.locked.kid.stateTicks).toBe(1);
     expect(result.locked.kid.position).toEqual(result.captured.kid.position);
@@ -153,13 +155,22 @@ test.describe('deterministic apple-picking rules', () => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;
       hooks.scenario('carry-limit');
       const before = hooks.getSnapshot();
-      const after = hooks.step({
+      const rejected = hooks.step({
         kid: { moveX: 0, moveZ: 0, actionPressed: true, dropPressed: false },
-      }, 30);
-      return { before, after };
+      }, 1);
+      const moving = hooks.step({
+        kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+      }, 1);
+      const after = hooks.step({}, 28);
+      return { before, rejected, moving, after };
     });
 
     expect(result.before.kid.carriedAppleIds).toHaveLength(3);
+    expect(result.rejected.kid.state).toBe('Rejecting');
+    expect(result.rejected.kid.stateTicks).toBe(29);
+    expect(result.rejected.kid.carriedAppleIds).toHaveLength(3);
+    expect(result.moving.kid.state).toBe('Rejecting');
+    expect(result.moving.kid.position.x).toBeGreaterThan(result.rejected.kid.position.x);
     expect(result.after.kid.carriedAppleIds).toHaveLength(3);
     expect(result.after.kid.state).toBe('Normal');
     expect(result.after.apples[3].state).toBe('Ground');

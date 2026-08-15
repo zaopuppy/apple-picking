@@ -6,7 +6,7 @@ import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
 import type { DebugPanel, DebugTuning } from '../systems/DebugPanel';
 import { Hud } from '../systems/Hud';
-import { FIXED_DELTA_SECONDS, GAME_CONFIG } from './config';
+import { DEFAULT_MOVEMENT_TUNING, FIXED_DELTA_SECONDS, GAME_CONFIG } from './config';
 import { GameSimulation } from './GameSimulation';
 import {
   commandsWithoutEdges,
@@ -15,10 +15,12 @@ import {
   type SimulationStep,
 } from './types';
 
+const PORTRAIT_CAMERA_ANGLE = 35;
+
 const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
-  portraitCameraAngle: 35,
-  landscapeCameraAngle: 40,
-  cameraZoom: 1,
+  ...DEFAULT_MOVEMENT_TUNING,
+  landscapeCameraAngle: 50,
+  cameraZoom: 1.2,
   hemisphereIntensity: 2.1,
   sunIntensity: 3.1,
   reducedMotion: false,
@@ -134,7 +136,7 @@ export class Game {
     const portraitLayout = usesPortraitArenaLayout(width / height);
     const cameraHeight = portraitLayout ? 34 : 23.5;
     const angleDegrees = portraitLayout
-      ? this.debugTuning.portraitCameraAngle
+      ? PORTRAIT_CAMERA_ANGLE
       : this.debugTuning.landscapeCameraAngle;
     const horizontalDistance = cameraHeight * Math.tan(THREE.MathUtils.degToRad(angleDegrees));
     if (portraitLayout) {
@@ -170,6 +172,10 @@ export class Game {
         this.updateCameraComposition();
         this.publishDiagnostics();
       },
+      movementChanged: () => {
+        this.simulation.setMovementTuning(this.debugTuning);
+        this.publishDiagnostics();
+      },
       lightingChanged: () => {
         this.hemisphere.intensity = this.debugTuning.hemisphereIntensity;
         this.sun.intensity = this.debugTuning.sunIntensity;
@@ -180,6 +186,7 @@ export class Game {
       },
       reset: () => {
         Object.assign(this.debugTuning, DEFAULT_DEBUG_TUNING);
+        this.simulation.setMovementTuning(this.debugTuning);
         this.reducedMotion = this.debugTuning.reducedMotion;
         this.hemisphere.intensity = this.debugTuning.hemisphereIntensity;
         this.sun.intensity = this.debugTuning.sunIntensity;
@@ -280,6 +287,7 @@ export class Game {
         sensors: 1,
         ccdBodies: 0,
       },
+      movement: this.simulation.getMovementTuning(),
       audio: this.audio.getDiagnostics(),
       environment: this.view.getEnvironmentDiagnostics(),
       characters: this.view.getCharacterDiagnostics(),
@@ -298,7 +306,7 @@ export class Game {
         positionY: this.camera.position.y,
         positionZ: this.camera.position.z,
         angleFromGroundNormal: usesPortraitArenaLayout(this.canvas.clientWidth / this.canvas.clientHeight)
-          ? this.debugTuning.portraitCameraAngle
+          ? PORTRAIT_CAMERA_ANGLE
           : this.debugTuning.landscapeCameraAngle,
         zoom: this.camera.zoom,
       },

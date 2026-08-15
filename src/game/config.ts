@@ -3,6 +3,18 @@ import type { Vec2 } from './types';
 export const TICKS_PER_SECOND = 60;
 export const FIXED_DELTA_SECONDS = 1 / TICKS_PER_SECOND;
 
+export type MovementTuning = {
+  baseSpeed: number;
+  guardSpeedMultiplier: number;
+  kidSpeedMultiplier: number;
+};
+
+export const DEFAULT_MOVEMENT_TUNING: Readonly<MovementTuning> = {
+  baseSpeed: 4,
+  guardSpeedMultiplier: 1.05,
+  kidSpeedMultiplier: 1.2,
+};
+
 export const GAME_CONFIG = {
   arenaHalfWidth: 12,
   arenaHalfDepth: 9,
@@ -11,13 +23,12 @@ export const GAME_CONFIG = {
   kidRadius: 0.48,
   guardRadius: 0.55,
   appleRadius: 0.34,
-  kidBaseSpeed: 4.8,
-  guardSpeed: 4.2,
   slowdownPerApple: 0.1,
   minimumCarryMultiplier: 0.55,
   maxCarriedApples: 3,
   pickupRadius: 1.15,
   pickingTicks: 24,
+  pickupRejectTicks: 30,
   kidHitStunTicks: 18,
   kidHitKnockback: 0.72,
   invincibleTicks: 72,

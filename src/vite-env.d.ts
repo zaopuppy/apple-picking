@@ -30,6 +30,11 @@ declare global {
       sensors: number;
       ccdBodies: number;
     };
+    movement: {
+      baseSpeed: number;
+      guardSpeedMultiplier: number;
+      kidSpeedMultiplier: number;
+    };
     audio: {
       externalEnabled: boolean;
       unlocked: boolean;
@@ -74,6 +79,7 @@ declare global {
         postureLean: number;
         breathScaleY: number;
         animationPaused: boolean | null;
+        headShakeAngle: number;
       } | null;
       lastFailure: string | null;
       lastFailures: {

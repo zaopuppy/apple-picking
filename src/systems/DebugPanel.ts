@@ -1,7 +1,7 @@
 import GUI from 'lil-gui';
+import type { MovementTuning } from '../game/config';
 
-export type DebugTuning = {
-  portraitCameraAngle: number;
+export type DebugTuning = MovementTuning & {
   landscapeCameraAngle: number;
   cameraZoom: number;
   hemisphereIntensity: number;
@@ -11,6 +11,7 @@ export type DebugTuning = {
 
 type DebugPanelCallbacks = {
   cameraChanged(): void;
+  movementChanged(): void;
   lightingChanged(): void;
   motionChanged(): void;
   reset(): void;
@@ -23,15 +24,23 @@ export class DebugPanel {
     this.gui.domElement.dataset.testid = 'debug-panel';
 
     const camera = this.gui.addFolder('镜头');
-    camera.add(tuning, 'portraitCameraAngle', 25, 50, 1)
-      .name('竖屏倾角（度）')
-      .onChange(callbacks.cameraChanged);
     camera.add(tuning, 'landscapeCameraAngle', 25, 50, 1)
       .name('横屏倾角（度）')
       .onChange(callbacks.cameraChanged);
     camera.add(tuning, 'cameraZoom', 0.8, 1.25, 0.01)
       .name('画面缩放')
       .onChange(callbacks.cameraChanged);
+
+    const movement = this.gui.addFolder('移动速度');
+    movement.add(tuning, 'baseSpeed', 1, 10, 0.1)
+      .name('基准速度')
+      .onChange(callbacks.movementChanged);
+    movement.add(tuning, 'guardSpeedMultiplier', 0.5, 2, 0.05)
+      .name('Guard 速度系数')
+      .onChange(callbacks.movementChanged);
+    movement.add(tuning, 'kidSpeedMultiplier', 0.5, 2, 0.05)
+      .name('Kid 速度系数')
+      .onChange(callbacks.movementChanged);
 
     const lighting = this.gui.addFolder('光照');
     lighting.add(tuning, 'hemisphereIntensity', 0.5, 4, 0.05)

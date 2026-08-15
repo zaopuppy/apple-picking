@@ -274,13 +274,15 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
     expect(layout.camera?.positionX).toBeGreaterThan(23);
     expect(layout.camera?.positionY).toBeCloseTo(34, 5);
     expect(layout.camera?.positionZ).toBeCloseTo(0, 5);
+    expect(layout.camera?.zoom).toBeCloseTo(1.2, 5);
   } else {
     expect(layout.camera?.portraitLayout).toBe(false);
     expect(layout.camera?.viewHeight).toBeCloseTo(18.5, 5);
     expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
     expect(layout.camera?.positionX).toBeCloseTo(0, 5);
-    expect(layout.camera?.positionZ).toBeGreaterThan(19.5);
-    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(40, 5);
+    expect(layout.camera?.positionZ).toBeGreaterThan(27.5);
+    expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(50, 5);
+    expect(layout.camera?.zoom).toBeCloseTo(1.2, 5);
   }
 });
 
@@ -291,6 +293,38 @@ test('development tuning panel is live and can be hidden by the visual test hook
 
   const panel = page.locator('[data-testid="debug-panel"]');
   await expect(panel).toBeVisible();
+  await expect(panel.getByText('竖屏倾角（度）')).toHaveCount(0);
+  await expect(panel.getByText('横屏倾角（度）')).toBeVisible();
+  await expect(panel.getByText('基准速度')).toBeVisible();
+  await expect(panel.getByText('Guard 速度系数')).toBeVisible();
+  await expect(panel.getByText('Kid 速度系数')).toBeVisible();
+
+  const baseSpeed = panel.getByRole('textbox', { name: '基准速度' });
+  const guardMultiplier = panel.getByRole('textbox', { name: 'Guard 速度系数' });
+  const kidMultiplier = panel.getByRole('textbox', { name: 'Kid 速度系数' });
+  await baseSpeed.fill('6');
+  await guardMultiplier.fill('0.5');
+  await kidMultiplier.fill('1.5');
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.movement))
+    .toEqual({ baseSpeed: 6, guardSpeedMultiplier: 0.5, kidSpeedMultiplier: 1.5 });
+
+  const movement = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+    hooks.setPausedForScreenshot(true);
+    hooks.scenario('active-play');
+    const before = hooks.getSnapshot();
+    const after = hooks.step({
+      guard1: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+      kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+    });
+    return {
+      guardDistance: after.guards[0].position.x - before.guards[0].position.x,
+      kidDistance: after.kid.position.x - before.kid.position.x,
+    };
+  });
+  expect(movement.guardDistance).toBeCloseTo(3 / 60, 5);
+  expect(movement.kidDistance).toBeCloseTo(9 / 60, 5);
+
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true));
   await expect(panel).toBeHidden();
 });
@@ -305,6 +339,24 @@ test('right shift delivers exactly one apple through the real input path', async
   await page.keyboard.press('ShiftRight');
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.delivered ?? -1)).toBe(1);
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.kid.carriedAppleIds.length ?? -1)).toBe(1);
+});
+
+test('right control triggers the full-basket head shake through real input', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Keyboard pickup rejection is covered once on desktop Chrome.');
+  await page.goto('/?audio=procedural&trees=procedural');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.kidMode))
+    .toBe('imported');
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('carry-limit'));
+
+  await page.keyboard.press('ControlRight');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.kid.state))
+    .toBe('Rejecting');
+  await expect
+    .poll(async () => page.evaluate(() =>
+      Math.abs(window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails?.headShakeAngle ?? 0)))
+    .toBeGreaterThan(0.05);
 });
 
 test('CC0 event samples load after audio unlock and retain the procedural fallback', async ({ page }, testInfo) => {
@@ -487,6 +539,20 @@ test('KayKit Knight guards and Rogue kid load once and map key states independen
   const loadDetails = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails);
   expect(loadDetails?.backpackScaleZ).toBeGreaterThan(1.25);
   expect(loadDetails?.postureLean).toBeGreaterThan(0.15);
+
+  const rejection = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+    hooks.scenario('carry-limit');
+    const snapshot = hooks.step({
+      kid: { moveX: 0, moveZ: 0, actionPressed: true, dropPressed: false },
+    }, 3);
+    return {
+      snapshot,
+      headShakeAngle: window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails?.headShakeAngle ?? 0,
+    };
+  });
+  expect(rejection.snapshot.kid.state).toBe('Rejecting');
+  expect(Math.abs(rejection.headShakeAngle)).toBeGreaterThan(0.08);
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(false));
 
   const stateAnimations = [
