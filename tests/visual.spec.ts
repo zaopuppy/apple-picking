@@ -67,10 +67,14 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   const sample = await sampleCanvas(page);
   expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
 
+  const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
+  expect(renderer?.calls).toBeLessThanOrEqual(150);
+  expect(renderer?.triangles).toBeLessThanOrEqual(100_000);
+
   const before = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.guards[0].position.z ?? 0);
-  await page.keyboard.down('KeyW');
+  await page.keyboard.down('KeyE');
   await page.waitForTimeout(450);
-  await page.keyboard.up('KeyW');
+  await page.keyboard.up('KeyE');
 
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.guards[0].position.z ?? 0))
@@ -192,4 +196,42 @@ test('right shift delivers exactly one apple through the real input path', async
   await page.keyboard.press('ShiftRight');
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.delivered ?? -1)).toBe(1);
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.kid.carriedAppleIds.length ?? -1)).toBe(1);
+});
+
+test('character state presentation stays readable across key gameplay moments', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'The presentation state matrix only needs one browser target.');
+  await page.goto('/');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
+
+  const scenarios = [
+    { name: 'heavy-carry', kidState: 'Normal', carried: 6 },
+    { name: 'guard-pounce', guardState: 'Pounce' },
+    { name: 'guard-stunned', guardState: 'Stunned' },
+    { name: 'delivery-progress', carried: 2, delivered: 3 },
+    { name: 'captured', kidState: 'Invincible' },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    await page.evaluate((name) => window.__THREE_GAME_TEST_HOOKS__?.scenario(name), scenario.name);
+    await page.waitForTimeout(34);
+
+    const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
+    expect(diagnostics, scenario.name).toBeDefined();
+    if ('kidState' in scenario) expect(diagnostics?.kid.state).toBe(scenario.kidState);
+    if ('guardState' in scenario) expect(diagnostics?.guards[0].state).toBe(scenario.guardState);
+    if ('carried' in scenario) expect(diagnostics?.kid.carriedAppleIds.length).toBe(scenario.carried);
+    if ('delivered' in scenario) expect(diagnostics?.delivered).toBe(scenario.delivered);
+
+    const sample = await sampleCanvas(page);
+    expect(sample, `${scenario.name}: ${JSON.stringify(sample)}`).toMatchObject({ ok: true });
+  }
+
+  await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.setReducedMotion(true);
+    window.__THREE_GAME_TEST_HOOKS__?.scenario('heavy-carry');
+  });
+  await page.waitForTimeout(34);
+  const reducedMotionSample = await sampleCanvas(page);
+  expect(reducedMotionSample, JSON.stringify(reducedMotionSample)).toMatchObject({ ok: true });
 });

@@ -68,7 +68,7 @@ export class Game {
     this.frame += 1;
     this.fps = fps;
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
-    this.renderTime = this.reducedMotion ? 0 : elapsed;
+    this.renderTime = elapsed;
     if (this.pausedForScreenshot) {
       this.syncPresentation();
       this.publishDiagnostics();
@@ -88,7 +88,9 @@ export class Game {
   }
 
   private handleStep(step: SimulationStep): void {
+    const presentationTime = this.reducedMotion ? step.snapshot.elapsedSeconds : this.renderTime;
     for (const event of step.events) {
+      this.view.handleEvent(event, step.snapshot, presentationTime);
       this.hud.announce(event);
       this.audio.play(event);
     }
@@ -96,7 +98,8 @@ export class Game {
 
   private syncPresentation(): void {
     const snapshot = this.simulation.getSnapshot();
-    this.view.sync(snapshot, this.renderTime, this.reducedMotion);
+    const presentationTime = this.reducedMotion ? snapshot.elapsedSeconds : this.renderTime;
+    this.view.sync(snapshot, presentationTime, this.reducedMotion);
     this.hud.update(snapshot, this.fps);
   }
 

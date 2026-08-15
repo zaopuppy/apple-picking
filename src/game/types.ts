@@ -30,6 +30,7 @@ export type GuardSnapshot = {
   stateTicks: number;
   cooldownTicks: number;
   pounceReady: boolean;
+  movementAmount: number;
 };
 
 export type KidSnapshot = {
@@ -41,6 +42,7 @@ export type KidSnapshot = {
   pickingTargetId: number | null;
   pickingProgress: number;
   speed: number;
+  movementAmount: number;
 };
 
 export type AppleSnapshot = {
@@ -74,7 +76,7 @@ export type GameEvent =
   | { type: 'picked'; appleId: number }
   | { type: 'dropped'; appleId: number; reason: 'manual' | 'capture' }
   | { type: 'captured'; catches: number }
-  | { type: 'delivered'; count: number; total: number }
+  | { type: 'delivered'; appleId: number; count: number; total: number }
   | { type: 'match-ended'; winner: 'kid' | 'guards' };
 
 export type SimulationStep = {

@@ -214,6 +214,38 @@ export class GameSimulation {
         this.kid.previousPosition = copy(this.kid.position);
         this.giveKidApples([0, 1, 2]);
         return;
+      case 'heavy-carry':
+        this.moveGuardsAway();
+        this.kid.position = { x: 0, z: 0 };
+        this.kid.facing = { x: 1, z: 0 };
+        this.giveKidApples([0, 1, 2, 3, 4, 5]);
+        this.kid.previousPosition = {
+          x: this.kid.position.x - this.currentKidSpeed() / TICKS_PER_SECOND,
+          z: this.kid.position.z,
+        };
+        return;
+      case 'guard-pounce':
+        this.moveGuardsAway();
+        this.guards[0].position = { x: -1.4, z: 0 };
+        this.guards[0].previousPosition = { x: -1.4, z: GAME_CONFIG.pounceSpeed / TICKS_PER_SECOND };
+        this.guards[0].facing = { x: 0, z: -1 };
+        this.guards[0].state = 'Pounce';
+        this.guards[0].stateTicks = Math.ceil(GAME_CONFIG.pounceTicks / 2);
+        this.kid.position = { x: 1.2, z: -0.7 };
+        this.kid.previousPosition = copy(this.kid.position);
+        return;
+      case 'guard-stunned':
+        this.guards[0].position = { x: -0.45, z: 0 };
+        this.guards[0].previousPosition = copy(this.guards[0].position);
+        this.guards[0].state = 'Stunned';
+        this.guards[0].stateTicks = Math.ceil(GAME_CONFIG.stunTicks / 2);
+        this.guards[1].position = { x: 0.45, z: 0 };
+        this.guards[1].previousPosition = copy(this.guards[1].position);
+        this.guards[1].state = 'Stunned';
+        this.guards[1].stateTicks = Math.ceil(GAME_CONFIG.stunTicks / 2);
+        this.kid.position = { x: 0, z: 3.2 };
+        this.kid.previousPosition = copy(this.kid.position);
+        return;
       case 'guard-on-apple':
         this.moveGuardsAway();
         this.guards[0].position = copy(this.apples[0].position);
@@ -224,6 +256,22 @@ export class GameSimulation {
         this.kid.position = copy(DELIVERY_ZONE);
         this.kid.previousPosition = copy(this.kid.position);
         this.giveKidApples([0, 1]);
+        return;
+      case 'delivery-progress':
+        this.moveGuardsAway();
+        this.apples[0].state = 'Delivered';
+        this.apples[1].state = 'Delivered';
+        this.apples[2].state = 'Delivered';
+        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.giveKidApples([3, 4]);
+        return;
+      case 'captured':
+        this.moveGuardsAway();
+        this.kid.position = { x: 0, z: 0 };
+        this.kid.previousPosition = copy(this.kid.position);
+        this.kid.state = 'Invincible';
+        this.kid.stateTicks = Math.ceil(GAME_CONFIG.invincibleTicks / 2);
         return;
       case 'capture-priority':
         this.catches = GAME_CONFIG.catchTarget - 1;
@@ -478,7 +526,7 @@ export class GameSimulation {
     if (appleId === undefined) return;
     this.apples[appleId].state = 'Delivered';
     const total = this.apples.filter((apple) => apple.state === 'Delivered').length;
-    this.events.push({ type: 'delivered', count: 1, total });
+    this.events.push({ type: 'delivered', appleId, count: 1, total });
     if (total === this.apples.length) {
       this.matchState = 'KidWin';
       this.events.push({ type: 'match-ended', winner: 'kid' });
@@ -500,6 +548,7 @@ export class GameSimulation {
   }
 
   private guardSnapshot(guard: GuardModel): GuardSnapshot {
+    const moved = Math.sqrt(distanceSquared(guard.position, guard.previousPosition));
     return {
       id: guard.id,
       position: copy(guard.position),
@@ -508,6 +557,7 @@ export class GameSimulation {
       stateTicks: guard.stateTicks,
       cooldownTicks: guard.cooldownTicks,
       pounceReady: guard.state === 'Move' && guard.cooldownTicks === 0,
+      movementAmount: clamp(moved * TICKS_PER_SECOND / GAME_CONFIG.guardSpeed, 0, 1),
     };
   }
 
@@ -515,6 +565,8 @@ export class GameSimulation {
     const progress = this.kid.state === 'Picking'
       ? 1 - this.kid.stateTicks / GAME_CONFIG.pickingTicks
       : 0;
+    const speed = this.currentKidSpeed();
+    const moved = Math.sqrt(distanceSquared(this.kid.position, this.kid.previousPosition));
     return {
       position: copy(this.kid.position),
       facing: copy(this.kid.facing),
@@ -523,7 +575,8 @@ export class GameSimulation {
       carriedAppleIds: [...this.kid.carriedAppleIds],
       pickingTargetId: this.kid.pickingTargetId,
       pickingProgress: clamp(progress, 0, 1),
-      speed: this.currentKidSpeed(),
+      speed,
+      movementAmount: clamp(moved * TICKS_PER_SECOND / Math.max(speed, 0.001), 0, 1),
     };
   }
 

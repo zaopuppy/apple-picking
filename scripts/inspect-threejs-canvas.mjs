@@ -252,6 +252,7 @@ async function main() {
       if (!hooks) return false;
       if (typeof seed === 'number') hooks.seed?.(seed);
       if (state) hooks.setState?.(state);
+      if (state) hooks.setPausedForScreenshot?.(true);
       return true;
     }, { seed: args.seed, state: args.state });
     if (!applied) {

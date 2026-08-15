@@ -1,16 +1,16 @@
 import type { ActorCommand, GameCommands } from '../game/types';
 
 const GAME_KEYS = new Set([
-  'KeyW',
   'KeyA',
   'KeyS',
   'KeyD',
-  'KeyQ',
+  'KeyE',
+  'KeyF',
   'KeyI',
   'KeyJ',
   'KeyK',
   'KeyL',
-  'KeyP',
+  'Semicolon',
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',
@@ -53,8 +53,8 @@ export class InputRouter {
 
   consumeCommands(): GameCommands {
     const commands: GameCommands = {
-      guard1: this.readActor(['KeyA', 'KeyD', 'KeyW', 'KeyS'], 'KeyQ'),
-      guard2: this.readActor(['KeyJ', 'KeyL', 'KeyI', 'KeyK'], 'KeyP'),
+      guard1: this.readActor(['KeyS', 'KeyF', 'KeyE', 'KeyD'], 'KeyA'),
+      guard2: this.readActor(['KeyJ', 'KeyL', 'KeyI', 'KeyK'], 'Semicolon'),
       kid: this.readActor(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'], 'ControlRight', 'ShiftRight'),
       restartPressed: this.pressed.has('KeyR'),
     };
@@ -64,7 +64,7 @@ export class InputRouter {
 
   readHeldCommands(): GameCommands {
     return {
-      guard1: this.readActor(['KeyA', 'KeyD', 'KeyW', 'KeyS'], ''),
+      guard1: this.readActor(['KeyS', 'KeyF', 'KeyE', 'KeyD'], ''),
       guard2: this.readActor(['KeyJ', 'KeyL', 'KeyI', 'KeyK'], ''),
       kid: this.readActor(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'], ''),
       restartPressed: false,
