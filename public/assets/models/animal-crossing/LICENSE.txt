@@ -1,0 +1,11 @@
+FREE DOWNLOAD Low poly nature pack
+
+Author: Gostbento
+Author page: https://sketchfab.com/gostbento
+Source: https://sketchfab.com/3d-models/free-download-low-poly-nature-pack-cb45d4926fcb4807bc93126b59325cf8
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License text: https://creativecommons.org/licenses/by/4.0/
+
+The author, source, title, and license above are embedded in the original GLB's
+glTF asset metadata. The project copies the GLB unchanged and extracts selected
+tree and apple meshes at runtime.

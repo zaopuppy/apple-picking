@@ -48,10 +48,17 @@ declare global {
     };
     environment: {
       treeMode: 'loading' | 'imported' | 'procedural';
+      fruitMode: 'loading' | 'imported' | 'procedural';
       externalRequested: boolean;
       treeVariants: number;
       treeInstances: number;
       treeTriangles: number;
+      fruitInstances: number;
+      fruitTriangles: number;
+      mapId: string;
+      mapName: string;
+      paths: number;
+      clearings: number;
       lastFailure: string | null;
     };
     characters: {

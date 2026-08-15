@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import {
-  loadForestTreeVisuals,
-  type TreePlacement,
-} from '../assets/ForestTreeAssets';
-import { APPLE_SPAWNS, DELIVERY_ZONE, GAME_CONFIG, OBSTACLES } from '../game/config';
+  createNaturePackAppleVisual,
+  loadNaturePackTreeVisuals,
+} from '../assets/NaturePackAssets';
+import { GAME_CONFIG } from '../game/config';
+import type { OrchardMap, OrchardTree, TreeVariant } from '../game/maps/OrchardMap';
 import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../game/types';
 import { VfxSystem } from '../systems/VfxSystem';
 import { disposeObject3D } from '../utils/dispose';
@@ -35,9 +36,9 @@ type AppleTransition = {
 
 type AppleView = {
   root: THREE.Group;
-  body: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-  stem: THREE.Mesh;
-  leaf: THREE.Mesh;
+  procedural: THREE.Group;
+  imported: THREE.Group | null;
+  materials: THREE.MeshStandardMaterial[];
   targetRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   baseRotation: number;
   transition: AppleTransition | null;
@@ -47,10 +48,17 @@ const FIELD_GROUND_SIZE = 44;
 
 export type EnvironmentAssetDiagnostics = {
   treeMode: 'loading' | 'imported' | 'procedural';
+  fruitMode: 'loading' | 'imported' | 'procedural';
   externalRequested: boolean;
   treeVariants: number;
   treeInstances: number;
   treeTriangles: number;
+  fruitInstances: number;
+  fruitTriangles: number;
+  mapId: string;
+  mapName: string;
+  paths: number;
+  clearings: number;
   lastFailure: string | null;
 };
 
@@ -96,10 +104,17 @@ export class ArenaView {
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
     treeMode: 'procedural',
+    fruitMode: 'procedural',
     externalRequested: false,
     treeVariants: 0,
-    treeInstances: OBSTACLES.length * 3,
+    treeInstances: 0,
     treeTriangles: 0,
+    fruitInstances: 0,
+    fruitTriangles: 0,
+    mapId: '',
+    mapName: '',
+    paths: 0,
+    clearings: 0,
     lastFailure: null,
   };
   private characterDiagnostics: CharacterAssetDiagnostics = {
@@ -121,12 +136,22 @@ export class ArenaView {
     lastFailure: null,
     lastFailures: { guard1: null, guard2: null, kid: null },
   };
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, private readonly map: OrchardMap) {
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      treeInstances: map.trees.length,
+      fruitInstances: map.appleSpawns.length,
+      mapId: map.id,
+      mapName: map.name,
+      paths: map.paths.length,
+      clearings: map.clearings.length,
+    };
     this.createWorld();
     void this.installImportedGuard('guard1');
     void this.installImportedGuard('guard2');
     void this.installImportedKid();
-    for (let id = 0; id < APPLE_SPAWNS.length; id += 1) this.createApple(id);
+    for (let id = 0; id < map.appleSpawns.length; id += 1) this.createApple(id);
+    void this.installImportedApples();
 
     this.pickingRing = new THREE.Mesh(
       new THREE.RingGeometry(0.62, 0.75, 28),
@@ -197,7 +222,11 @@ export class ArenaView {
         const apple = snapshot.apples.find((candidate) => candidate.id === event.appleId);
         this.vfx.emit(
           'delivery',
-          new THREE.Vector3(apple?.position.x ?? DELIVERY_ZONE.x, 0.12, apple?.position.z ?? DELIVERY_ZONE.z),
+          new THREE.Vector3(
+            apple?.position.x ?? this.map.deliveryZone.x,
+            0.12,
+            apple?.position.z ?? this.map.deliveryZone.z,
+          ),
           time + 0.34,
           event.total,
         );
@@ -320,8 +349,9 @@ export class ArenaView {
     this.root.add(floor);
 
     this.createFurrows();
+    this.createGroundPaths();
     this.createFence();
-    this.createTreeRows();
+    this.createForest();
     this.createDeliveryZone();
   }
 
@@ -388,83 +418,102 @@ export class ArenaView {
     this.root.add(fence);
   }
 
-  private createTreeRows(): void {
-    const treeCount = OBSTACLES.length * 3;
-    const patches = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      this.materials.soilDark,
-      OBSTACLES.length,
+  private createGroundPaths(): void {
+    const pathSegments = this.map.paths.reduce(
+      (total, path) => total + Math.max(0, path.points.length - 1),
+      0,
     );
+    const pathMaterial = this.materials.soil.clone();
+    pathMaterial.color.set('#a48058');
+    pathMaterial.roughness = 1;
+    const segments = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 1),
+      pathMaterial,
+      pathSegments,
+    );
+    segments.name = 'orchard-ground-path-segments';
+    segments.receiveShadow = true;
+    let segmentIndex = 0;
+    for (const path of this.map.paths) {
+      for (let index = 1; index < path.points.length; index += 1) {
+        const start = path.points[index - 1];
+        const end = path.points[index];
+        const deltaX = end.x - start.x;
+        const deltaZ = end.z - start.z;
+        const length = Math.hypot(deltaX, deltaZ);
+        this.setInstance(
+          segments,
+          segmentIndex,
+          new THREE.Vector3((start.x + end.x) / 2, 0.014, (start.z + end.z) / 2),
+          new THREE.Vector3(length, path.width, 1),
+          new THREE.Euler(-Math.PI / 2, 0, -Math.atan2(deltaZ, deltaX)),
+        );
+        segmentIndex += 1;
+      }
+    }
+    segments.instanceMatrix.needsUpdate = true;
+
+    const clearingMaterial = pathMaterial.clone();
+    clearingMaterial.color.set('#ad8c62');
+    const clearings = new THREE.InstancedMesh(
+      new THREE.CircleGeometry(1, 28),
+      clearingMaterial,
+      this.map.clearings.length,
+    );
+    clearings.name = 'orchard-ground-clearings';
+    clearings.receiveShadow = true;
+    this.map.clearings.forEach((clearing, index) => {
+      this.setInstance(
+        clearings,
+        index,
+        new THREE.Vector3(clearing.x, 0.016, clearing.z),
+        new THREE.Vector3(clearing.radius, clearing.radius, 1),
+        new THREE.Euler(-Math.PI / 2, 0, 0),
+      );
+    });
+    clearings.instanceMatrix.needsUpdate = true;
+    this.root.add(segments, clearings);
+  }
+
+  private createForest(): void {
+    const treeCount = this.map.trees.length;
     const trunks = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.18, 0.23, 1, 7),
+      new THREE.CylinderGeometry(0.16, 0.22, 1, 7),
       this.materials.wood,
-      treeCount * 2,
+      treeCount,
     );
     const crowns = new THREE.InstancedMesh(
-      new THREE.DodecahedronGeometry(0.72, 0),
+      new THREE.DodecahedronGeometry(0.78, 0),
       this.materials.leaf,
-      treeCount * 2,
+      treeCount,
     );
     trunks.castShadow = true;
     crowns.castShadow = true;
-
-    let treeIndex = 0;
-    let crownIndex = 0;
-    OBSTACLES.forEach((obstacle, rowIndex) => {
+    this.map.trees.forEach((tree, index) => {
+      const trunkHeight = tree.variant === 'pine' ? 1.45 : 1.25;
+      const crownScale = proceduralCrownScale(tree.variant, tree.scale);
       this.setInstance(
-        patches,
-        rowIndex,
-        new THREE.Vector3(obstacle.x, 0.06, obstacle.z),
-        new THREE.Vector3(obstacle.halfWidth * 2, 0.12, 1.35),
+        trunks,
+        index,
+        new THREE.Vector3(tree.x, trunkHeight * tree.scale / 2, tree.z),
+        new THREE.Vector3(tree.scale, trunkHeight * tree.scale, tree.scale),
+        new THREE.Euler(0, tree.rotationY, 0),
       );
-      for (let index = 0; index < 3; index += 1) {
-        const offset = (index - 1) * obstacle.halfWidth * 0.72;
-        const x = obstacle.x + offset;
-        const phase = rowIndex * 3 + index;
-        this.setInstance(
-          trunks,
-          treeIndex * 2,
-          new THREE.Vector3(x, 0.62, obstacle.z),
-          new THREE.Vector3(1, 1.14 + (phase % 2) * 0.08, 1),
-        );
-        this.setInstance(
-          trunks,
-          treeIndex * 2 + 1,
-          new THREE.Vector3(x + 0.13, 1.12, obstacle.z + 0.02),
-          new THREE.Vector3(0.62, 0.48, 0.62),
-          new THREE.Euler(0, 0, phase % 2 === 0 ? -0.52 : 0.52),
-        );
-
-        const primaryColor = new THREE.Color(rowIndex % 2 === 0 ? ORCHARD_COLORS.leaf : ORCHARD_COLORS.leafLight);
-        const secondaryColor = primaryColor.clone().offsetHSL(0.015, -0.02, 0.06);
-        this.setInstance(
-          crowns,
-          crownIndex,
-          new THREE.Vector3(x - 0.18, 1.58 + (phase % 2) * 0.05, obstacle.z),
-          new THREE.Vector3(0.9, 0.82, 0.88),
-          new THREE.Euler(0.12, phase * 0.58, 0.08),
-        );
-        crowns.setColorAt(crownIndex, primaryColor);
-        crownIndex += 1;
-        this.setInstance(
-          crowns,
-          crownIndex,
-          new THREE.Vector3(x + 0.28, 1.64, obstacle.z - 0.04),
-          new THREE.Vector3(0.72, 0.68, 0.76),
-          new THREE.Euler(-0.08, phase * 0.41, -0.1),
-        );
-        crowns.setColorAt(crownIndex, secondaryColor);
-        crownIndex += 1;
-        treeIndex += 1;
-      }
+      this.setInstance(
+        crowns,
+        index,
+        new THREE.Vector3(tree.x, (tree.variant === 'pine' ? 1.85 : 1.72) * tree.scale, tree.z),
+        crownScale,
+        new THREE.Euler(0.08, tree.rotationY, -0.06),
+      );
+      crowns.setColorAt(index, proceduralTreeColor(tree.variant));
     });
-    patches.instanceMatrix.needsUpdate = true;
     trunks.instanceMatrix.needsUpdate = true;
     crowns.instanceMatrix.needsUpdate = true;
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
     this.proceduralTreeVisuals.name = 'procedural-orchard-trees';
     this.proceduralTreeVisuals.add(trunks, crowns);
-    this.root.add(patches, this.proceduralTreeVisuals);
+    this.root.add(this.proceduralTreeVisuals);
 
     if (new URLSearchParams(window.location.search).get('trees') === 'procedural') return;
     this.environmentDiagnostics = {
@@ -472,27 +521,12 @@ export class ArenaView {
       treeMode: 'loading',
       externalRequested: true,
     };
-    void this.installImportedTrees(this.createTreePlacements());
+    void this.installImportedTrees(this.map.trees);
   }
 
-  private createTreePlacements(): TreePlacement[] {
-    const placements: TreePlacement[] = [];
-    OBSTACLES.forEach((obstacle, rowIndex) => {
-      for (let index = 0; index < 3; index += 1) {
-        placements.push({
-          variant: index,
-          x: obstacle.x + (index - 1) * obstacle.halfWidth * 0.72,
-          z: obstacle.z,
-          rotationY: rowIndex * 0.74 + index * 1.91,
-        });
-      }
-    });
-    return placements;
-  }
-
-  private async installImportedTrees(placements: readonly TreePlacement[]): Promise<void> {
+  private async installImportedTrees(placements: readonly OrchardTree[]): Promise<void> {
     try {
-      const imported = await loadForestTreeVisuals(placements);
+      const imported = await loadNaturePackTreeVisuals(placements);
       if (this.disposed) {
         disposeObject3D(imported.root);
         return;
@@ -500,8 +534,8 @@ export class ArenaView {
       this.proceduralTreeVisuals.visible = false;
       this.root.add(imported.root);
       this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
         treeMode: 'imported',
-        externalRequested: true,
         treeVariants: imported.variants,
         treeInstances: imported.instances,
         treeTriangles: imported.triangles,
@@ -511,6 +545,42 @@ export class ArenaView {
       this.environmentDiagnostics = {
         ...this.environmentDiagnostics,
         treeMode: 'procedural',
+        lastFailure: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async installImportedApples(): Promise<void> {
+    if (new URLSearchParams(window.location.search).get('fruit') === 'procedural') return;
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      fruitMode: 'loading',
+      externalRequested: true,
+    };
+    try {
+      let triangles = 0;
+      for (const view of this.appleViews.values()) {
+        const imported = await createNaturePackAppleVisual();
+        if (this.disposed) {
+          disposeObject3D(imported.root);
+          return;
+        }
+        view.procedural.visible = false;
+        view.imported = imported.root;
+        view.materials = imported.materials;
+        view.root.add(imported.root);
+        triangles += imported.triangles;
+      }
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        fruitMode: 'imported',
+        fruitTriangles: triangles,
+        lastFailure: null,
+      };
+    } catch (error) {
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        fruitMode: 'procedural',
         lastFailure: error instanceof Error ? error.message : String(error),
       };
     }
@@ -609,13 +679,15 @@ export class ArenaView {
     );
     fill.rotation.x = -Math.PI / 2;
     outline.rotation.x = -Math.PI / 2;
-    fill.position.set(DELIVERY_ZONE.x, 0.021, DELIVERY_ZONE.z);
-    outline.position.set(DELIVERY_ZONE.x, 0.026, DELIVERY_ZONE.z);
+    fill.position.set(this.map.deliveryZone.x, 0.021, this.map.deliveryZone.z);
+    outline.position.set(this.map.deliveryZone.x, 0.026, this.map.deliveryZone.z);
     this.root.add(fill, outline);
   }
 
   private createApple(id: number): void {
     const root = new THREE.Group();
+    const procedural = new THREE.Group();
+    procedural.name = `procedural-apple-${id}`;
     const body = new THREE.Mesh(createAppleGeometry(id % 3, 0.34), createAppleMaterial(id));
     body.position.y = 0.38;
     body.castShadow = true;
@@ -655,12 +727,13 @@ export class ArenaView {
     targetRing.rotation.x = -Math.PI / 2;
     targetRing.position.y = 0.025;
     targetRing.visible = false;
-    root.add(body, stem, leaf, targetRing);
+    procedural.add(body, stem, leaf);
+    root.add(procedural, targetRing);
     this.appleViews.set(id, {
       root,
-      body,
-      stem,
-      leaf,
+      procedural,
+      imported: null,
+      materials: [body.material],
       targetRing,
       baseRotation: id * 1.37,
       transition: null,
@@ -677,9 +750,16 @@ export class ArenaView {
     const view = this.appleViews.get(apple.id);
     if (!view) return;
     view.targetRing.visible = snapshot.kid.pickingTargetId === apple.id && apple.state === 'Ground';
-    view.body.material.transparent = apple.lockTicks > 0;
-    view.body.material.opacity = apple.lockTicks > 0 ? 0.62 : 1;
-    view.body.material.emissiveIntensity = view.targetRing.visible ? 0.22 : apple.state === 'Delivered' ? 0.16 : 0.1;
+    for (const material of view.materials) {
+      material.transparent = apple.lockTicks > 0;
+      material.opacity = apple.lockTicks > 0 ? 0.62 : 1;
+      material.depthWrite = apple.lockTicks === 0;
+      material.emissiveIntensity = view.targetRing.visible
+        ? 0.22
+        : apple.state === 'Delivered'
+          ? 0.16
+          : 0.08;
+    }
     view.root.scale.setScalar(1);
 
     const target = this.appleTarget;
@@ -718,7 +798,10 @@ export class ArenaView {
       const settle = reducedMotion ? 0 : Math.sin(time * 1.7 + apple.id * 0.9) * 0.012;
       view.root.position.y = settle;
       view.root.rotation.set(0, view.baseRotation, 0);
-      view.leaf.rotation.z = view.baseRotation * 0.22 + (reducedMotion ? 0 : Math.sin(time * 1.9 + apple.id) * 0.16);
+      view.procedural.rotation.z = reducedMotion ? 0 : Math.sin(time * 1.9 + apple.id) * 0.025;
+      if (view.imported) {
+        view.imported.rotation.z = reducedMotion ? 0 : Math.sin(time * 1.9 + apple.id) * 0.025;
+      }
     }
   }
 
@@ -747,6 +830,28 @@ export class ArenaView {
     this.matrixDummy.scale.copy(scale);
     this.matrixDummy.updateMatrix();
     mesh.setMatrixAt(index, this.matrixDummy.matrix);
+  }
+}
+
+function proceduralCrownScale(variant: TreeVariant, scale: number): THREE.Vector3 {
+  switch (variant) {
+    case 'broadleaf':
+      return new THREE.Vector3(1.05, 0.9, 1.02).multiplyScalar(scale);
+    case 'pine':
+      return new THREE.Vector3(0.78, 1.22, 0.78).multiplyScalar(scale);
+    case 'cherry':
+      return new THREE.Vector3(1.12, 0.84, 1.08).multiplyScalar(scale);
+  }
+}
+
+function proceduralTreeColor(variant: TreeVariant): THREE.Color {
+  switch (variant) {
+    case 'broadleaf':
+      return new THREE.Color(ORCHARD_COLORS.leaf);
+    case 'pine':
+      return new THREE.Color('#315f3b');
+    case 'cherry':
+      return new THREE.Color('#d790a4');
   }
 }
 

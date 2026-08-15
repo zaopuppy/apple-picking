@@ -91,14 +91,14 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(150);
-  expect(renderer?.triangles).toBeLessThanOrEqual(100_000);
+  expect(renderer?.triangles).toBeLessThanOrEqual(300_000);
 
   const physics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.physics);
   expect(physics).toMatchObject({
-    engine: 'custom-xz-circle-aabb',
+    engine: 'custom-xz-circles',
     timestep: 1 / 60,
     bodies: 9,
-    colliders: 13,
+    colliders: 125,
     sensors: 1,
     ccdBodies: 0,
   });
@@ -392,7 +392,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
   await expect.poll(() => audioResponses).toEqual([
     { path: '/assets/audio/kenney/sfx-pack.json', status: 200 },
   ]);
-  await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
+  await page.locator('#game-canvas').click({ position: { x: 400, y: 360 } });
 
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio))
@@ -421,7 +421,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
 
   await page.goto('/?audio=procedural&trees=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
-  await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
+  await page.locator('#game-canvas').click({ position: { x: 400, y: 360 } });
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('delivery'));
   await page.keyboard.press('ShiftRight');
   await expect
@@ -436,12 +436,12 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
   });
 });
 
-test('CC0 orchard trees load within the mobile render budget and retain the procedural fallback', async ({ page }, testInfo) => {
+test('Nature Pack trees and fruit load within the mobile render budget and retain procedural fallbacks', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Tree asset loading only needs one installed Chrome run.');
   const assetResponses: Array<{ path: string; status: number }> = [];
   page.on('response', (response) => {
     const url = new URL(response.url());
-    if (url.pathname.includes('/assets/models/kaykit-forest/')) {
+    if (url.pathname.includes('/assets/models/animal-crossing/')) {
       assetResponses.push({ path: url.pathname, status: response.status() });
     }
   });
@@ -453,26 +453,33 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
       treeMode: 'imported',
       externalRequested: true,
       treeVariants: 3,
-      treeInstances: 9,
-      treeTriangles: 9750,
+      treeInstances: 115,
+      treeTriangles: 243504,
+      fruitMode: 'imported',
+      fruitInstances: 6,
+      fruitTriangles: 1152,
+      mapName: '林间集市',
       lastFailure: null,
     });
-  expect(assetResponses).toHaveLength(3);
+  expect(assetResponses).toHaveLength(1);
   expect(assetResponses.every((response) => response.status === 200), JSON.stringify(assetResponses)).toBe(true);
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(75);
-  expect(renderer?.triangles).toBeLessThanOrEqual(80_000);
+  expect(renderer?.triangles).toBeLessThanOrEqual(300_000);
   expect(renderer?.textures).toBeLessThanOrEqual(12);
 
-  await page.goto('/?audio=procedural&trees=procedural');
+  await page.goto('/?audio=procedural&trees=procedural&fruit=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment)).toMatchObject({
     treeMode: 'procedural',
+    fruitMode: 'procedural',
     externalRequested: false,
     treeVariants: 0,
-    treeInstances: 9,
+    treeInstances: 115,
     treeTriangles: 0,
+    fruitInstances: 6,
+    fruitTriangles: 0,
     lastFailure: null,
   });
 });

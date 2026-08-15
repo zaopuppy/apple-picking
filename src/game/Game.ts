@@ -6,8 +6,10 @@ import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
 import type { DebugPanel, DebugTuning } from '../systems/DebugPanel';
 import { Hud } from '../systems/Hud';
+import { loadActiveMap } from '../systems/MapStorage';
 import { DEFAULT_MOVEMENT_TUNING, FIXED_DELTA_SECONDS, GAME_CONFIG } from './config';
 import { GameSimulation } from './GameSimulation';
+import type { OrchardMap } from './maps/OrchardMap';
 import {
   commandsWithoutEdges,
   createEmptyCommands,
@@ -31,7 +33,8 @@ export class Game {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-14, 14, 11, -11, 0.1, 100);
   private readonly input = new InputRouter();
-  private readonly simulation = new GameSimulation();
+  private readonly map: OrchardMap;
+  private readonly simulation: GameSimulation;
   private readonly hemisphere = new THREE.HemisphereLight('#fff7db', '#55743d', 2.1);
   private readonly sun = new THREE.DirectionalLight('#fff0bd', 3.1);
   private readonly debugTuning: DebugTuning = { ...DEFAULT_DEBUG_TUNING };
@@ -55,12 +58,16 @@ export class Game {
   private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
+    this.map = loadActiveMap();
+    this.simulation = new GameSimulation(this.map);
     this.renderer = createRenderer(canvas);
     this.scene.background = new THREE.Color('#91ad62');
     this.camera.position.set(0, 23.5, 19.5);
     this.camera.lookAt(0, 0, 0);
     this.createLighting();
-    this.view = new ArenaView(this.scene);
+    this.view = new ArenaView(this.scene, this.map);
+    const mapName = document.querySelector<HTMLElement>('#active-map-name');
+    if (mapName) mapName.textContent = this.map.name;
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
     this.updateCameraComposition();
     this.syncPresentation();
@@ -280,10 +287,10 @@ export class Game {
         delivered: snapshot.apples.filter((apple) => apple.state === 'Delivered').length,
       },
       physics: {
-        engine: 'custom-xz-circle-aabb',
+        engine: 'custom-xz-circles',
         timestep: FIXED_DELTA_SECONDS,
         bodies: 3 + looseAppleCount,
-        colliders: 7 + looseAppleCount,
+        colliders: 4 + this.map.trees.length + looseAppleCount,
         sensors: 1,
         ccdBodies: 0,
       },

@@ -1,17 +1,16 @@
 import { createSeededRandom } from '../utils/random';
 import {
-  APPLE_SPAWNS,
   DEFAULT_MOVEMENT_TUNING,
-  DELIVERY_ZONE,
   GAME_CONFIG,
-  GUARD1_START,
-  GUARD2_START,
-  KID_START,
-  OBSTACLES,
   TICKS_PER_SECOND,
   type MovementTuning,
-  type Obstacle,
 } from './config';
+import { DEFAULT_ORCHARD_MAP } from './maps/MapGenerator';
+import {
+  treeColliderRadius,
+  type OrchardMap,
+  type OrchardTree,
+} from './maps/OrchardMap';
 import {
   createEmptyCommands,
   type ActorCommand,
@@ -80,7 +79,10 @@ export class GameSimulation {
   private dropSerial = 0;
   private readonly movementTuning: MovementTuning;
 
-  constructor(movementTuning: MovementTuning = DEFAULT_MOVEMENT_TUNING) {
+  constructor(
+    private readonly map: OrchardMap = DEFAULT_ORCHARD_MAP,
+    movementTuning: MovementTuning = DEFAULT_MOVEMENT_TUNING,
+  ) {
     this.movementTuning = { ...movementTuning };
     this.restart(false);
   }
@@ -103,19 +105,19 @@ export class GameSimulation {
     this.catches = 0;
     this.dropSerial = 0;
     this.guards = [
-      this.createGuard('guard1', GUARD1_START),
-      this.createGuard('guard2', GUARD2_START),
+      this.createGuard('guard1', this.map.guardStarts[0]),
+      this.createGuard('guard2', this.map.guardStarts[1]),
     ];
     this.kid = {
-      position: copy(KID_START),
-      previousPosition: copy(KID_START),
+      position: copy(this.map.kidStart),
+      previousPosition: copy(this.map.kidStart),
       facing: { x: 1, z: 0 },
       state: 'Normal',
       stateTicks: 0,
       carriedAppleIds: [],
       pickingTargetId: null,
     };
-    this.apples = APPLE_SPAWNS.map((position, id) => ({
+    this.apples = this.map.appleSpawns.map((position, id) => ({
       id,
       state: 'Ground' as const,
       position: copy(position),
@@ -299,14 +301,14 @@ export class GameSimulation {
         return;
       case 'delivery':
         this.moveGuardsAway();
-        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.position = copy(this.map.deliveryZone);
         this.kid.previousPosition = copy(this.kid.position);
         this.giveKidApples([0, 1]);
         return;
       case 'delivery-progress':
         this.moveGuardsAway();
         this.placeDeliveredApples([0, 1, 2]);
-        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.position = copy(this.map.deliveryZone);
         this.kid.previousPosition = copy(this.kid.position);
         this.giveKidApples([3, 4]);
         return;
@@ -314,8 +316,8 @@ export class GameSimulation {
         this.moveGuardsAway();
         this.placeDeliveredApples([0]);
         this.apples[0].position = {
-          x: DELIVERY_ZONE.x + GAME_CONFIG.deliveryRadius - 0.08,
-          z: DELIVERY_ZONE.z,
+          x: this.map.deliveryZone.x + GAME_CONFIG.deliveryRadius - 0.08,
+          z: this.map.deliveryZone.z,
         };
         this.guards[0].position = {
           x: this.apples[0].position.x - 0.7,
@@ -327,7 +329,7 @@ export class GameSimulation {
         this.moveGuardsAway();
         this.placeDeliveredApples([0, 1, 2, 3, 4]);
         this.giveKidApples([5]);
-        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.position = copy(this.map.deliveryZone);
         this.kid.previousPosition = copy(this.kid.position);
         return;
       case 'captured':
@@ -349,10 +351,10 @@ export class GameSimulation {
         this.placeDeliveredApples(this.apples.map((apple) => apple.id));
         this.apples[0].state = 'Carried';
         this.kid.carriedAppleIds = [0];
-        this.kid.position = copy(DELIVERY_ZONE);
+        this.kid.position = copy(this.map.deliveryZone);
         this.kid.previousPosition = copy(this.kid.position);
-        this.guards[0].position = copy(DELIVERY_ZONE);
-        this.guards[0].previousPosition = copy(DELIVERY_ZONE);
+        this.guards[0].position = copy(this.map.deliveryZone);
+        this.guards[0].previousPosition = copy(this.map.deliveryZone);
         this.guards[1].position = { x: -10, z: -7 };
         this.guards[1].previousPosition = copy(this.guards[1].position);
         return;
@@ -532,7 +534,7 @@ export class GameSimulation {
     const deliveryRadiusSquared = GAME_CONFIG.deliveryRadius ** 2;
     for (const apple of this.apples) {
       if (apple.state === 'Carried') continue;
-      const inside = distanceSquared(apple.position, DELIVERY_ZONE) <= deliveryRadiusSquared;
+      const inside = distanceSquared(apple.position, this.map.deliveryZone) <= deliveryRadiusSquared;
       if (inside && apple.state === 'Ground') {
         apple.state = 'Delivered';
         const total = this.deliveredAppleCount();
@@ -560,8 +562,8 @@ export class GameSimulation {
       -GAME_CONFIG.arenaHalfDepth + radius,
       GAME_CONFIG.arenaHalfDepth - radius,
     );
-    for (const obstacle of OBSTACLES) {
-      resolveCircleAgainstObstacle(position, radius, obstacle);
+    for (const tree of this.map.trees) {
+      resolveCircleAgainstTree(position, radius, tree);
     }
     position.x = clamp(
       position.x,
@@ -741,7 +743,7 @@ export class GameSimulation {
   }
 
   private isKidInDeliveryZone(): boolean {
-    return distanceSquared(this.kid.position, DELIVERY_ZONE) <= GAME_CONFIG.deliveryRadius ** 2;
+    return distanceSquared(this.kid.position, this.map.deliveryZone) <= GAME_CONFIG.deliveryRadius ** 2;
   }
 
   private deliverOneApple(): void {
@@ -752,8 +754,8 @@ export class GameSimulation {
     const deliveryIndex = this.deliveredAppleCount();
     const offset = DELIVERY_DROP_OFFSETS[deliveryIndex % DELIVERY_DROP_OFFSETS.length];
     apple.position = {
-      x: DELIVERY_ZONE.x + offset.x,
-      z: DELIVERY_ZONE.z + offset.z,
+      x: this.map.deliveryZone.x + offset.x,
+      z: this.map.deliveryZone.z + offset.z,
     };
     apple.state = 'Delivered';
     apple.lockTicks = 0;
@@ -820,9 +822,9 @@ export class GameSimulation {
   }
 
   private moveGuardsAway(): void {
-    this.guards[0].position = { x: -10.5, z: -7.5 };
+    this.guards[0].position = copy(this.map.guardStarts[0]);
     this.guards[0].previousPosition = copy(this.guards[0].position);
-    this.guards[1].position = { x: 10.5, z: -7.5 };
+    this.guards[1].position = copy(this.map.guardStarts[1]);
     this.guards[1].previousPosition = copy(this.guards[1].position);
   }
 
@@ -840,8 +842,8 @@ export class GameSimulation {
       const offset = DELIVERY_DROP_OFFSETS[index % DELIVERY_DROP_OFFSETS.length];
       apple.state = 'Delivered';
       apple.position = {
-        x: DELIVERY_ZONE.x + offset.x,
-        z: DELIVERY_ZONE.z + offset.z,
+        x: this.map.deliveryZone.x + offset.x,
+        z: this.map.deliveryZone.z + offset.z,
       };
       apple.lockTicks = 0;
     });
@@ -918,34 +920,21 @@ function resolveCirclePair(
   return true;
 }
 
-function resolveCircleAgainstObstacle(position: Vec2, radius: number, obstacle: Obstacle): void {
-  const minX = obstacle.x - obstacle.halfWidth;
-  const maxX = obstacle.x + obstacle.halfWidth;
-  const minZ = obstacle.z - obstacle.halfDepth;
-  const maxZ = obstacle.z + obstacle.halfDepth;
-  const closestX = clamp(position.x, minX, maxX);
-  const closestZ = clamp(position.z, minZ, maxZ);
-  const deltaX = position.x - closestX;
-  const deltaZ = position.z - closestZ;
+function resolveCircleAgainstTree(position: Vec2, radius: number, tree: OrchardTree): void {
+  const deltaX = position.x - tree.x;
+  const deltaZ = position.z - tree.z;
+  const minimumDistance = radius + treeColliderRadius(tree);
   const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
-  if (distanceSq >= radius * radius) return;
+  if (distanceSq >= minimumDistance * minimumDistance) return;
 
   if (distanceSq > 0.000001) {
     const distance = Math.sqrt(distanceSq);
-    const push = radius - distance;
+    const push = minimumDistance - distance;
     position.x += deltaX / distance * push;
     position.z += deltaZ / distance * push;
     return;
   }
-
-  const distances = [
-    { axis: 'x' as const, value: Math.abs(position.x - minX), target: minX - radius },
-    { axis: 'x' as const, value: Math.abs(maxX - position.x), target: maxX + radius },
-    { axis: 'z' as const, value: Math.abs(position.z - minZ), target: minZ - radius },
-    { axis: 'z' as const, value: Math.abs(maxZ - position.z), target: maxZ + radius },
-  ].sort((a, b) => a.value - b.value);
-  const nearest = distances[0];
-  position[nearest.axis] = nearest.target;
+  position.x = tree.x + minimumDistance;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
