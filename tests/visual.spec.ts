@@ -277,6 +277,70 @@ test('right shift delivers exactly one apple through the real input path', async
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.kid.carriedAppleIds.length ?? -1)).toBe(1);
 });
 
+test('CC0 event samples load after audio unlock and retain the procedural fallback', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Audio loading only needs one installed Chrome run.');
+  const audioResponses: Array<{ path: string; status: number; accept: string | undefined }> = [];
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.includes('/assets/audio/kenney/')) {
+      audioResponses.push({
+        path: url.pathname,
+        status: response.status(),
+        accept: response.request().headers().accept,
+      });
+    }
+  });
+  await page.goto('/');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+  await expect.poll(() => new Set(audioResponses.map((response) => response.path)).size).toBe(10);
+  expect(
+    audioResponses.every((response) => response.status === 200),
+    JSON.stringify(audioResponses),
+  ).toBe(true);
+  await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio))
+    .toMatchObject({
+      unlocked: true,
+      fetchedSamples: 10,
+      decodedSamples: 10,
+      failedSamples: 0,
+      lastFailure: null,
+    });
+  const loadedAudio = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio);
+  expect(loadedAudio).toMatchObject({
+    externalEnabled: true,
+    unlocked: true,
+    sampleFiles: 10,
+    fetchedSamples: 10,
+    decodedSamples: 10,
+    failedSamples: 0,
+  });
+
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('delivery'));
+  await page.keyboard.press('ShiftRight');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio.samplePlays ?? 0))
+    .toBeGreaterThan(0);
+
+  await page.goto('/?audio=procedural');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+  await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('delivery'));
+  await page.keyboard.press('ShiftRight');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio.fallbackPlays ?? 0))
+    .toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio)).toMatchObject({
+    externalEnabled: false,
+    sampleFiles: 10,
+    fetchedSamples: 0,
+    decodedSamples: 0,
+    samplePlays: 0,
+  });
+});
+
 test('character state presentation stays readable across key gameplay moments', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'The presentation state matrix only needs one browser target.');
   await page.goto('/');

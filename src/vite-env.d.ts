@@ -30,6 +30,17 @@ declare global {
       sensors: number;
       ccdBodies: number;
     };
+    audio: {
+      externalEnabled: boolean;
+      unlocked: boolean;
+      sampleFiles: number;
+      fetchedSamples: number;
+      decodedSamples: number;
+      failedSamples: number;
+      lastFailure: string | null;
+      samplePlays: number;
+      fallbackPlays: number;
+    };
     renderer: {
       calls: number;
       triangles: number;
