@@ -38,6 +38,8 @@ Three.js 中 `Y` 轴是上下方向，`X` 与 `Z` 轴构成地面；面板中的
 
 当前版本是同键盘本地多人游戏：
 
+![Apple Picking 键盘操作键位图](keyboard-controls-layout-v2.png)
+
 | 角色 | 移动 | 动作 |
 | --- | --- | --- |
 | guard1 | `E` 上、`S` 左、`D` 下、`F` 右 | `A` 飞扑 |
