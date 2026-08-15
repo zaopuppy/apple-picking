@@ -20,7 +20,7 @@
 | 使用中 | Interface Sounds 1.0：`pluck_001`、`confirmation_002`、`confirmation_003`、`confirmation_004`、`bong_001` | [Kenney Interface Sounds](https://kenney.nl/assets/interface-sounds) | CC0 1.0 | 2026-08-15 | 转为单声道 MP3、按游戏事件重命名，并合入单请求 JSON 音效包；运行时统一音量并轻微改变播放速率 | `public/assets/audio/kenney/` | 开始拾取、拾取完成、交付、回合结束 |
 | 使用中 | Impact Sounds 1.0：`impactWood_light_002`、`impactWood_light_004`、`impactSoft_heavy_001`、`impactPunch_medium_002`、`impactPunch_heavy_002` | [Kenney Impact Sounds](https://kenney.nl/assets/impact-sounds) | CC0 1.0 | 2026-08-15 | 转为单声道 MP3、按游戏事件重命名，并合入单请求 JSON 音效包；运行时统一音量并轻微改变播放速率 | `public/assets/audio/kenney/` | 苹果落地、飞扑、双 guard 碰撞、抓到 kid |
 | 使用中 | Forest Nature Pack 1.0 FREE：`Tree_1_A_Color1`、`Tree_2_B_Color1`、`Tree_3_C_Color1` | [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 只保留 3 个自包含 GLB；图集由 1024 × 1024 降采样至 256 × 256；运行时顺序加载、按变体实例化并共享材质 | `public/assets/models/kaykit-forest/` | 果园内部 3 组既有树障碍的视觉网格；不参与碰撞 |
-| 使用中 | Adventurers Character Pack 2.0 FREE：`Ranger`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 移除箭袋和未使用内容；将 `Idle_A`、`Running_A`、`Jump_Full_Short`、`Jump_Land`、`Hit_A` 合入单一 GLB；图集由 1024 × 1024 降采样至 256 × 256 | `public/assets/models/kaykit-adventurers/` | 仅 guard1 的视觉与动作；guard2、kid 和所有玩法碰撞保持原样 |
+| 使用中 | Adventurers Character Pack 2.0 FREE：`Ranger`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 移除箭袋和未使用内容；将 `Idle_A`、`Running_A`、`Jump_Full_Short`、`Jump_Land`、`Hit_A` 合入单一 GLB；图集由 1024 × 1024 降采样至 256 × 256 | `public/assets/models/kaykit-adventurers/` | guard1 与 guard2 的视觉和动作；kid 与所有玩法碰撞保持原样 |
 
 原始许可证副本保存在：
 
@@ -58,6 +58,17 @@
 - guard2 与 kid 继续使用程序化角色，作为风格和可读性对照；
 - `?guard=procedural` 可强制恢复 guard1 原有外观，模型加载失败时也会自动保留原角色；
 - `guard-pounce` / `guard-recover` 实测桌面和手机最多 63 draw calls、21,577 triangles、71 geometries、6 textures；
+- 模拟层的角色半径、碰撞、位移、飞扑和爬起计时均未修改。
+
+## 阶段 4 资产结果
+
+- 未引入新的外部文件或许可证；guard2 复用阶段 3 已验收的 Ranger GLB 和 CC0 记录；
+- 两名 guard 合计 14 meshes、17,290 triangles、2 个可独立变色的 materials，并共享 1 个逻辑纹理资产；模型只发起一次网络请求；
+- guard1 使用蓝色七边形帽顶、矩形帽檐、斜带和状态环，guard2 使用绿色七边形帽顶、圆形帽檐、反向斜带和状态环；
+- 两名 guard 分别持有动画混合器，可独立播放 `Idle_A`、`Running_A`、`Jump_Full_Short`、`Jump_Land` 和 `Hit_A`，不会串动画；
+- `?guard=procedural` 可同时回退两名 guard，`?guard1=procedural` 与 `?guard2=procedural` 可逐角色回退；单个资源加载失败时程序化外观仍然可见；
+- 正常桌面/手机实测为 63 draw calls、29,782 triangles、75 geometries、7 textures；受控状态峰值为 69 draw calls、29,998 triangles、77 geometries、7 textures；
+- kid 继续使用程序化角色，以完整保留拾取、负重姿态、苹果堆、滴汗和被抓等关键状态；
 - 模拟层的角色半径、碰撞、位移、飞扑和爬起计时均未修改。
 
 ## 当前基线

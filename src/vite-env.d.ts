@@ -51,15 +51,24 @@ declare global {
     };
     characters: {
       guard1Mode: 'loading' | 'imported' | 'procedural';
+      guard2Mode: 'loading' | 'imported' | 'procedural';
       externalRequested: boolean;
+      importedGuards: number;
       meshes: number;
       triangles: number;
       materials: number;
       textures: number;
       animations: string[];
-      currentAnimation: string | null;
+      currentAnimations: {
+        guard1: string | null;
+        guard2: string | null;
+      };
       sockets: string[];
       lastFailure: string | null;
+      lastFailures: {
+        guard1: string | null;
+        guard2: string | null;
+      };
     };
     renderer: {
       calls: number;

@@ -23,6 +23,7 @@ import {
   disposeImportedGuardView,
   loadImportedGuardView,
   syncImportedGuardView,
+  type ImportedGuardId,
   type ImportedGuardView,
 } from './ImportedGuardView';
 
@@ -66,15 +67,18 @@ export type EnvironmentAssetDiagnostics = {
 
 export type CharacterAssetDiagnostics = {
   guard1Mode: 'loading' | 'imported' | 'procedural';
+  guard2Mode: 'loading' | 'imported' | 'procedural';
   externalRequested: boolean;
+  importedGuards: number;
   meshes: number;
   triangles: number;
   materials: number;
   textures: number;
   animations: string[];
-  currentAnimation: string | null;
+  currentAnimations: Record<ImportedGuardId, string | null>;
   sockets: string[];
   lastFailure: string | null;
+  lastFailures: Record<ImportedGuardId, string | null>;
 };
 
 export class ArenaView {
@@ -89,7 +93,7 @@ export class ArenaView {
   private readonly matrixDummy = new THREE.Object3D();
   private readonly appleTarget = new THREE.Vector3();
   private readonly proceduralTreeVisuals = new THREE.Group();
-  private importedGuardView: ImportedGuardView | null = null;
+  private readonly importedGuardViews = new Map<ImportedGuardId, ImportedGuardView>();
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
     treeMode: 'procedural',
@@ -101,15 +105,18 @@ export class ArenaView {
   };
   private characterDiagnostics: CharacterAssetDiagnostics = {
     guard1Mode: 'procedural',
+    guard2Mode: 'procedural',
     externalRequested: false,
+    importedGuards: 0,
     meshes: 0,
     triangles: 0,
     materials: 0,
     textures: 0,
     animations: [],
-    currentAnimation: null,
+    currentAnimations: { guard1: null, guard2: null },
     sockets: [],
     lastFailure: null,
+    lastFailures: { guard1: null, guard2: null },
   };
   private deliveryApples!: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
@@ -118,14 +125,15 @@ export class ArenaView {
     this.guardViews.set('guard1', createGuardCharacter('guard1', this.materials));
     this.guardViews.set('guard2', createGuardCharacter('guard2', this.materials));
     for (const view of this.guardViews.values()) this.root.add(view.root);
-    if (new URLSearchParams(window.location.search).get('guard') !== 'procedural') {
-      this.characterDiagnostics = {
-        ...this.characterDiagnostics,
-        guard1Mode: 'loading',
-        externalRequested: true,
-      };
-      void this.installImportedGuard();
-    }
+    const assetOptions = new URLSearchParams(window.location.search);
+    const allGuardsProcedural = assetOptions.get('guard') === 'procedural';
+    const guard1External = !allGuardsProcedural && assetOptions.get('guard1') !== 'procedural';
+    const guard2External = !allGuardsProcedural && assetOptions.get('guard2') !== 'procedural';
+    this.characterDiagnostics.guard1Mode = guard1External ? 'loading' : 'procedural';
+    this.characterDiagnostics.guard2Mode = guard2External ? 'loading' : 'procedural';
+    this.characterDiagnostics.externalRequested = guard1External || guard2External;
+    if (guard1External) void this.installImportedGuard('guard1');
+    if (guard2External) void this.installImportedGuard('guard2');
     this.kidView = createKidCharacter(this.materials);
     this.root.add(this.kidView.root);
     for (let id = 0; id < APPLE_SPAWNS.length; id += 1) this.createApple(id);
@@ -236,9 +244,10 @@ export class ArenaView {
 
   sync(snapshot: GameSnapshot, renderTime: number, reducedMotion: boolean): void {
     for (const guard of snapshot.guards) {
-      if (guard.id === 'guard1' && this.importedGuardView) {
-        syncImportedGuardView(this.importedGuardView, guard, renderTime, reducedMotion);
-        this.characterDiagnostics.currentAnimation = this.importedGuardView.currentAnimation;
+      const imported = this.importedGuardViews.get(guard.id);
+      if (imported) {
+        syncImportedGuardView(imported, guard, renderTime, reducedMotion);
+        this.characterDiagnostics.currentAnimations[guard.id] = imported.currentAnimation;
         continue;
       }
       const view = this.guardViews.get(guard.id);
@@ -268,13 +277,15 @@ export class ArenaView {
     return {
       ...this.characterDiagnostics,
       animations: [...this.characterDiagnostics.animations],
+      currentAnimations: { ...this.characterDiagnostics.currentAnimations },
       sockets: [...this.characterDiagnostics.sockets],
+      lastFailures: { ...this.characterDiagnostics.lastFailures },
     };
   }
 
   dispose(): void {
     this.disposed = true;
-    if (this.importedGuardView) disposeImportedGuardView(this.importedGuardView);
+    for (const imported of this.importedGuardViews.values()) disposeImportedGuardView(imported);
     disposeObject3D(this.root);
     this.root.removeFromParent();
   }
@@ -486,37 +497,52 @@ export class ArenaView {
     }
   }
 
-  private async installImportedGuard(): Promise<void> {
+  private async installImportedGuard(id: ImportedGuardId): Promise<void> {
     try {
-      const imported = await loadImportedGuardView();
+      const imported = await loadImportedGuardView(id);
       if (this.disposed) {
         disposeImportedGuardView(imported);
         disposeObject3D(imported.root);
         return;
       }
-      const procedural = this.guardViews.get('guard1');
+      const procedural = this.guardViews.get(id);
       if (procedural) procedural.root.visible = false;
-      this.importedGuardView = imported;
+      this.importedGuardViews.set(id, imported);
       this.root.add(imported.root);
-      this.characterDiagnostics = {
-        guard1Mode: 'imported',
-        externalRequested: true,
-        meshes: imported.meshes,
-        triangles: imported.triangles,
-        materials: imported.materialCount,
-        textures: imported.textureCount,
-        animations: [...imported.actions.keys()],
-        currentAnimation: imported.currentAnimation,
-        sockets: [...imported.sockets],
-        lastFailure: null,
-      };
+      this.setGuardMode(id, 'imported');
+      this.characterDiagnostics.lastFailures[id] = null;
+      this.refreshImportedGuardDiagnostics();
     } catch (error) {
-      this.characterDiagnostics = {
-        ...this.characterDiagnostics,
-        guard1Mode: 'procedural',
-        lastFailure: error instanceof Error ? error.message : String(error),
-      };
+      const failure = error instanceof Error ? error.message : String(error);
+      this.setGuardMode(id, 'procedural');
+      this.characterDiagnostics.lastFailures[id] = failure;
+      this.refreshImportedGuardDiagnostics();
     }
+  }
+
+  private setGuardMode(
+    id: ImportedGuardId,
+    mode: CharacterAssetDiagnostics['guard1Mode'],
+  ): void {
+    if (id === 'guard1') this.characterDiagnostics.guard1Mode = mode;
+    else this.characterDiagnostics.guard2Mode = mode;
+  }
+
+  private refreshImportedGuardDiagnostics(): void {
+    const imported = [...this.importedGuardViews.values()];
+    const first = imported[0];
+    this.characterDiagnostics.importedGuards = imported.length;
+    this.characterDiagnostics.meshes = imported.reduce((total, view) => total + view.meshes, 0);
+    this.characterDiagnostics.triangles = imported.reduce((total, view) => total + view.triangles, 0);
+    this.characterDiagnostics.materials = imported.reduce((total, view) => total + view.materialCount, 0);
+    this.characterDiagnostics.textures = imported.reduce(
+      (highest, view) => Math.max(highest, view.textureCount),
+      0,
+    );
+    this.characterDiagnostics.animations = first ? [...first.actions.keys()] : [];
+    this.characterDiagnostics.sockets = first ? [...first.sockets] : [];
+    this.characterDiagnostics.lastFailure =
+      this.characterDiagnostics.lastFailures.guard1 ?? this.characterDiagnostics.lastFailures.guard2;
   }
 
   private createDeliveryZone(): void {

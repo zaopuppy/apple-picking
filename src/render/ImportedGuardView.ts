@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { GAME_CONFIG } from '../game/config';
 import type { GuardSnapshot } from '../game/types';
 import { ORCHARD_COLORS } from './OrchardMaterials';
@@ -15,6 +16,20 @@ const REQUIRED_ANIMATIONS = [
 ] as const;
 
 type GuardAnimationName = typeof REQUIRED_ANIMATIONS[number];
+export type ImportedGuardId = 'guard1' | 'guard2';
+
+const GUARD_IDENTITIES: Record<ImportedGuardId, { primary: string; accent: string }> = {
+  guard1: {
+    primary: ORCHARD_COLORS.guardBlue,
+    accent: ORCHARD_COLORS.guardBlueAccent,
+  },
+  guard2: {
+    primary: ORCHARD_COLORS.guardGreen,
+    accent: ORCHARD_COLORS.guardGreenAccent,
+  },
+};
+
+let guardAssetPromise: ReturnType<GLTFLoader['loadAsync']> | null = null;
 
 export type ImportedGuardView = {
   root: THREE.Group;
@@ -32,25 +47,28 @@ export type ImportedGuardView = {
   materialCount: number;
   textureCount: number;
   sockets: string[];
+  primaryColor: string;
+  accentColor: string;
 };
 
 const matrixDummy = new THREE.Object3D();
 
-export async function loadImportedGuardView(): Promise<ImportedGuardView> {
-  const gltf = await new GLTFLoader().loadAsync(GUARD_ASSET_URL);
+export async function loadImportedGuardView(id: ImportedGuardId): Promise<ImportedGuardView> {
+  const gltf = await loadGuardAsset();
   const clips = new Map(gltf.animations.map((clip) => [clip.name, clip]));
   for (const animation of REQUIRED_ANIMATIONS) {
     if (!clips.has(animation)) throw new Error(`Guard asset is missing animation: ${animation}`);
   }
 
   const root = new THREE.Group();
-  root.name = 'imported-guard1-root';
+  root.name = `imported-${id}-root`;
   const motionRoot = new THREE.Group();
-  motionRoot.name = 'imported-guard1-motion';
+  motionRoot.name = `imported-${id}-motion`;
   root.add(motionRoot);
 
-  const scene = gltf.scene;
-  scene.name = 'kaykit-ranger-guard';
+  const scene = cloneSkeleton(gltf.scene) as THREE.Group;
+  scene.name = `kaykit-ranger-${id}`;
+  shareGuardSkeleton(scene);
   scene.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(scene);
   const size = bounds.getSize(new THREE.Vector3());
@@ -60,6 +78,7 @@ export async function loadImportedGuardView(): Promise<ImportedGuardView> {
   scene.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
 
   const materials = new Set<THREE.MeshStandardMaterial>();
+  const materialClones = new Map<THREE.Material, THREE.Material>();
   const textures = new Set<THREE.Texture>();
   let triangles = 0;
   let meshes = 0;
@@ -70,7 +89,13 @@ export async function loadImportedGuardView(): Promise<ImportedGuardView> {
     object.receiveShadow = true;
     const indexCount = object.geometry.index?.count;
     triangles += indexCount ? indexCount / 3 : (object.geometry.attributes.position?.count ?? 0) / 3;
-    const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    const objectMaterials = sourceMaterials.map((material) => {
+      const cloned = materialClones.get(material) ?? material.clone();
+      materialClones.set(material, cloned);
+      return cloned;
+    });
+    object.material = Array.isArray(object.material) ? objectMaterials : objectMaterials[0] ?? object.material;
     for (const material of objectMaterials) {
       if (!(material instanceof THREE.MeshStandardMaterial)) continue;
       material.roughness = 0.82;
@@ -82,14 +107,15 @@ export async function loadImportedGuardView(): Promise<ImportedGuardView> {
     }
   });
   motionRoot.add(scene);
-  const cap = createGuardCap();
-  cap.position.set(0, 1.57, 0.015);
-  motionRoot.add(cap);
+  const identity = GUARD_IDENTITIES[id];
+  const identityMarker = createGuardIdentity(id, identity.primary);
+  identityMarker.position.set(0, 1.57, 0.015);
+  motionRoot.add(identityMarker);
 
   const stateRing = new THREE.Mesh(
     new THREE.RingGeometry(0.58, 0.67, 24),
     new THREE.MeshBasicMaterial({
-      color: ORCHARD_COLORS.guardBlueAccent,
+      color: identity.accent,
       transparent: true,
       opacity: 0.78,
       side: THREE.DoubleSide,
@@ -145,6 +171,8 @@ export async function loadImportedGuardView(): Promise<ImportedGuardView> {
     materialCount: materials.size,
     textureCount: textures.size,
     sockets: findSocketLabels(scene),
+    primaryColor: identity.primary,
+    accentColor: identity.accent,
   };
 }
 
@@ -204,14 +232,14 @@ export function syncImportedGuardView(
       : guard.state === 'Recover'
         ? '#e2a43a'
         : guard.state === 'Pounce'
-          ? '#b8d9ff'
-          : '#d7d5b0',
+          ? view.accentColor
+          : view.primaryColor,
   );
   view.stateRing.material.opacity = guard.state === 'Move' ? 0.42 : 0.78;
   view.stateRing.rotation.z = reducedMotion ? 0 : time * (guard.state === 'Stunned' ? 3.8 : 1.1);
 
   for (const material of view.materials) {
-    material.emissive.set(guard.state === 'Pounce' ? '#5ea9ff' : '#000000');
+    material.emissive.set(guard.state === 'Pounce' ? view.accentColor : '#000000');
     material.emissiveIntensity = guard.state === 'Pounce' ? 0.1 : 0;
   }
   updateStunMarks(view, guard.state === 'Stunned', time, reducedMotion);
@@ -271,23 +299,51 @@ function stateAnimationTime(duration: number, guard: GuardSnapshot): number {
   return 0;
 }
 
-function createGuardCap(): THREE.Group {
-  const cap = new THREE.Group();
-  cap.name = 'guard-identity-cap';
+function createGuardIdentity(id: ImportedGuardId, color: string): THREE.Group {
+  const identity = new THREE.Group();
+  identity.name = `${id}-identity-marker`;
   const material = new THREE.MeshStandardMaterial({
-    color: ORCHARD_COLORS.guardBlue,
+    color,
     roughness: 0.76,
     metalness: 0,
     flatShading: true,
   });
-  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.16, 8), material);
+  const crown = new THREE.Mesh(
+    new THREE.CylinderGeometry(id === 'guard1' ? 0.2 : 0.19, id === 'guard1' ? 0.26 : 0.25, 0.16, id === 'guard1' ? 8 : 7),
+    material,
+  );
   crown.position.y = 0.08;
   crown.castShadow = true;
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.045, 0.3), material);
-  brim.position.set(0, 0.015, 0.07);
+  const brim = id === 'guard1'
+    ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.045, 0.3), material)
+    : new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.045, 10), material);
+  brim.position.set(0, 0.015, id === 'guard1' ? 0.07 : 0);
   brim.castShadow = true;
-  cap.add(crown, brim);
-  return cap;
+  const sash = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.42, 0.045), material);
+  sash.position.set(id === 'guard1' ? -0.18 : 0.18, -0.52, 0.23);
+  sash.rotation.z = id === 'guard1' ? -0.48 : 0.48;
+  sash.castShadow = true;
+  identity.add(crown, brim, sash);
+  return identity;
+}
+
+function loadGuardAsset(): ReturnType<GLTFLoader['loadAsync']> {
+  guardAssetPromise ??= new GLTFLoader().loadAsync(GUARD_ASSET_URL);
+  return guardAssetPromise;
+}
+
+function shareGuardSkeleton(scene: THREE.Group): void {
+  let sharedSkeleton: THREE.Skeleton | null = null;
+  scene.traverse((object) => {
+    if (!(object instanceof THREE.SkinnedMesh)) return;
+    if (!sharedSkeleton) {
+      sharedSkeleton = object.skeleton;
+      return;
+    }
+    const sameBones = object.skeleton.bones.length === sharedSkeleton.bones.length &&
+      object.skeleton.bones.every((bone, index) => bone === sharedSkeleton?.bones[index]);
+    if (sameBones) object.bind(sharedSkeleton, object.bindMatrix);
+  });
 }
 
 function updateStunMarks(
