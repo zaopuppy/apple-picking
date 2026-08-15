@@ -40,6 +40,8 @@ declare global {
       viewWidth: number;
       viewHeight: number;
       verticalOffset: number;
+      portraitLayout: boolean;
+      positionX: number;
       positionY: number;
       positionZ: number;
     };

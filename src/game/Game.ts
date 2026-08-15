@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { InputRouter } from '../core/InputRouter';
 import { Loop } from '../core/Loop';
-import { createRenderer, getPortraitFramingAmount, resizeRenderer } from '../core/Renderer';
+import { createRenderer, resizeRenderer, usesPortraitArenaLayout } from '../core/Renderer';
 import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
 import { Hud } from '../systems/Hud';
@@ -38,8 +38,7 @@ export class Game {
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = createRenderer(canvas);
-    this.scene.background = new THREE.Color('#cfe3b0');
-    this.scene.fog = new THREE.Fog('#cfe3b0', 31, 55);
+    this.scene.background = new THREE.Color('#91ad62');
     this.camera.position.set(0, 23.5, 19.5);
     this.camera.lookAt(0, 0, 0);
     this.createLighting();
@@ -102,7 +101,7 @@ export class Game {
     const snapshot = this.simulation.getSnapshot();
     const presentationTime = this.reducedMotion ? snapshot.elapsedSeconds : this.renderTime;
     this.view.sync(snapshot, presentationTime, this.reducedMotion);
-    this.hud.update(snapshot, this.fps);
+    this.hud.update(snapshot);
   }
 
   private render(): void {
@@ -112,12 +111,12 @@ export class Game {
   private updateCameraComposition(): void {
     const width = Math.max(1, this.canvas.clientWidth);
     const height = Math.max(1, this.canvas.clientHeight);
-    const portraitAmount = getPortraitFramingAmount(width / height);
-    this.camera.position.set(
-      0,
-      THREE.MathUtils.lerp(23.5, 29, portraitAmount),
-      THREE.MathUtils.lerp(19.5, 13, portraitAmount),
-    );
+    const portraitLayout = usesPortraitArenaLayout(width / height);
+    if (portraitLayout) {
+      this.camera.position.set(10.5, 34, 0);
+    } else {
+      this.camera.position.set(0, 23.5, 19.5);
+    }
     this.camera.lookAt(0, 0, 0);
   }
 
@@ -232,6 +231,8 @@ export class Game {
         viewWidth: this.camera.right - this.camera.left,
         viewHeight: this.camera.top - this.camera.bottom,
         verticalOffset: (this.camera.top + this.camera.bottom) / 2,
+        portraitLayout: usesPortraitArenaLayout(this.canvas.clientWidth / this.canvas.clientHeight),
+        positionX: this.camera.position.x,
         positionY: this.camera.position.y,
         positionZ: this.camera.position.z,
       },

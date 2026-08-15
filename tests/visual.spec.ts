@@ -57,9 +57,9 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10);
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('active-play'));
 
-  const fpsValue = page.locator('#fps-value');
-  await expect(fpsValue).toBeVisible();
-  await expect.poll(async () => Number(await fpsValue.textContent())).toBeGreaterThan(0);
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.frameRate.current ?? 0))
+    .toBeGreaterThan(0);
   const frameRate = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.frameRate);
   expect(frameRate?.current).toBeLessThanOrEqual(60);
   expect(frameRate?.cap).toBe(60);
@@ -91,7 +91,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
     .toBeLessThan(before - 0.3);
 
   const hudOverflow = await page.evaluate(() => {
-    const elements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #carried-badge, #controls')];
+    const elements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #carried-badge')];
     return elements.some((element) => element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1);
   });
   expect(hudOverflow).toBe(false);
@@ -176,7 +176,7 @@ test('render loop adapts to the available refresh rate and caps at 60 FPS', asyn
   expect(samples.lowRefresh.fps).toBeLessThanOrEqual(30);
 });
 
-test('responsive HUD keeps objective and inventory clear of the playfield', async ({ page }, testInfo) => {
+test('transparent top HUD and arena framing adapt to the viewport', async ({ page }, testInfo) => {
   await page.goto('/');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await page.evaluate(() => {
@@ -187,6 +187,8 @@ test('responsive HUD keeps objective and inventory clear of the playfield', asyn
   await expect(page.locator('#carried-value')).toHaveText('6');
   await expect(page.locator('#state-strip')).toHaveCount(0);
   await expect(page.locator('#status-line')).toHaveCount(0);
+  await expect(page.locator('#controls')).toHaveCount(0);
+  await expect(page.locator('#fps-value')).toHaveCount(0);
 
   const layout = await page.evaluate(() => {
     const rect = (selector: string) => {
@@ -202,14 +204,30 @@ test('responsive HUD keeps objective and inventory clear of the playfield', asyn
         height: bounds.height,
       };
     };
-    const hudElements = [...document.querySelectorAll<HTMLElement>(
-      '#score-ribbon, #carried-badge, #controls',
-    )];
+    const hudElements = [...document.querySelectorAll<HTMLElement>('#score-ribbon, #carried-badge')];
+    const background = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) throw new Error(`Missing HUD element: ${selector}`);
+      return getComputedStyle(element).backgroundColor;
+    };
+    const layer = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) throw new Error(`Missing layered element: ${selector}`);
+      return Number(getComputedStyle(element).zIndex);
+    };
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       score: rect('#score-ribbon'),
       carried: rect('#carried-badge'),
-      controls: rect('#controls'),
+      backgrounds: {
+        score: background('#score-ribbon'),
+        carried: background('#carried-badge'),
+      },
+      layers: {
+        canvas: layer('#game-canvas'),
+        score: layer('#score-ribbon'),
+        carried: layer('#carried-badge'),
+      },
       overflow: hudElements.some((element) =>
         element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1),
       camera: window.__THREE_GAME_DIAGNOSTICS__?.camera,
@@ -217,22 +235,33 @@ test('responsive HUD keeps objective and inventory clear of the playfield', asyn
   });
 
   expect(layout.overflow).toBe(false);
-  for (const bounds of [layout.score, layout.carried, layout.controls]) {
+  expect(layout.backgrounds).toEqual({
+    score: 'rgba(0, 0, 0, 0)',
+    carried: 'rgba(0, 0, 0, 0)',
+  });
+  expect(layout.layers.score).toBeGreaterThan(layout.layers.canvas);
+  expect(layout.layers.carried).toBeGreaterThan(layout.layers.canvas);
+  for (const bounds of [layout.score, layout.carried]) {
     expect(bounds.left).toBeGreaterThanOrEqual(-1);
     expect(bounds.right).toBeLessThanOrEqual(layout.viewport.width + 1);
     expect(bounds.top).toBeGreaterThanOrEqual(-1);
     expect(bounds.bottom).toBeLessThanOrEqual(layout.viewport.height + 1);
   }
-  expect(layout.score.bottom).toBeLessThanOrEqual(layout.carried.top - 4);
+  expect(layout.score.bottom).toBeLessThanOrEqual(layout.carried.top + 1);
 
   if (testInfo.project.name === 'narrow-chrome') {
-    expect(layout.camera?.viewWidth).toBeLessThanOrEqual(25.1);
-    expect(layout.camera?.verticalOffset).toBeGreaterThan(0.6);
-    expect(layout.camera?.positionY).toBeCloseTo(29, 5);
-    expect(layout.camera?.positionZ).toBeCloseTo(13, 5);
-  } else {
-    expect(layout.camera?.viewHeight).toBeCloseTo(23, 5);
+    expect(layout.camera?.portraitLayout).toBe(true);
+    expect(layout.camera?.viewWidth).toBeLessThanOrEqual(18.9);
     expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
+    expect(layout.camera?.positionX).toBeCloseTo(10.5, 5);
+    expect(layout.camera?.positionY).toBeCloseTo(34, 5);
+    expect(layout.camera?.positionZ).toBeCloseTo(0, 5);
+  } else {
+    expect(layout.camera?.portraitLayout).toBe(false);
+    expect(layout.camera?.viewHeight).toBeCloseTo(18.5, 5);
+    expect(layout.camera?.verticalOffset).toBeCloseTo(0, 5);
+    expect(layout.camera?.positionX).toBeCloseTo(0, 5);
+    expect(layout.camera?.positionZ).toBeCloseTo(19.5, 5);
   }
 });
 

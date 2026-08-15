@@ -10,12 +10,11 @@ export class Hud {
   private readonly catchesFill = this.getElement('#catches-fill');
   private readonly carriedValue = this.getElement('#carried-value');
   private readonly timerValue = this.getElement('#timer-value');
-  private readonly fpsValue = this.getElement('#fps-value');
   private readonly matchMessage = this.getElement('#match-message');
   private readonly resultOverlay = this.getElement('#result-overlay');
   private readonly resultTitle = this.getElement('#result-title');
 
-  update(snapshot: GameSnapshot, fps: number): void {
+  update(snapshot: GameSnapshot): void {
     this.deliveredValue.textContent = String(snapshot.delivered);
     this.deliveredTotal.textContent = String(snapshot.totalApples);
     this.deliveredFill.style.width = `${snapshot.delivered / snapshot.totalApples * 100}%`;
@@ -26,7 +25,6 @@ export class Hud {
     const minutes = Math.floor(snapshot.elapsedSeconds / 60).toString().padStart(2, '0');
     const seconds = Math.floor(snapshot.elapsedSeconds % 60).toString().padStart(2, '0');
     this.timerValue.textContent = `${minutes}:${seconds}`;
-    this.fpsValue.textContent = fps > 0 ? String(fps) : '--';
 
     if (snapshot.matchState === 'Countdown') {
       this.matchMessage.textContent = String(Math.max(1, Math.ceil(snapshot.countdownTicks / TICKS_PER_SECOND)));

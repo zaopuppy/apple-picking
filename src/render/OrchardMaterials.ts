@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 
 export const ORCHARD_COLORS = {
-  meadow: '#b9d493',
   grass: '#91ad62',
   grassShadow: '#647d43',
   soil: '#775537',
@@ -10,11 +9,6 @@ export const ORCHARD_COLORS = {
   woodDark: '#4d3425',
   leaf: '#3f753b',
   leafLight: '#5c913f',
-  leafFar: '#315c35',
-  shedWall: '#d9bd77',
-  roof: '#a94f35',
-  pathStone: '#ba9a69',
-  banner: '#d95a39',
   apple: '#d74432',
   appleDark: '#8f241d',
   appleLeaf: '#477b38',
@@ -34,7 +28,6 @@ export const ORCHARD_COLORS = {
 } as const;
 
 export type OrchardMaterials = {
-  meadow: THREE.MeshStandardMaterial;
   grass: THREE.MeshStandardMaterial;
   grassShadow: THREE.MeshStandardMaterial;
   soil: THREE.MeshStandardMaterial;
@@ -42,12 +35,6 @@ export type OrchardMaterials = {
   wood: THREE.MeshStandardMaterial;
   woodDark: THREE.MeshStandardMaterial;
   leaf: THREE.MeshStandardMaterial;
-  leafFar: THREE.MeshStandardMaterial;
-  shedWall: THREE.MeshStandardMaterial;
-  roof: THREE.MeshStandardMaterial;
-  pathStone: THREE.MeshStandardMaterial;
-  flower: THREE.MeshStandardMaterial;
-  banner: THREE.MeshStandardMaterial;
   basketCloth: THREE.MeshStandardMaterial;
   appleStem: THREE.MeshStandardMaterial;
   appleLeaf: THREE.MeshStandardMaterial;
@@ -57,7 +44,6 @@ export type OrchardMaterials = {
 
 export function createOrchardMaterials(): OrchardMaterials {
   return {
-    meadow: standard(ORCHARD_COLORS.meadow, 1),
     grass: standard(ORCHARD_COLORS.grass, 0.96),
     grassShadow: standard(ORCHARD_COLORS.grassShadow, 1),
     soil: standard(ORCHARD_COLORS.soil, 1),
@@ -69,18 +55,6 @@ export function createOrchardMaterials(): OrchardMaterials {
       roughness: 0.92,
       metalness: 0,
       flatShading: true,
-    }),
-    leafFar: standard(ORCHARD_COLORS.leafFar, 0.98, true),
-    shedWall: standard(ORCHARD_COLORS.shedWall, 0.92),
-    roof: standard(ORCHARD_COLORS.roof, 0.88, true),
-    pathStone: standard(ORCHARD_COLORS.pathStone, 1, true),
-    flower: standard('#fff2a6', 0.82, true),
-    banner: new THREE.MeshStandardMaterial({
-      color: ORCHARD_COLORS.banner,
-      roughness: 0.86,
-      metalness: 0,
-      flatShading: true,
-      side: THREE.DoubleSide,
     }),
     basketCloth: standard('#e8cb73', 0.94),
     appleStem: standard('#51351e', 0.94),

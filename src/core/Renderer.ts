@@ -1,18 +1,13 @@
 import * as THREE from 'three';
 
-const LANDSCAPE_WORLD_WIDTH = 29;
-const PORTRAIT_WORLD_WIDTH = 25;
-const MINIMUM_WORLD_HEIGHT = 23;
-const PORTRAIT_BLEND_START = 0.9;
-const PORTRAIT_BLEND_END = 0.62;
-const PORTRAIT_VERTICAL_OFFSET = 0.65;
+const LANDSCAPE_WORLD_WIDTH = 25.5;
+const PORTRAIT_WORLD_WIDTH = 18.8;
+const LANDSCAPE_WORLD_HEIGHT = 18.5;
+const PORTRAIT_WORLD_HEIGHT = 25;
+const PORTRAIT_LAYOUT_THRESHOLD = 0.86;
 
-export function getPortraitFramingAmount(aspect: number): number {
-  return THREE.MathUtils.clamp(
-    (PORTRAIT_BLEND_START - aspect) / (PORTRAIT_BLEND_START - PORTRAIT_BLEND_END),
-    0,
-    1,
-  );
+export function usesPortraitArenaLayout(aspect: number): boolean {
+  return aspect < PORTRAIT_LAYOUT_THRESHOLD;
 }
 
 export function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
@@ -47,19 +42,15 @@ export function resizeRenderer(
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     const aspect = width / height;
-    const portraitAmount = getPortraitFramingAmount(aspect);
-    const minimumWorldWidth = THREE.MathUtils.lerp(
-      LANDSCAPE_WORLD_WIDTH,
-      PORTRAIT_WORLD_WIDTH,
-      portraitAmount,
-    );
-    const viewHeight = Math.max(MINIMUM_WORLD_HEIGHT, minimumWorldWidth / aspect);
+    const portraitLayout = usesPortraitArenaLayout(aspect);
+    const minimumWorldWidth = portraitLayout ? PORTRAIT_WORLD_WIDTH : LANDSCAPE_WORLD_WIDTH;
+    const minimumWorldHeight = portraitLayout ? PORTRAIT_WORLD_HEIGHT : LANDSCAPE_WORLD_HEIGHT;
+    const viewHeight = Math.max(minimumWorldHeight, minimumWorldWidth / aspect);
     const viewWidth = viewHeight * aspect;
-    const verticalOffset = PORTRAIT_VERTICAL_OFFSET * portraitAmount;
     camera.left = -viewWidth / 2;
     camera.right = viewWidth / 2;
-    camera.top = verticalOffset + viewHeight / 2;
-    camera.bottom = verticalOffset - viewHeight / 2;
+    camera.top = viewHeight / 2;
+    camera.bottom = -viewHeight / 2;
     camera.updateProjectionMatrix();
   }
 
