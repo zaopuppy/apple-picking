@@ -52,21 +52,33 @@ declare global {
     characters: {
       guard1Mode: 'loading' | 'imported' | 'failed';
       guard2Mode: 'loading' | 'imported' | 'failed';
+      kidMode: 'loading' | 'imported' | 'failed';
       importedGuards: number;
+      importedCharacters: number;
       meshes: number;
       triangles: number;
       materials: number;
       textures: number;
       animations: string[];
+      kidAnimations: string[];
       currentAnimations: {
         guard1: string | null;
         guard2: string | null;
+        kid: string | null;
       };
       sockets: string[];
+      kidSockets: string[];
+      kidDetails: {
+        backpackScaleZ: number;
+        sweatDrops: number;
+        postureLean: number;
+        breathScaleY: number;
+      } | null;
       lastFailure: string | null;
       lastFailures: {
         guard1: string | null;
         guard2: string | null;
+        kid: string | null;
       };
     };
     renderer: {

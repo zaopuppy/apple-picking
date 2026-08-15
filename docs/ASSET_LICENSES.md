@@ -20,7 +20,7 @@
 | 使用中 | Interface Sounds 1.0：`pluck_001`、`confirmation_002`、`confirmation_003`、`confirmation_004`、`bong_001` | [Kenney Interface Sounds](https://kenney.nl/assets/interface-sounds) | CC0 1.0 | 2026-08-15 | 转为单声道 MP3、按游戏事件重命名，并合入单请求 JSON 音效包；运行时统一音量并轻微改变播放速率 | `public/assets/audio/kenney/` | 开始拾取、拾取完成、交付、回合结束 |
 | 使用中 | Impact Sounds 1.0：`impactWood_light_002`、`impactWood_light_004`、`impactSoft_heavy_001`、`impactPunch_medium_002`、`impactPunch_heavy_002` | [Kenney Impact Sounds](https://kenney.nl/assets/impact-sounds) | CC0 1.0 | 2026-08-15 | 转为单声道 MP3、按游戏事件重命名，并合入单请求 JSON 音效包；运行时统一音量并轻微改变播放速率 | `public/assets/audio/kenney/` | 苹果落地、飞扑、双 guard 碰撞、抓到 kid |
 | 使用中 | Forest Nature Pack 1.0 FREE：`Tree_1_A_Color1`、`Tree_2_B_Color1`、`Tree_3_C_Color1` | [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 只保留 3 个自包含 GLB；图集由 1024 × 1024 降采样至 256 × 256；运行时顺序加载、按变体实例化并共享材质 | `public/assets/models/kaykit-forest/` | 果园内部 3 组既有树障碍的视觉网格；不参与碰撞 |
-| 使用中 | Adventurers Character Pack 2.0 FREE：`Ranger`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 移除箭袋和未使用内容；将 `Idle_A`、`Running_A`、`Jump_Full_Short`、`Jump_Land`、`Hit_A` 合入单一 GLB；图集由 1024 × 1024 降采样至 256 × 256 | `public/assets/models/kaykit-adventurers/` | guard1 与 guard2 的视觉和动作；kid 与所有玩法碰撞保持原样 |
+| 使用中 | Adventurers Character Pack 2.0 FREE：`Knight`、`Rogue`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 分别整理为 `Knight_Guard.glb` 与 `Rogue_Kid.glb`；只合入使用中的 5/4 个动画；两张图集由 1024 × 1024 降采样至 256 × 256；保留 Knight 原生头盔和面罩 | `public/assets/models/kaykit-adventurers/` | guard1、guard2 与 kid 的视觉和动作；碰撞、负重、苹果堆和状态逻辑保持独立 |
 
 原始许可证副本保存在：
 
@@ -40,7 +40,7 @@
 - [x] 模型已记录三角面、mesh、material、texture 和动画片段数量
 - [x] 外部视觉与模拟层碰撞代理保持分离
 - [x] 构建、浏览器加载、桌面和手机检查通过
-- [x] 撤回开关或原有效果回退路径可用
+- [x] 已定稿角色的加载失败会显式记录，不会静默切回已删除的旧模型
 
 ## 阶段 2 资产结果
 
@@ -70,6 +70,21 @@
 - 正常桌面/手机实测为 63 draw calls、29,782 triangles、75 geometries、7 textures；受控状态峰值为 69 draw calls、29,998 triangles、77 geometries、7 textures；
 - kid 继续使用程序化角色，以完整保留拾取、负重姿态、苹果堆、滴汗和被抓等关键状态；
 - 模拟层的角色半径、碰撞、位移、飞扑和爬起计时均未修改。
+
+以上阶段 3–4 的 Ranger 内容为历史实施记录，现已由下面的角色定稿替代。
+
+## Knight / Rogue 角色定稿
+
+- guard1 与 guard2 改用 `Knight_Guard.glb`：保留 Knight 原生头盔和面罩，删除旧 Ranger 上额外叠加的帽顶和帽檐；蓝/绿披风、反向斜带和状态环继续区分两名 guard；
+- kid 改用 `Rogue_Kid.glb`：`Idle_A` 提供待机动作并叠加轻微呼吸，`Running_A` 根据负重降低播放速度，`PickUp` 表达拾取，`Hit_A` 表达被抓后的短暂受击；
+- 程序化 kid 身体已删除，但苹果篮、篮子负重膨胀、身体前倾、重载摇摆、苹果堆、4/6 个苹果时的滴汗和状态环仍由状态驱动；
+- `Knight_Guard.glb` 为 458,152 bytes、9 meshes、5,800 triangles、1 个 256 × 256 图集和 5 个动画；`Rogue_Kid.glb` 为 503,252 bytes、7 meshes、7,562 triangles、1 个 256 × 256 图集和 4 个动画；
+- 三名角色合计 25 meshes、19,162 triangles、5 个运行时材质和 2 个逻辑纹理；两名 guard 共享 Knight 的 geometry、texture 和骨骼数据，只发起一次 Knight 请求；
+- `heavy-carry` 实测桌面与 390 × 664 手机均为 62 draw calls、31,164 triangles、57 geometries、9 textures；`picking` 手机状态峰值为 67 draw calls、31,436 triangles、60 geometries、9 textures；
+- GLB 通过 glTF Validator，无 error；源包固有的 skinned-mesh 层级 warning 保留，Three.js 实际动画、缩放、阴影和材质检查通过；
+- 本地完整源包位于被忽略的 `assets/`，可用 `npm run prepare:kaykit-characters` 重建运行时文件；仓库不提交未使用角色、道具或动画；
+- `Ranger_Guard.glb` 和旧程序化 kid 代码已删除；Knight 或 Rogue 加载失败时分别标记为 `failed`，不保留查询参数回退分支；
+- 模拟层的角色半径、角色/苹果碰撞、移动、飞扑和爬起计时均未修改。
 
 ## 当前基线
 

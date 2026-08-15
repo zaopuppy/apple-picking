@@ -87,6 +87,8 @@ public/assets/       运行时音频与 3D 资产
 
 不要把完整素材包或来源不明的重新打包资源提交到仓库。新增资产应先记录许可证，再检查文件大小、三角面、材质、纹理、动画和手机端表现。
 
+本地持有 `assets/KayKit_Adventurers_2.0_FREE/` 源包时，可运行 `npm run prepare:kaykit-characters` 重新生成项目使用的 Knight 与 Rogue GLB。`assets/` 已被忽略，仓库只提交 `public/assets/` 下的整理结果。
+
 ## 鸿蒙 / ArkWeb 集成提示
 
 Web 版本的发布入口是 `dist/index.html`。集成 ArkWeb 前需要确认：

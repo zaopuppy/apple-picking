@@ -1,6 +1,9 @@
 
 .codegraph/
 
+# Locally downloaded source asset packs. Only processed runtime assets belong in public/.
+/assets/
+
 node_modules/
 dist/
 test-results/

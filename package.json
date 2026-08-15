@@ -9,7 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "playwright test",
     "verify:visual": "playwright test tests/visual.spec.ts",
-    "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs"
+    "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs",
+    "prepare:kaykit-characters": "node scripts/prepare-kaykit-characters.mjs"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",

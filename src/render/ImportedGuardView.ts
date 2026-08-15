@@ -5,7 +5,7 @@ import { GAME_CONFIG } from '../game/config';
 import type { GuardSnapshot } from '../game/types';
 import { ORCHARD_COLORS } from './OrchardMaterials';
 
-const GUARD_ASSET_URL = `${import.meta.env.BASE_URL}assets/models/kaykit-adventurers/Ranger_Guard.glb`;
+const GUARD_ASSET_URL = `${import.meta.env.BASE_URL}assets/models/kaykit-adventurers/Knight_Guard.glb`;
 
 const REQUIRED_ANIMATIONS = [
   'Idle_A',
@@ -67,7 +67,7 @@ export async function loadImportedGuardView(id: ImportedGuardId): Promise<Import
   root.add(motionRoot);
 
   const scene = cloneSkeleton(gltf.scene) as THREE.Group;
-  scene.name = `kaykit-ranger-${id}`;
+  scene.name = `kaykit-knight-${id}`;
   shareGuardSkeleton(scene);
   scene.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(scene);
@@ -77,6 +77,7 @@ export async function loadImportedGuardView(id: ImportedGuardId): Promise<Import
   scene.scale.setScalar(scale);
   scene.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
 
+  const identity = GUARD_IDENTITIES[id];
   const materials = new Set<THREE.MeshStandardMaterial>();
   const materialClones = new Map<THREE.Material, THREE.Material>();
   const textures = new Set<THREE.Texture>();
@@ -91,6 +92,14 @@ export async function loadImportedGuardView(id: ImportedGuardId): Promise<Import
     triangles += indexCount ? indexCount / 3 : (object.geometry.attributes.position?.count ?? 0) / 3;
     const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
     const objectMaterials = sourceMaterials.map((material) => {
+      if (object.name === 'Knight_Cape') {
+        return new THREE.MeshStandardMaterial({
+          color: identity.primary,
+          roughness: 0.8,
+          metalness: 0,
+          flatShading: true,
+        });
+      }
       const cloned = materialClones.get(material) ?? material.clone();
       materialClones.set(material, cloned);
       return cloned;
@@ -107,7 +116,6 @@ export async function loadImportedGuardView(id: ImportedGuardId): Promise<Import
     }
   });
   motionRoot.add(scene);
-  const identity = GUARD_IDENTITIES[id];
   const identityMarker = createGuardIdentity(id, identity.primary);
   identityMarker.position.set(0, 1.57, 0.015);
   motionRoot.add(identityMarker);
@@ -308,22 +316,11 @@ function createGuardIdentity(id: ImportedGuardId, color: string): THREE.Group {
     metalness: 0,
     flatShading: true,
   });
-  const crown = new THREE.Mesh(
-    new THREE.CylinderGeometry(id === 'guard1' ? 0.2 : 0.19, id === 'guard1' ? 0.26 : 0.25, 0.16, id === 'guard1' ? 8 : 7),
-    material,
-  );
-  crown.position.y = 0.08;
-  crown.castShadow = true;
-  const brim = id === 'guard1'
-    ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.045, 0.3), material)
-    : new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.045, 10), material);
-  brim.position.set(0, 0.015, id === 'guard1' ? 0.07 : 0);
-  brim.castShadow = true;
   const sash = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.42, 0.045), material);
   sash.position.set(id === 'guard1' ? -0.18 : 0.18, -0.52, 0.23);
   sash.rotation.z = id === 'guard1' ? -0.48 : 0.48;
   sash.castShadow = true;
-  identity.add(crown, brim, sash);
+  identity.add(sash);
   return identity;
 }
 

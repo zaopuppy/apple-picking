@@ -68,7 +68,12 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
       .toMatchObject({
         audio: { fetchedSamples: 10, failedSamples: 0 },
         environment: { treeMode: 'imported', lastFailure: null },
-        characters: { guard1Mode: 'imported', guard2Mode: 'imported', lastFailure: null },
+        characters: {
+          guard1Mode: 'imported',
+          guard2Mode: 'imported',
+          kidMode: 'imported',
+          lastFailure: null,
+        },
       });
   }
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('active-play'));
@@ -395,8 +400,8 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
   });
 });
 
-test('two CC0 guard instances load once and map key states independently', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop-chrome', 'Guard asset loading only needs one installed Chrome run.');
+test('KayKit Knight guards and Rogue kid load once and map key states independently', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Character asset loading only needs one installed Chrome run.');
   const modelResponses: Array<{ path: string; status: number }> = [];
   page.on('response', (response) => {
     const url = new URL(response.url());
@@ -411,19 +416,24 @@ test('two CC0 guard instances load once and map key states independently', async
     .toMatchObject({
       guard1Mode: 'imported',
       guard2Mode: 'imported',
+      kidMode: 'imported',
       importedGuards: 2,
-      meshes: 14,
-      triangles: 17_290,
-      materials: 2,
-      textures: 1,
+      importedCharacters: 3,
+      meshes: 25,
+      triangles: 19_162,
+      materials: 5,
+      textures: 2,
       animations: ['Idle_A', 'Running_A', 'Jump_Full_Short', 'Jump_Land', 'Hit_A'],
-      currentAnimations: { guard1: 'Idle_A', guard2: 'Idle_A' },
+      kidAnimations: ['Idle_A', 'Running_A', 'PickUp', 'Hit_A'],
+      currentAnimations: { guard1: 'Idle_A', guard2: 'Idle_A', kid: 'Idle_A' },
       sockets: ['head', 'left-hand', 'right-hand', 'back'],
+      kidSockets: ['head', 'left-hand', 'right-hand', 'back'],
       lastFailure: null,
-      lastFailures: { guard1: null, guard2: null },
+      lastFailures: { guard1: null, guard2: null, kid: null },
     });
-  expect(modelResponses).toEqual([
-    { path: '/assets/models/kaykit-adventurers/Ranger_Guard.glb', status: 200 },
+  expect(modelResponses.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+    { path: '/assets/models/kaykit-adventurers/Knight_Guard.glb', status: 200 },
+    { path: '/assets/models/kaykit-adventurers/Rogue_Kid.glb', status: 200 },
   ]);
 
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('active-play'));
@@ -443,6 +453,32 @@ test('two CC0 guard instances load once and map key states independently', async
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.guard2))
     .toBe('Idle_A');
+  await page.keyboard.down('ArrowUp');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))
+    .toBe('Running_A');
+  await page.keyboard.up('ArrowUp');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))
+    .toBe('Idle_A');
+  await expect
+    .poll(async () => page.evaluate(() => {
+      const scale = window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails?.breathScaleY ?? 1;
+      return Math.abs(scale - 1);
+    }))
+    .toBeGreaterThan(0.001);
+
+  await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true);
+    window.__THREE_GAME_TEST_HOOKS__?.scenario('heavy-carry');
+  });
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails?.sweatDrops))
+    .toBe(4);
+  const loadDetails = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails);
+  expect(loadDetails?.backpackScaleZ).toBeGreaterThan(1.25);
+  expect(loadDetails?.postureLean).toBeGreaterThan(0.15);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(false));
 
   const stateAnimations = [
     { scenario: 'guard-pounce', animation: 'Jump_Full_Short' },
@@ -459,6 +495,15 @@ test('two CC0 guard instances load once and map key states independently', async
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.guard2))
     .toBe('Hit_A');
 
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('picking'));
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))
+    .toBe('PickUp');
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('captured'));
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))
+    .toBe('Hit_A');
+
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(100);
   expect(renderer?.triangles).toBeLessThanOrEqual(80_000);
@@ -467,7 +512,7 @@ test('two CC0 guard instances load once and map key states independently', async
 
 test('guard asset failure is surfaced without a procedural fallback', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Guard failure handling only needs one installed Chrome run.');
-  await page.route('**/assets/models/kaykit-adventurers/Ranger_Guard.glb', (route) => route.abort('failed'));
+  await page.route('**/assets/models/kaykit-adventurers/Knight_Guard.glb', (route) => route.abort('failed'));
   await page.goto('/?audio=procedural&trees=procedural');
 
   await expect
@@ -475,24 +520,62 @@ test('guard asset failure is surfaced without a procedural fallback', async ({ p
     .toMatchObject({
       guard1Mode: 'failed',
       guard2Mode: 'failed',
+      kidMode: 'imported',
       importedGuards: 0,
-      meshes: 0,
-      triangles: 0,
-      materials: 0,
-      textures: 0,
+      importedCharacters: 1,
+      meshes: 7,
+      triangles: 7_562,
+      materials: 1,
+      textures: 1,
       animations: [],
-      currentAnimations: { guard1: null, guard2: null },
+      kidAnimations: ['Idle_A', 'Running_A', 'PickUp', 'Hit_A'],
+      currentAnimations: { guard1: null, guard2: null, kid: 'Idle_A' },
       sockets: [],
+      kidSockets: ['head', 'left-hand', 'right-hand', 'back'],
     });
   const failures = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.lastFailures);
   expect(failures?.guard1).toBeTruthy();
   expect(failures?.guard2).toBeTruthy();
+  expect(failures?.kid).toBeNull();
+});
+
+test('kid asset failure is surfaced without the old procedural model', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Kid failure handling only needs one installed Chrome run.');
+  await page.route('**/assets/models/kaykit-adventurers/Rogue_Kid.glb', (route) => route.abort('failed'));
+  await page.goto('/?audio=procedural&trees=procedural');
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters))
+    .toMatchObject({
+      guard1Mode: 'imported',
+      guard2Mode: 'imported',
+      kidMode: 'failed',
+      importedGuards: 2,
+      importedCharacters: 2,
+      meshes: 18,
+      triangles: 11_600,
+      materials: 4,
+      textures: 1,
+      animations: ['Idle_A', 'Running_A', 'Jump_Full_Short', 'Jump_Land', 'Hit_A'],
+      kidAnimations: [],
+      currentAnimations: { guard1: 'Idle_A', guard2: 'Idle_A', kid: null },
+      sockets: ['head', 'left-hand', 'right-hand', 'back'],
+      kidSockets: [],
+      kidDetails: null,
+    });
+  const failures = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.lastFailures);
+  expect(failures?.guard1).toBeNull();
+  expect(failures?.guard2).toBeNull();
+  expect(failures?.kid).toBeTruthy();
 });
 
 test('character state presentation stays readable across key gameplay moments', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'The presentation state matrix only needs one browser target.');
   await page.goto('/');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.kidMode))
+    .toBe('imported');
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
 
   const scenarios = [

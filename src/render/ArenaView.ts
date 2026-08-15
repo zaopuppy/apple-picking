@@ -8,11 +8,6 @@ import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../gam
 import { VfxSystem } from '../systems/VfxSystem';
 import { disposeObject3D } from '../utils/dispose';
 import {
-  createKidCharacter,
-  syncKidCharacter,
-  type CharacterView,
-} from './CharacterView';
-import {
   createAppleMaterial,
   createOrchardMaterials,
   ORCHARD_COLORS,
@@ -24,6 +19,12 @@ import {
   type ImportedGuardId,
   type ImportedGuardView,
 } from './ImportedGuardView';
+import {
+  disposeImportedKidView,
+  loadImportedKidView,
+  syncImportedKidView,
+  type ImportedKidView,
+} from './ImportedKidView';
 
 type AppleTransition = {
   kind: 'pickup' | 'drop' | 'delivery';
@@ -66,23 +67,32 @@ export type EnvironmentAssetDiagnostics = {
 export type CharacterAssetDiagnostics = {
   guard1Mode: 'loading' | 'imported' | 'failed';
   guard2Mode: 'loading' | 'imported' | 'failed';
+  kidMode: 'loading' | 'imported' | 'failed';
   importedGuards: number;
+  importedCharacters: number;
   meshes: number;
   triangles: number;
   materials: number;
   textures: number;
   animations: string[];
-  currentAnimations: Record<ImportedGuardId, string | null>;
+  kidAnimations: string[];
+  currentAnimations: Record<ImportedGuardId | 'kid', string | null>;
   sockets: string[];
+  kidSockets: string[];
+  kidDetails: {
+    backpackScaleZ: number;
+    sweatDrops: number;
+    postureLean: number;
+    breathScaleY: number;
+  } | null;
   lastFailure: string | null;
-  lastFailures: Record<ImportedGuardId, string | null>;
+  lastFailures: Record<ImportedGuardId | 'kid', string | null>;
 };
 
 export class ArenaView {
   readonly root = new THREE.Group();
 
   private readonly materials = createOrchardMaterials();
-  private readonly kidView: CharacterView;
   private readonly appleViews = new Map<number, AppleView>();
   private readonly pickingRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   private readonly vfx: VfxSystem;
@@ -90,6 +100,7 @@ export class ArenaView {
   private readonly appleTarget = new THREE.Vector3();
   private readonly proceduralTreeVisuals = new THREE.Group();
   private readonly importedGuardViews = new Map<ImportedGuardId, ImportedGuardView>();
+  private importedKidView: ImportedKidView | null = null;
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
     treeMode: 'procedural',
@@ -102,16 +113,21 @@ export class ArenaView {
   private characterDiagnostics: CharacterAssetDiagnostics = {
     guard1Mode: 'loading',
     guard2Mode: 'loading',
+    kidMode: 'loading',
     importedGuards: 0,
+    importedCharacters: 0,
     meshes: 0,
     triangles: 0,
     materials: 0,
     textures: 0,
     animations: [],
-    currentAnimations: { guard1: null, guard2: null },
+    kidAnimations: [],
+    currentAnimations: { guard1: null, guard2: null, kid: null },
     sockets: [],
+    kidSockets: [],
+    kidDetails: null,
     lastFailure: null,
-    lastFailures: { guard1: null, guard2: null },
+    lastFailures: { guard1: null, guard2: null, kid: null },
   };
   private deliveryApples!: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
@@ -119,8 +135,7 @@ export class ArenaView {
     this.createWorld();
     void this.installImportedGuard('guard1');
     void this.installImportedGuard('guard2');
-    this.kidView = createKidCharacter(this.materials);
-    this.root.add(this.kidView.root);
+    void this.installImportedKid();
     for (let id = 0; id < APPLE_SPAWNS.length; id += 1) this.createApple(id);
 
     this.pickingRing = new THREE.Mesh(
@@ -235,7 +250,16 @@ export class ArenaView {
         this.characterDiagnostics.currentAnimations[guard.id] = imported.currentAnimation;
       }
     }
-    syncKidCharacter(this.kidView, snapshot.kid, renderTime, reducedMotion);
+    if (this.importedKidView) {
+      syncImportedKidView(this.importedKidView, snapshot.kid, renderTime, reducedMotion);
+      this.characterDiagnostics.currentAnimations.kid = this.importedKidView.currentAnimation;
+      this.characterDiagnostics.kidDetails = {
+        backpackScaleZ: this.importedKidView.backpackBody.scale.z,
+        sweatDrops: this.importedKidView.sweat.count,
+        postureLean: this.importedKidView.motionRoot.rotation.x,
+        breathScaleY: this.importedKidView.motionRoot.scale.y,
+      };
+    }
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);
     this.syncDeliveryPile(snapshot, renderTime);
 
@@ -259,8 +283,13 @@ export class ArenaView {
     return {
       ...this.characterDiagnostics,
       animations: [...this.characterDiagnostics.animations],
+      kidAnimations: [...this.characterDiagnostics.kidAnimations],
       currentAnimations: { ...this.characterDiagnostics.currentAnimations },
       sockets: [...this.characterDiagnostics.sockets],
+      kidSockets: [...this.characterDiagnostics.kidSockets],
+      kidDetails: this.characterDiagnostics.kidDetails
+        ? { ...this.characterDiagnostics.kidDetails }
+        : null,
       lastFailures: { ...this.characterDiagnostics.lastFailures },
     };
   }
@@ -268,6 +297,7 @@ export class ArenaView {
   dispose(): void {
     this.disposed = true;
     for (const imported of this.importedGuardViews.values()) disposeImportedGuardView(imported);
+    if (this.importedKidView) disposeImportedKidView(this.importedKidView);
     disposeObject3D(this.root);
     this.root.removeFromParent();
   }
@@ -491,12 +521,32 @@ export class ArenaView {
       this.root.add(imported.root);
       this.setGuardMode(id, 'imported');
       this.characterDiagnostics.lastFailures[id] = null;
-      this.refreshImportedGuardDiagnostics();
+      this.refreshImportedCharacterDiagnostics();
     } catch (error) {
       const failure = error instanceof Error ? error.message : String(error);
       this.setGuardMode(id, 'failed');
       this.characterDiagnostics.lastFailures[id] = failure;
-      this.refreshImportedGuardDiagnostics();
+      this.refreshImportedCharacterDiagnostics();
+    }
+  }
+
+  private async installImportedKid(): Promise<void> {
+    try {
+      const imported = await loadImportedKidView(this.materials);
+      if (this.disposed) {
+        disposeImportedKidView(imported);
+        disposeObject3D(imported.root);
+        return;
+      }
+      this.importedKidView = imported;
+      this.root.add(imported.root);
+      this.characterDiagnostics.kidMode = 'imported';
+      this.characterDiagnostics.lastFailures.kid = null;
+      this.refreshImportedCharacterDiagnostics();
+    } catch (error) {
+      this.characterDiagnostics.kidMode = 'failed';
+      this.characterDiagnostics.lastFailures.kid = error instanceof Error ? error.message : String(error);
+      this.refreshImportedCharacterDiagnostics();
     }
   }
 
@@ -508,21 +558,25 @@ export class ArenaView {
     else this.characterDiagnostics.guard2Mode = mode;
   }
 
-  private refreshImportedGuardDiagnostics(): void {
-    const imported = [...this.importedGuardViews.values()];
-    const first = imported[0];
-    this.characterDiagnostics.importedGuards = imported.length;
+  private refreshImportedCharacterDiagnostics(): void {
+    const guards = [...this.importedGuardViews.values()];
+    const firstGuard = guards[0];
+    const kid = this.importedKidView;
+    const imported = kid ? [...guards, kid] : guards;
+    this.characterDiagnostics.importedGuards = guards.length;
+    this.characterDiagnostics.importedCharacters = imported.length;
     this.characterDiagnostics.meshes = imported.reduce((total, view) => total + view.meshes, 0);
     this.characterDiagnostics.triangles = imported.reduce((total, view) => total + view.triangles, 0);
     this.characterDiagnostics.materials = imported.reduce((total, view) => total + view.materialCount, 0);
-    this.characterDiagnostics.textures = imported.reduce(
-      (highest, view) => Math.max(highest, view.textureCount),
-      0,
-    );
-    this.characterDiagnostics.animations = first ? [...first.actions.keys()] : [];
-    this.characterDiagnostics.sockets = first ? [...first.sockets] : [];
+    this.characterDiagnostics.textures = (firstGuard?.textureCount ?? 0) + (kid?.textureCount ?? 0);
+    this.characterDiagnostics.animations = firstGuard ? [...firstGuard.actions.keys()] : [];
+    this.characterDiagnostics.kidAnimations = kid ? [...kid.actions.keys()] : [];
+    this.characterDiagnostics.sockets = firstGuard ? [...firstGuard.sockets] : [];
+    this.characterDiagnostics.kidSockets = kid ? [...kid.sockets] : [];
     this.characterDiagnostics.lastFailure =
-      this.characterDiagnostics.lastFailures.guard1 ?? this.characterDiagnostics.lastFailures.guard2;
+      this.characterDiagnostics.lastFailures.guard1 ??
+      this.characterDiagnostics.lastFailures.guard2 ??
+      this.characterDiagnostics.lastFailures.kid;
   }
 
   private createDeliveryZone(): void {
