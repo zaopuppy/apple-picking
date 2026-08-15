@@ -121,7 +121,7 @@ export class Game {
     const snapshot = this.simulation.getSnapshot();
     const presentationTime = this.reducedMotion ? snapshot.elapsedSeconds : this.renderTime;
     this.view.sync(snapshot, presentationTime, this.reducedMotion);
-    this.hud.update(snapshot);
+    this.hud.update(snapshot, this.fps);
   }
 
   private render(): void {

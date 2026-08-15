@@ -84,6 +84,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   const frameRate = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.frameRate);
   expect(frameRate?.current).toBeLessThanOrEqual(60);
   expect(frameRate?.cap).toBe(60);
+  await expect(page.locator('#fps-value')).not.toHaveText('0');
 
   const sample = await sampleCanvas(page);
   expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
@@ -211,7 +212,7 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
   await expect(page.locator('#state-strip')).toHaveCount(0);
   await expect(page.locator('#status-line')).toHaveCount(0);
   await expect(page.locator('#controls')).toHaveCount(0);
-  await expect(page.locator('#fps-value')).toHaveCount(0);
+  await expect(page.locator('#fps-value')).toHaveCount(1);
 
   const layout = await page.evaluate(() => {
     const rect = (selector: string) => {
