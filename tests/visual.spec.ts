@@ -299,14 +299,30 @@ test('development tuning panel is live and can be hidden by the visual test hook
   await expect(panel.getByText('Guard 速度系数')).toBeVisible();
   await expect(panel.getByText('Kid 速度系数')).toBeVisible();
 
+  const landscapeAngle = panel.getByRole('textbox', { name: '横屏倾角（度）' });
   const baseSpeed = panel.getByRole('textbox', { name: '基准速度' });
   const guardMultiplier = panel.getByRole('textbox', { name: 'Guard 速度系数' });
   const kidMultiplier = panel.getByRole('textbox', { name: 'Kid 速度系数' });
-  await baseSpeed.fill('6');
+  await landscapeAngle.fill('120');
+  await landscapeAngle.press('Enter');
+  await expect(landscapeAngle).toHaveValue('100');
+  await landscapeAngle.fill('10');
+  await landscapeAngle.press('Enter');
+  await expect(landscapeAngle).toHaveValue('25');
+  await landscapeAngle.fill('50');
+  await baseSpeed.fill('3');
+  await baseSpeed.press('Enter');
+  await expect(baseSpeed).toHaveValue('5');
+  await baseSpeed.fill('25');
+  await baseSpeed.press('Enter');
+  await expect(baseSpeed).toHaveValue('20');
+  await baseSpeed.fill('8');
+  await expect(baseSpeed).toHaveValue('8');
+  await baseSpeed.fill('15');
   await guardMultiplier.fill('0.5');
   await kidMultiplier.fill('1.5');
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.movement))
-    .toEqual({ baseSpeed: 6, guardSpeedMultiplier: 0.5, kidSpeedMultiplier: 1.5 });
+    .toEqual({ baseSpeed: 15, guardSpeedMultiplier: 0.5, kidSpeedMultiplier: 1.5 });
 
   const movement = await page.evaluate(() => {
     const hooks = window.__THREE_GAME_TEST_HOOKS__!;
@@ -322,8 +338,8 @@ test('development tuning panel is live and can be hidden by the visual test hook
       kidDistance: after.kid.position.x - before.kid.position.x,
     };
   });
-  expect(movement.guardDistance).toBeCloseTo(3 / 60, 5);
-  expect(movement.kidDistance).toBeCloseTo(9 / 60, 5);
+  expect(movement.guardDistance).toBeCloseTo(7.5 / 60, 5);
+  expect(movement.kidDistance).toBeCloseTo(22.5 / 60, 5);
 
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true));
   await expect(panel).toBeHidden();

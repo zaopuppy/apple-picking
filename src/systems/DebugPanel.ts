@@ -24,7 +24,7 @@ export class DebugPanel {
     this.gui.domElement.dataset.testid = 'debug-panel';
 
     const camera = this.gui.addFolder('镜头');
-    camera.add(tuning, 'landscapeCameraAngle', 25, 50, 1)
+    camera.add(tuning, 'landscapeCameraAngle', 25, 100, 1)
       .name('横屏倾角（度）')
       .onChange(callbacks.cameraChanged);
     camera.add(tuning, 'cameraZoom', 0.8, 1.25, 0.01)
@@ -32,7 +32,7 @@ export class DebugPanel {
       .onChange(callbacks.cameraChanged);
 
     const movement = this.gui.addFolder('移动速度');
-    movement.add(tuning, 'baseSpeed', 1, 10, 0.1)
+    movement.add(tuning, 'baseSpeed', 5, 20, 0.1)
       .name('基准速度')
       .onChange(callbacks.movementChanged);
     movement.add(tuning, 'guardSpeedMultiplier', 0.5, 2, 0.05)

@@ -10,7 +10,7 @@ export type MovementTuning = {
 };
 
 export const DEFAULT_MOVEMENT_TUNING: Readonly<MovementTuning> = {
-  baseSpeed: 4,
+  baseSpeed: 8,
   guardSpeedMultiplier: 1.05,
   kidSpeedMultiplier: 1.2,
 };
