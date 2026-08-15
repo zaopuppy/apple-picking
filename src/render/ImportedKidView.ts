@@ -7,6 +7,7 @@ import { ORCHARD_COLORS, type OrchardMaterials } from './OrchardMaterials';
 
 const KID_ASSET_URL = `${import.meta.env.BASE_URL}assets/models/kaykit-adventurers/Rogue_Kid.glb`;
 const KID_HEIGHT = 1.56;
+const KID_HIT_COLOR = '#ef6a4a';
 
 const REQUIRED_ANIMATIONS = [
   'Idle_A',
@@ -180,21 +181,29 @@ export function syncImportedKidView(
     ? 0
     : Math.sin(time * (2.1 + loadRatio * 0.65)) * (0.009 + loadRatio * 0.009);
   const picking = kid.state === 'Picking' ? Math.sin(kid.pickingProgress * Math.PI / 2) : 0;
+  const hitProgress = kid.state === 'Hit'
+    ? THREE.MathUtils.clamp(1 - kid.stateTicks / GAME_CONFIG.kidHitStunTicks, 0, 1)
+    : 0;
+  const hitImpulse = reducedMotion ? 0 : Math.sin(hitProgress * Math.PI);
   const lean = loadRatio * 0.17 + motion * 0.035 + picking * 0.06;
   const wobble = reducedMotion ? 0 : gait * 0.025 * motion * (0.4 + loadRatio * 0.6);
 
-  view.motionRoot.position.set(0, -picking * 0.035, 0);
-  view.motionRoot.rotation.set(lean, 0, wobble);
-  view.motionRoot.scale.set(1 - breath * 0.22, 1 + breath, 1 - breath * 0.22);
+  view.motionRoot.position.set(0, -picking * 0.035 - hitImpulse * 0.05, 0);
+  view.motionRoot.rotation.set(lean - hitImpulse * 0.22, 0, wobble + hitImpulse * 0.28);
+  view.motionRoot.scale.set(
+    (1 - breath * 0.22) * (1 + hitImpulse * 0.04),
+    (1 + breath) * (1 - hitImpulse * 0.08),
+    (1 - breath * 0.22) * (1 + hitImpulse * 0.04),
+  );
 
   const animation = selectAnimation(kid);
-  const action = activateAnimation(view, animation, kid.state !== 'Normal');
+  const action = activateAnimation(view, animation, animation === 'PickUp' || animation === 'Hit_A');
   const delta = view.lastUpdateTime === 0
     ? 0
     : THREE.MathUtils.clamp(time - view.lastUpdateTime, 0, 0.1);
   view.lastUpdateTime = time;
 
-  if (kid.state === 'Normal') {
+  if (animation === 'Idle_A' || animation === 'Running_A') {
     action.paused = reducedMotion;
     action.timeScale = animation === 'Running_A' ? 1.08 - loadRatio * 0.24 : 0.9;
     if (reducedMotion) action.time = 0;
@@ -211,16 +220,24 @@ export function syncImportedKidView(
 
   view.stateRing.visible = kid.state !== 'Normal';
   view.stateRing.material.color.set(
-    kid.state === 'Picking' ? ORCHARD_COLORS.reward : ORCHARD_COLORS.invincible,
+    kid.state === 'Picking'
+      ? ORCHARD_COLORS.reward
+      : kid.state === 'Hit'
+        ? KID_HIT_COLOR
+        : ORCHARD_COLORS.invincible,
   );
   view.stateRing.material.opacity = kid.state === 'Invincible'
     ? reducedMotion ? 0.72 : 0.38 + Math.abs(Math.sin(time * 9)) * 0.46
-    : 0.82;
+    : kid.state === 'Hit' ? 0.94 : 0.82;
   view.stateRing.rotation.z = reducedMotion ? 0 : -time * 1.4;
 
   for (const material of view.materials) {
-    material.emissive.set(kid.state === 'Invincible' ? ORCHARD_COLORS.invincible : '#000000');
-    material.emissiveIntensity = kid.state === 'Invincible' ? 0.42 : 0;
+    material.emissive.set(
+      kid.state === 'Hit'
+        ? KID_HIT_COLOR
+        : kid.state === 'Invincible' ? ORCHARD_COLORS.invincible : '#000000',
+    );
+    material.emissiveIntensity = kid.state === 'Hit' ? 0.86 : kid.state === 'Invincible' ? 0.42 : 0;
   }
   updateSweat(view, load, kid.movementAmount, time, reducedMotion);
 }
@@ -232,7 +249,7 @@ export function disposeImportedKidView(view: ImportedKidView): void {
 
 function selectAnimation(kid: KidSnapshot): KidAnimationName {
   if (kid.state === 'Picking') return 'PickUp';
-  if (kid.state === 'Invincible') return 'Hit_A';
+  if (kid.state === 'Hit') return 'Hit_A';
   return kid.movementAmount > 0.08 ? 'Running_A' : 'Idle_A';
 }
 
@@ -255,9 +272,9 @@ function activateAnimation(
 
 function stateAnimationTime(duration: number, kid: KidSnapshot): number {
   if (kid.state === 'Picking') return kid.pickingProgress * duration;
-  if (kid.state === 'Invincible') {
-    const progress = 1 - kid.stateTicks / GAME_CONFIG.invincibleTicks;
-    return Math.min(1, progress * 2.2) * duration;
+  if (kid.state === 'Hit') {
+    const progress = 1 - kid.stateTicks / GAME_CONFIG.kidHitStunTicks;
+    return THREE.MathUtils.clamp(progress, 0, 1) * duration;
   }
   return 0;
 }

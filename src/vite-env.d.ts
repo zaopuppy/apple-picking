@@ -73,6 +73,7 @@ declare global {
         sweatDrops: number;
         postureLean: number;
         breathScaleY: number;
+        animationPaused: boolean | null;
       } | null;
       lastFailure: string | null;
       lastFailures: {

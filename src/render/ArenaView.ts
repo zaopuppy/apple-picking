@@ -74,6 +74,7 @@ export type CharacterAssetDiagnostics = {
     sweatDrops: number;
     postureLean: number;
     breathScaleY: number;
+    animationPaused: boolean | null;
   } | null;
   lastFailure: string | null;
   lastFailures: Record<ImportedGuardId | 'kid', string | null>;
@@ -260,6 +261,9 @@ export class ArenaView {
         sweatDrops: this.importedKidView.sweat.count,
         postureLean: this.importedKidView.motionRoot.rotation.x,
         breathScaleY: this.importedKidView.motionRoot.scale.y,
+        animationPaused: this.importedKidView.currentAnimation
+          ? this.importedKidView.actions.get(this.importedKidView.currentAnimation)?.paused ?? null
+          : null,
       };
     }
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);

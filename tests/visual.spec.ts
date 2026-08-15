@@ -508,10 +508,42 @@ test('KayKit Knight guards and Rogue kid load once and map key states independen
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))
     .toBe('PickUp');
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('captured'));
-  await expect
-    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))
-    .toBe('Hit_A');
+
+  const captureMotion = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+    hooks.setPausedForScreenshot(true);
+    hooks.scenario('pickup-danger');
+    const captured = hooks.step({}, 1);
+    const captureAnimation = window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid;
+    const locked = hooks.step({
+      kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+    }, 17);
+    const recovered = hooks.step({
+      kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+    }, 1);
+    const moved = hooks.step({
+      kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+    }, 1);
+    return {
+      captured,
+      captureAnimation,
+      locked,
+      recovered,
+      moved,
+      movementAnimation: window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid,
+      animationPaused: window.__THREE_GAME_DIAGNOSTICS__?.characters.kidDetails?.animationPaused,
+    };
+  });
+  expect(captureMotion.captured.kid.state).toBe('Hit');
+  expect(captureMotion.captureAnimation).toBe('Hit_A');
+  expect(captureMotion.locked.kid.position).toEqual(captureMotion.captured.kid.position);
+  expect(captureMotion.recovered.kid.state).toBe('Invincible');
+  expect(captureMotion.recovered.kid.position).toEqual(captureMotion.captured.kid.position);
+  expect(captureMotion.moved.kid.state).toBe('Invincible');
+  expect(captureMotion.moved.kid.position.x).toBeGreaterThan(captureMotion.recovered.kid.position.x);
+  expect(captureMotion.movementAnimation).toBe('Running_A');
+  expect(captureMotion.animationPaused).toBe(false);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(false));
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(100);
@@ -593,7 +625,8 @@ test('character state presentation stays readable across key gameplay moments', 
     { name: 'guard-recover', guardState: 'Recover' },
     { name: 'guard-stunned', guardState: 'Stunned' },
     { name: 'delivery-progress', carried: 2, delivered: 3 },
-    { name: 'captured', kidState: 'Invincible' },
+    { name: 'captured', kidState: 'Hit' },
+    { name: 'invincible', kidState: 'Invincible' },
   ] as const;
 
   for (const scenario of scenarios) {

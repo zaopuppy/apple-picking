@@ -38,9 +38,45 @@ test.describe('deterministic apple-picking rules', () => {
       return hooks.step({ kid: { moveX: 0, moveZ: 0, actionPressed: true, dropPressed: false } }, 1);
     });
     expect(snapshot.catches).toBe(1);
-    expect(snapshot.kid.state).toBe('Invincible');
+    expect(snapshot.kid.state).toBe('Hit');
     expect(snapshot.kid.pickingTargetId).toBeNull();
     expect(snapshot.apples[0].state).toBe('Ground');
+  });
+
+  test('capture locks movement briefly, then grants a mobile invincibility window', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('pickup-danger');
+      const captured = hooks.step({}, 1);
+      const locked = hooks.step({
+        kid: { moveX: 1, moveZ: 0, actionPressed: true, dropPressed: false },
+      }, 17);
+      const recovered = hooks.step({
+        kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+      }, 1);
+      const moving = hooks.step({
+        kid: { moveX: 1, moveZ: 0, actionPressed: false, dropPressed: false },
+      }, 1);
+      const almostVulnerable = hooks.step({}, 70);
+      const vulnerable = hooks.step({}, 1);
+      return { captured, locked, recovered, moving, almostVulnerable, vulnerable };
+    });
+
+    expect(result.captured.kid.state).toBe('Hit');
+    expect(result.captured.kid.stateTicks).toBe(18);
+    expect(result.locked.kid.state).toBe('Hit');
+    expect(result.locked.kid.stateTicks).toBe(1);
+    expect(result.locked.kid.position).toEqual(result.captured.kid.position);
+    expect(result.locked.kid.pickingTargetId).toBeNull();
+    expect(result.recovered.kid.state).toBe('Invincible');
+    expect(result.recovered.kid.stateTicks).toBe(72);
+    expect(result.recovered.kid.position).toEqual(result.captured.kid.position);
+    expect(result.moving.kid.state).toBe('Invincible');
+    expect(result.moving.kid.position.x).toBeGreaterThan(result.recovered.kid.position.x);
+    expect(result.almostVulnerable.kid.state).toBe('Invincible');
+    expect(result.almostVulnerable.kid.stateTicks).toBe(1);
+    expect(result.vulnerable.kid.state).toBe('Normal');
+    expect(result.vulnerable.catches).toBe(1);
   });
 
   test('actors separate while light ground apples yield without changing ownership', async ({ page }) => {

@@ -140,8 +140,11 @@ export class GameSimulation {
     this.decrementAppleLocks();
     this.savePreviousPositions();
 
-    const deliveryThrowRequested = commands.kid.dropPressed && this.isKidInDeliveryZone();
-    if (commands.kid.dropPressed && !deliveryThrowRequested) this.dropOneApple();
+    const kidCanUseItems = this.kid.state !== 'Hit';
+    const deliveryThrowRequested = kidCanUseItems &&
+      commands.kid.dropPressed &&
+      this.isKidInDeliveryZone();
+    if (kidCanUseItems && commands.kid.dropPressed && !deliveryThrowRequested) this.dropOneApple();
     if (commands.kid.actionPressed) this.tryStartPicking();
 
     this.updateGuard(this.guards[0], commands.guard1);
@@ -317,6 +320,13 @@ export class GameSimulation {
         this.moveGuardsAway();
         this.kid.position = { x: 0, z: 0 };
         this.kid.previousPosition = copy(this.kid.position);
+        this.kid.state = 'Hit';
+        this.kid.stateTicks = Math.ceil(GAME_CONFIG.kidHitStunTicks / 2);
+        return;
+      case 'invincible':
+        this.moveGuardsAway();
+        this.kid.position = { x: 0, z: 0 };
+        this.kid.previousPosition = copy(this.kid.position);
         this.kid.state = 'Invincible';
         this.kid.stateTicks = Math.ceil(GAME_CONFIG.invincibleTicks / 2);
         return;
@@ -401,7 +411,7 @@ export class GameSimulation {
   }
 
   private updateKidMovement(command: ActorCommand): void {
-    if (this.kid.state === 'Picking') return;
+    if (this.kid.state === 'Picking' || this.kid.state === 'Hit') return;
     const direction = normalized({ x: command.moveX, z: command.moveZ });
     if (lengthSquared(direction) > 0) this.kid.facing = direction;
     this.moveWithCollisions(
@@ -566,7 +576,7 @@ export class GameSimulation {
   }
 
   private checkCapture(): boolean {
-    if (this.kid.state === 'Invincible') return false;
+    if (this.kid.state === 'Hit' || this.kid.state === 'Invincible') return false;
     const captureRadius = GAME_CONFIG.guardRadius + GAME_CONFIG.kidRadius;
     const captor = this.guards.find((guard) =>
       (guard.state === 'Move' || guard.state === 'Pounce') &&
@@ -577,8 +587,9 @@ export class GameSimulation {
     this.catches += 1;
     this.cancelPicking();
     this.dropAllCarriedApples();
-    this.kid.state = 'Invincible';
-    this.kid.stateTicks = GAME_CONFIG.invincibleTicks;
+    this.knockKidAwayFrom(captor);
+    this.kid.state = 'Hit';
+    this.kid.stateTicks = GAME_CONFIG.kidHitStunTicks;
     this.events.push({ type: 'captured', catches: this.catches });
     if (this.catches >= GAME_CONFIG.catchTarget) {
       this.matchState = 'GuardWin';
@@ -607,6 +618,11 @@ export class GameSimulation {
     if (this.kid.state === 'Normal') return;
     this.kid.stateTicks = Math.max(0, this.kid.stateTicks - 1);
     if (this.kid.stateTicks > 0) return;
+    if (this.kid.state === 'Hit') {
+      this.kid.state = 'Invincible';
+      this.kid.stateTicks = GAME_CONFIG.invincibleTicks;
+      return;
+    }
     if (this.kid.state === 'Invincible') {
       this.kid.state = 'Normal';
       return;
@@ -626,6 +642,18 @@ export class GameSimulation {
     apple.state = 'Carried';
     this.kid.carriedAppleIds.push(apple.id);
     this.events.push({ type: 'picked', appleId: apple.id });
+  }
+
+  private knockKidAwayFrom(captor: GuardModel): void {
+    let direction = normalized({
+      x: this.kid.position.x - captor.position.x,
+      z: this.kid.position.z - captor.position.z,
+    });
+    if (lengthSquared(direction) === 0) direction = copy(captor.facing);
+    this.kid.position.x += direction.x * GAME_CONFIG.kidHitKnockback;
+    this.kid.position.z += direction.z * GAME_CONFIG.kidHitKnockback;
+    this.kid.facing = direction;
+    this.constrainPosition(this.kid.position, GAME_CONFIG.kidRadius);
   }
 
   private tryStartPicking(): void {

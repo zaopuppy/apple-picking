@@ -18,6 +18,8 @@ export const GAME_CONFIG = {
   maxCarriedApples: 3,
   pickupRadius: 1.15,
   pickingTicks: 24,
+  kidHitStunTicks: 18,
+  kidHitKnockback: 0.72,
   invincibleTicks: 72,
   invincibleSpeedMultiplier: 1.25,
   manualDropLockTicks: 36,
