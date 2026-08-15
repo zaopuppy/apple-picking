@@ -15,6 +15,11 @@ import {
   createOrchardMaterials,
   ORCHARD_COLORS,
 } from './OrchardMaterials';
+import {
+  createOrchardWorldKit,
+  syncOrchardWorldKit,
+  type OrchardWorldKitView,
+} from './OrchardWorldKit';
 
 type AppleTransition = {
   kind: 'pickup' | 'drop' | 'delivery';
@@ -54,6 +59,7 @@ export class ArenaView {
   private readonly vfx: VfxSystem;
   private readonly matrixDummy = new THREE.Object3D();
   private readonly appleTarget = new THREE.Vector3();
+  private worldKit!: OrchardWorldKitView;
   private deliveryApples!: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
   constructor(scene: THREE.Scene) {
@@ -177,6 +183,7 @@ export class ArenaView {
     syncKidCharacter(this.kidView, snapshot.kid, renderTime, reducedMotion);
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);
     this.syncDeliveryPile(snapshot, renderTime);
+    syncOrchardWorldKit(this.worldKit, renderTime, reducedMotion);
 
     this.pickingRing.visible = snapshot.kid.state === 'Picking';
     if (this.pickingRing.visible) {
@@ -196,6 +203,9 @@ export class ArenaView {
   }
 
   private createWorld(): void {
+    this.worldKit = createOrchardWorldKit(this.materials);
+    this.root.add(this.worldKit.root);
+
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(GAME_CONFIG.arenaHalfWidth * 2, GAME_CONFIG.arenaHalfDepth * 2),
       this.materials.grass,
