@@ -50,9 +50,8 @@ declare global {
       lastFailure: string | null;
     };
     characters: {
-      guard1Mode: 'loading' | 'imported' | 'procedural';
-      guard2Mode: 'loading' | 'imported' | 'procedural';
-      externalRequested: boolean;
+      guard1Mode: 'loading' | 'imported' | 'failed';
+      guard2Mode: 'loading' | 'imported' | 'failed';
       importedGuards: number;
       meshes: number;
       triangles: number;

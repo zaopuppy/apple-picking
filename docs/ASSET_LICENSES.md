@@ -56,7 +56,7 @@
 - guard1 使用 `Idle_A` / `Running_A` 表达待机与追赶，`Jump_Full_Short` 表达飞扑，`Jump_Land` 配合状态进度表达爬起，`Hit_A` 仅用于双 guard 碰撞后的受控状态；
 - 保留头部、左右手和背部挂点，并叠加蓝色帽子、阵营环、飞扑高亮和受控标记；
 - guard2 与 kid 继续使用程序化角色，作为风格和可读性对照；
-- `?guard=procedural` 可强制恢复 guard1 原有外观，模型加载失败时也会自动保留原角色；
+- 单角色原型期曾保留程序化 guard 作为对照；角色方向确认后，该临时回退已删除；
 - `guard-pounce` / `guard-recover` 实测桌面和手机最多 63 draw calls、21,577 triangles、71 geometries、6 textures；
 - 模拟层的角色半径、碰撞、位移、飞扑和爬起计时均未修改。
 
@@ -66,7 +66,7 @@
 - 两名 guard 合计 14 meshes、17,290 triangles、2 个可独立变色的 materials，并共享 1 个逻辑纹理资产；模型只发起一次网络请求；
 - guard1 使用蓝色七边形帽顶、矩形帽檐、斜带和状态环，guard2 使用绿色七边形帽顶、圆形帽檐、反向斜带和状态环；
 - 两名 guard 分别持有动画混合器，可独立播放 `Idle_A`、`Running_A`、`Jump_Full_Short`、`Jump_Land` 和 `Hit_A`，不会串动画；
-- `?guard=procedural` 可同时回退两名 guard，`?guard1=procedural` 与 `?guard2=procedural` 可逐角色回退；单个资源加载失败时程序化外观仍然可见；
+- Ranger GLB 已成为两名 guard 的正式运行时依赖；程序化 guard 和逐角色查询参数回退已删除，加载失败会在角色诊断中标记为 `failed`；
 - 正常桌面/手机实测为 63 draw calls、29,782 triangles、75 geometries、7 textures；受控状态峰值为 69 draw calls、29,998 triangles、77 geometries、7 textures；
 - kid 继续使用程序化角色，以完整保留拾取、负重姿态、苹果堆、滴汗和被抓等关键状态；
 - 模拟层的角色半径、碰撞、位移、飞扑和爬起计时均未修改。

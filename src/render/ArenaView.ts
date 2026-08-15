@@ -8,9 +8,7 @@ import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../gam
 import { VfxSystem } from '../systems/VfxSystem';
 import { disposeObject3D } from '../utils/dispose';
 import {
-  createGuardCharacter,
   createKidCharacter,
-  syncGuardCharacter,
   syncKidCharacter,
   type CharacterView,
 } from './CharacterView';
@@ -66,9 +64,8 @@ export type EnvironmentAssetDiagnostics = {
 };
 
 export type CharacterAssetDiagnostics = {
-  guard1Mode: 'loading' | 'imported' | 'procedural';
-  guard2Mode: 'loading' | 'imported' | 'procedural';
-  externalRequested: boolean;
+  guard1Mode: 'loading' | 'imported' | 'failed';
+  guard2Mode: 'loading' | 'imported' | 'failed';
   importedGuards: number;
   meshes: number;
   triangles: number;
@@ -85,7 +82,6 @@ export class ArenaView {
   readonly root = new THREE.Group();
 
   private readonly materials = createOrchardMaterials();
-  private readonly guardViews = new Map<'guard1' | 'guard2', CharacterView>();
   private readonly kidView: CharacterView;
   private readonly appleViews = new Map<number, AppleView>();
   private readonly pickingRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
@@ -104,9 +100,8 @@ export class ArenaView {
     lastFailure: null,
   };
   private characterDiagnostics: CharacterAssetDiagnostics = {
-    guard1Mode: 'procedural',
-    guard2Mode: 'procedural',
-    externalRequested: false,
+    guard1Mode: 'loading',
+    guard2Mode: 'loading',
     importedGuards: 0,
     meshes: 0,
     triangles: 0,
@@ -122,18 +117,8 @@ export class ArenaView {
 
   constructor(scene: THREE.Scene) {
     this.createWorld();
-    this.guardViews.set('guard1', createGuardCharacter('guard1', this.materials));
-    this.guardViews.set('guard2', createGuardCharacter('guard2', this.materials));
-    for (const view of this.guardViews.values()) this.root.add(view.root);
-    const assetOptions = new URLSearchParams(window.location.search);
-    const allGuardsProcedural = assetOptions.get('guard') === 'procedural';
-    const guard1External = !allGuardsProcedural && assetOptions.get('guard1') !== 'procedural';
-    const guard2External = !allGuardsProcedural && assetOptions.get('guard2') !== 'procedural';
-    this.characterDiagnostics.guard1Mode = guard1External ? 'loading' : 'procedural';
-    this.characterDiagnostics.guard2Mode = guard2External ? 'loading' : 'procedural';
-    this.characterDiagnostics.externalRequested = guard1External || guard2External;
-    if (guard1External) void this.installImportedGuard('guard1');
-    if (guard2External) void this.installImportedGuard('guard2');
+    void this.installImportedGuard('guard1');
+    void this.installImportedGuard('guard2');
     this.kidView = createKidCharacter(this.materials);
     this.root.add(this.kidView.root);
     for (let id = 0; id < APPLE_SPAWNS.length; id += 1) this.createApple(id);
@@ -248,10 +233,7 @@ export class ArenaView {
       if (imported) {
         syncImportedGuardView(imported, guard, renderTime, reducedMotion);
         this.characterDiagnostics.currentAnimations[guard.id] = imported.currentAnimation;
-        continue;
       }
-      const view = this.guardViews.get(guard.id);
-      if (view) syncGuardCharacter(view, guard, renderTime, reducedMotion);
     }
     syncKidCharacter(this.kidView, snapshot.kid, renderTime, reducedMotion);
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);
@@ -505,8 +487,6 @@ export class ArenaView {
         disposeObject3D(imported.root);
         return;
       }
-      const procedural = this.guardViews.get(id);
-      if (procedural) procedural.root.visible = false;
       this.importedGuardViews.set(id, imported);
       this.root.add(imported.root);
       this.setGuardMode(id, 'imported');
@@ -514,7 +494,7 @@ export class ArenaView {
       this.refreshImportedGuardDiagnostics();
     } catch (error) {
       const failure = error instanceof Error ? error.message : String(error);
-      this.setGuardMode(id, 'procedural');
+      this.setGuardMode(id, 'failed');
       this.characterDiagnostics.lastFailures[id] = failure;
       this.refreshImportedGuardDiagnostics();
     }

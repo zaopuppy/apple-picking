@@ -305,7 +305,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
       });
     }
   });
-  await page.goto('/?trees=procedural&guard=procedural');
+  await page.goto('/?trees=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await expect.poll(() => audioResponses).toEqual([
     { path: '/assets/audio/kenney/sfx-pack.json', status: 200 },
@@ -337,7 +337,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio.samplePlays ?? 0))
     .toBeGreaterThan(0);
 
-  await page.goto('/?audio=procedural&trees=procedural&guard=procedural');
+  await page.goto('/?audio=procedural&trees=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await page.locator('#game-canvas').click({ position: { x: 20, y: 20 } });
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('delivery'));
@@ -364,7 +364,7 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
     }
   });
 
-  await page.goto('/?audio=procedural&guard=procedural');
+  await page.goto('/?audio=procedural');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
     .toMatchObject({
@@ -380,10 +380,10 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(75);
-  expect(renderer?.triangles).toBeLessThanOrEqual(25_000);
-  expect(renderer?.textures).toBeLessThanOrEqual(5);
+  expect(renderer?.triangles).toBeLessThanOrEqual(80_000);
+  expect(renderer?.textures).toBeLessThanOrEqual(12);
 
-  await page.goto('/?audio=procedural&trees=procedural&guard=procedural');
+  await page.goto('/?audio=procedural&trees=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment)).toMatchObject({
     treeMode: 'procedural',
@@ -395,7 +395,7 @@ test('CC0 orchard trees load within the mobile render budget and retain the proc
   });
 });
 
-test('two CC0 guard instances map key states and retain per-role procedural fallbacks', async ({ page }, testInfo) => {
+test('two CC0 guard instances load once and map key states independently', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Guard asset loading only needs one installed Chrome run.');
   const modelResponses: Array<{ path: string; status: number }> = [];
   page.on('response', (response) => {
@@ -411,7 +411,6 @@ test('two CC0 guard instances map key states and retain per-role procedural fall
     .toMatchObject({
       guard1Mode: 'imported',
       guard2Mode: 'imported',
-      externalRequested: true,
       importedGuards: 2,
       meshes: 14,
       triangles: 17_290,
@@ -464,39 +463,30 @@ test('two CC0 guard instances map key states and retain per-role procedural fall
   expect(renderer?.calls).toBeLessThanOrEqual(100);
   expect(renderer?.triangles).toBeLessThanOrEqual(80_000);
   expect(renderer?.textures).toBeLessThanOrEqual(12);
+});
 
-  await page.goto('/?audio=procedural&trees=procedural&guard2=procedural');
+test('guard asset failure is surfaced without a procedural fallback', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Guard failure handling only needs one installed Chrome run.');
+  await page.route('**/assets/models/kaykit-adventurers/Ranger_Guard.glb', (route) => route.abort('failed'));
+  await page.goto('/?audio=procedural&trees=procedural');
+
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters))
     .toMatchObject({
-      guard1Mode: 'imported',
-      guard2Mode: 'procedural',
-      externalRequested: true,
-      importedGuards: 1,
-      meshes: 7,
-      triangles: 8645,
-      materials: 1,
-      textures: 1,
-      lastFailure: null,
+      guard1Mode: 'failed',
+      guard2Mode: 'failed',
+      importedGuards: 0,
+      meshes: 0,
+      triangles: 0,
+      materials: 0,
+      textures: 0,
+      animations: [],
+      currentAnimations: { guard1: null, guard2: null },
+      sockets: [],
     });
-
-  await page.goto('/?audio=procedural&trees=procedural&guard=procedural');
-  await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
-  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters)).toMatchObject({
-    guard1Mode: 'procedural',
-    guard2Mode: 'procedural',
-    externalRequested: false,
-    importedGuards: 0,
-    meshes: 0,
-    triangles: 0,
-    materials: 0,
-    textures: 0,
-    animations: [],
-    currentAnimations: { guard1: null, guard2: null },
-    sockets: [],
-    lastFailure: null,
-    lastFailures: { guard1: null, guard2: null },
-  });
+  const failures = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.lastFailures);
+  expect(failures?.guard1).toBeTruthy();
+  expect(failures?.guard2).toBeTruthy();
 });
 
 test('character state presentation stays readable across key gameplay moments', async ({ page }, testInfo) => {
