@@ -6,6 +6,15 @@ export type WorldLandmarkVisuals = {
   root: THREE.Group;
   meshes: number;
   triangles: number;
+  homesteads: HomesteadVisualSlot[];
+};
+
+export type HomesteadVisualSlot = {
+  mount: THREE.Group;
+  fallback: THREE.Group;
+  fallbackMeshes: number;
+  fallbackTriangles: number;
+  targetWidth: number;
 };
 
 export function createWorldLandmarks(
@@ -14,10 +23,13 @@ export function createWorldLandmarks(
 ): WorldLandmarkVisuals {
   const root = new THREE.Group();
   root.name = 'semantic-world-landmarks';
+  const homesteads: HomesteadVisualSlot[] = [];
   for (const landmark of landmarks) {
-    const visual = landmark.kind === 'homestead'
+    const homestead = landmark.kind === 'homestead'
       ? createHomestead(landmark, materials)
-      : createPond(landmark, materials);
+      : null;
+    const visual = homestead?.root ?? createPond(landmark, materials);
+    if (homestead) homesteads.push(homestead.slot);
     visual.position.set(landmark.x, 0, landmark.z);
     visual.rotation.y = landmark.rotationY;
     root.add(visual);
@@ -33,13 +45,13 @@ export function createWorldLandmarks(
     const instances = object instanceof THREE.InstancedMesh ? object.count : 1;
     triangles += (indexCount ? indexCount / 3 : vertexCount / 3) * instances;
   });
-  return { root, meshes, triangles };
+  return { root, meshes, triangles, homesteads };
 }
 
 function createHomestead(
   landmark: OrchardLandmark,
   materials: OrchardMaterials,
-): THREE.Group {
+): { root: THREE.Group; slot: HomesteadVisualSlot } {
   const root = new THREE.Group();
   root.name = `homestead-${landmark.id}`;
 
@@ -55,15 +67,23 @@ function createHomestead(
   const houseWidth = Math.min(5.2, landmark.radiusX * 1.06);
   const houseDepth = Math.min(3.8, landmark.radiusZ * 0.94);
   const wallHeight = 2.35;
+  const mount = new THREE.Group();
+  mount.name = `homestead-house-mount-${landmark.id}`;
+  mount.position.set(0, 0.08, -landmark.radiusZ * 0.24);
+  const fallback = new THREE.Group();
+  fallback.name = `procedural-cottage-${landmark.id}`;
+  mount.add(fallback);
+  root.add(mount);
+
   const house = new THREE.Mesh(
     new THREE.BoxGeometry(houseWidth, wallHeight, houseDepth),
     materials.cottageWall,
   );
   house.name = 'cottage-walls';
-  house.position.set(0, wallHeight / 2 + 0.08, -landmark.radiusZ * 0.24);
+  house.position.set(0, wallHeight / 2, 0);
   house.castShadow = true;
   house.receiveShadow = true;
-  root.add(house);
+  fallback.add(house);
 
   const roofRise = 1.05;
   const roofHalfWidth = houseWidth / 2 + 0.34;
@@ -77,12 +97,12 @@ function createHomestead(
     roof.name = side < 0 ? 'cottage-roof-left' : 'cottage-roof-right';
     roof.position.set(
       side * roofHalfWidth * 0.5,
-      wallHeight + 0.08 + roofRise * 0.52,
-      house.position.z,
+      wallHeight + roofRise * 0.52,
+      0,
     );
     roof.rotation.z = side * roofAngle;
     roof.castShadow = true;
-    root.add(roof);
+    fallback.add(roof);
   }
 
   const frontZ = house.position.z + houseDepth / 2 + 0.04;
@@ -90,7 +110,7 @@ function createHomestead(
   door.name = 'cottage-door';
   door.position.set(0, 0.89, frontZ);
   door.castShadow = true;
-  root.add(door);
+  fallback.add(door);
 
   for (const x of [-houseWidth * 0.31, houseWidth * 0.31]) {
     const window = new THREE.Mesh(
@@ -99,11 +119,11 @@ function createHomestead(
     );
     window.name = 'cottage-window';
     window.position.set(x, 1.47, frontZ + 0.015);
-    root.add(window);
+    fallback.add(window);
     const cross = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.72, 0.13), materials.wood);
     cross.position.copy(window.position);
     cross.position.z += 0.02;
-    root.add(cross);
+    fallback.add(cross);
   }
 
   const chimney = new THREE.Mesh(
@@ -113,7 +133,7 @@ function createHomestead(
   chimney.name = 'cottage-chimney';
   chimney.position.set(houseWidth * 0.28, wallHeight + 1.05, house.position.z - houseDepth * 0.18);
   chimney.castShadow = true;
-  root.add(chimney);
+  fallback.add(chimney);
 
   root.add(createYardFence(landmark.radiusX, landmark.radiusZ, materials));
 
@@ -139,7 +159,31 @@ function createHomestead(
   }
   shrubs.instanceMatrix.needsUpdate = true;
   root.add(shrubs);
-  return root;
+  const fallbackMetrics = measureMeshes(fallback);
+  return {
+    root,
+    slot: {
+      mount,
+      fallback,
+      fallbackMeshes: fallbackMetrics.meshes,
+      fallbackTriangles: fallbackMetrics.triangles,
+      targetWidth: Math.min(6.2, landmark.radiusX * 1.25),
+    },
+  };
+}
+
+function measureMeshes(root: THREE.Object3D): { meshes: number; triangles: number } {
+  let meshes = 0;
+  let triangles = 0;
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    meshes += 1;
+    const indexCount = object.geometry.index?.count;
+    const vertexCount = object.geometry.attributes.position?.count ?? 0;
+    const instances = object instanceof THREE.InstancedMesh ? object.count : 1;
+    triangles += (indexCount ? indexCount / 3 : vertexCount / 3) * instances;
+  });
+  return { meshes, triangles };
 }
 
 function createYardFence(

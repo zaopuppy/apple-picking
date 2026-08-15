@@ -63,8 +63,20 @@ declare global {
       clearings: number;
       landmarks: number;
       terrainZones: number;
+      landmarkMode: 'loading' | 'imported' | 'procedural';
+      importedHomesteads: number;
       landmarkMeshes: number;
       landmarkTriangles: number;
+      landmarkAssetMeshes: number;
+      landmarkAssetTriangles: number;
+      landmarkAssetMaterials: number;
+      landmarkAssetTextures: number;
+      landmarkHouseBounds: {
+        width: number;
+        height: number;
+        depth: number;
+      } | null;
+      landmarkLastFailure: string | null;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;

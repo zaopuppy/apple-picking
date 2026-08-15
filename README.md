@@ -107,7 +107,7 @@ public/assets/       运行时音频与 3D 资产
 
 ## 外部素材与许可
 
-项目目前使用 Kenney、KayKit 的 CC0 音效与角色素材，以及 Gostbento 的 CC BY 4.0 Nature Pack 树木和苹果。采用的具体文件、模型节点、修改方式和来源记录在 [外部资产许可台账](docs/ASSET_LICENSES.md) 中。
+项目目前使用 Kenney、KayKit 的 CC0 音效、角色与小屋素材，以及 Gostbento 的 CC BY 4.0 Nature Pack 树木和苹果。采用的具体文件、模型节点、修改方式和来源记录在 [外部资产许可台账](docs/ASSET_LICENSES.md) 中。
 
 不要把完整素材包或来源不明的重新打包资源提交到仓库。新增资产应先记录许可证，再检查文件大小、三角面、材质、纹理、动画和手机端表现。
 

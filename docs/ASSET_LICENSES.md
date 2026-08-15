@@ -22,6 +22,7 @@
 | 已替换 | Forest Nature Pack 1.0 FREE：`Tree_1_A_Color1`、`Tree_2_B_Color1`、`Tree_3_C_Color1` | [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 保留旧运行时文件作为历史资产；游戏不再加载 | `public/assets/models/kaykit-forest/` | 历史果园树木视觉 |
 | 使用中 | Adventurers Character Pack 2.0 FREE：`Knight`、`Rogue`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 分别整理为 `Knight_Guard.glb` 与 `Rogue_Kid.glb`；只合入使用中的 5/4 个动画；两张图集由 1024 × 1024 降采样至 256 × 256；保留 Knight 原生头盔和面罩 | `public/assets/models/kaykit-adventurers/` | guard1、guard2 与 kid 的视觉和动作；碰撞、负重、苹果堆和状态逻辑保持独立 |
 | 使用中 | FREE DOWNLOAD Low poly nature pack：`Cut_0`、`Full_Grow001_2`、`Full_Grow003_7`、`MidGrow005_13`、`APPLE__20` | [Gostbento / Sketchfab](https://sketchfab.com/3d-models/free-download-low-poly-nature-pack-cb45d4926fcb4807bc93126b59325cf8) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 2026-08-15 | 运行时从单个 GLB 提取树桩、阔叶树、松树、樱花树和苹果；树桩缩放到 `0.46` 高，苹果为可读性保留 `0.78` 的风格化高度；障碍按品种实例化 | `public/assets/models/animal-crossing/free_download_low_poly_nature_pack.glb` | 开放果园的树桩与少量大树、可拾取苹果；圆形碰撞代理由地图数据独立维护 |
+| 使用中 | Medieval Builder Pack 1.0：`house.gltf.glb` | [KayKit Medieval Builder Pack](https://kaylousberg.itch.io/kaykit-medieval-builder-pack)，Kay Lousberg | CC0 1.0 | 2026-08-16 | 只整理自由摆放版本的小屋并重命名为 `house.glb`；运行时按房屋小院宽度统一缩放、落地和居中，不引入六边形/方形地台 | `public/assets/models/kaykit-medieval/` | 游戏与地图编辑器生成地图中的“房屋小院”视觉；院落围栏和矩形碰撞代理仍由项目代码维护 |
 
 原始许可证副本保存在：
 
@@ -30,6 +31,7 @@
 - `public/assets/models/kaykit-forest/LICENSE.txt`
 - `public/assets/models/kaykit-adventurers/LICENSE.txt`
 - `public/assets/models/animal-crossing/LICENSE.txt`
+- `public/assets/models/kaykit-medieval/LICENSE.txt`
 
 ## 开放乡野地图与 Nature Pack 定稿
 
@@ -51,6 +53,14 @@
 - [x] 外部视觉与模拟层碰撞代理保持分离
 - [x] 构建、浏览器加载、桌面和手机检查通过
 - [x] 已定稿角色的加载失败会显式记录，不会静默切回已删除的旧模型
+
+## KayKit Medieval 小屋接入
+
+- 只从 226 个源 GLB 中采用自由摆放的 `Models/objects/gltf/house.gltf.glb`，不提交完整 14 MB 素材包；运行文件为 73,308 bytes；
+- 源模型为 Y-up，原始包围盒约 1.687 × 0.914 × 1.656，包含 5 meshes、1,666 triangles、5 materials、0 textures；加载器将模型在 XZ 平面居中、底部落到地面，并将整体宽度限制在房屋小院宽度对应的 5.5–6.2 左右；
+- 导入成功后只隐藏程序化小屋本体，继续保留项目原有院落地面、外圈围栏和灌木；房屋和院落仍共用地图中的矩形阻挡区，模型网格不参与确定性碰撞；
+- 模型请求或解析失败时继续显示程序化小屋，诊断字段会记录失败；`?landmarks=procedural` 可强制检查回退；
+- 编辑器的“房屋小院”工具、随机生成器和地图 JSON 结构没有新增资产专用字段，所以旧地图会自动获得新小屋视觉，并保持可导入导出。
 
 ## 阶段 2 资产结果
 
@@ -105,6 +115,6 @@
 | Desktop 1280 × 720, DPR 1 | 49 | 81,468 | 57 | 12 | 3.54 | 0.416 | 165.5 | 0.475 |
 | Mobile 390 × 664, DPR 2 | 49 | 81,468 | 57 | 12 | 2.62 | 0.271 | 165.5 | 0.406 |
 
-开放乡野“果园村口”于 2026-08-16 重新采集：桌面和 390 × 664 窄屏均为 74 draw calls、44,724 三角面、77 geometries、12 textures，低于项目的 150 draw calls、300,000 三角面、200 geometries 和 40 textures 移动端预算。
+开放乡野“果园村口”于 2026-08-16 重新采集：接入 Medieval 小屋前，桌面和 390 × 664 窄屏均为 74 draw calls、44,724 三角面、77 geometries、12 textures；接入后均为 70 draw calls、46,270 三角面、82 geometries、12 textures。小屋用 1,546 个额外三角面换掉 4 个 draw calls，仍低于 150 draw calls、300,000 三角面、200 geometries 和 40 textures 的移动端预算。
 
 基线截图和 JSON 由 `npm run inspect:canvas` 生成在 `artifacts/canvas-inspection/`，属于本地 QA 产物，不提交仓库。

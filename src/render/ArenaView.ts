@@ -3,6 +3,7 @@ import {
   createNaturePackAppleVisual,
   loadNaturePackTreeVisuals,
 } from '../assets/NaturePackAssets';
+import { createMedievalHouseVisual } from '../assets/MedievalBuilderAssets';
 import { GAME_CONFIG } from '../game/config';
 import type { OrchardMap, OrchardTree, TreeVariant } from '../game/maps/OrchardMap';
 import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../game/types';
@@ -26,7 +27,7 @@ import {
   syncImportedKidView,
   type ImportedKidView,
 } from './ImportedKidView';
-import { createWorldLandmarks } from './WorldLandmarks';
+import { createWorldLandmarks, type HomesteadVisualSlot } from './WorldLandmarks';
 
 type AppleTransition = {
   kind: 'pickup' | 'drop' | 'delivery';
@@ -67,8 +68,20 @@ export type EnvironmentAssetDiagnostics = {
   clearings: number;
   landmarks: number;
   terrainZones: number;
+  landmarkMode: 'loading' | 'imported' | 'procedural';
+  importedHomesteads: number;
   landmarkMeshes: number;
   landmarkTriangles: number;
+  landmarkAssetMeshes: number;
+  landmarkAssetTriangles: number;
+  landmarkAssetMaterials: number;
+  landmarkAssetTextures: number;
+  landmarkHouseBounds: {
+    width: number;
+    height: number;
+    depth: number;
+  } | null;
+  landmarkLastFailure: string | null;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -131,8 +144,16 @@ export class ArenaView {
     clearings: 0,
     landmarks: 0,
     terrainZones: 0,
+    landmarkMode: 'procedural',
+    importedHomesteads: 0,
     landmarkMeshes: 0,
     landmarkTriangles: 0,
+    landmarkAssetMeshes: 0,
+    landmarkAssetTriangles: 0,
+    landmarkAssetMaterials: 0,
+    landmarkAssetTextures: 0,
+    landmarkHouseBounds: null,
+    landmarkLastFailure: null,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -336,7 +357,12 @@ export class ArenaView {
   }
 
   getEnvironmentDiagnostics(): EnvironmentAssetDiagnostics {
-    return { ...this.environmentDiagnostics };
+    return {
+      ...this.environmentDiagnostics,
+      landmarkHouseBounds: this.environmentDiagnostics.landmarkHouseBounds
+        ? { ...this.environmentDiagnostics.landmarkHouseBounds }
+        : null,
+    };
   }
 
   getCharacterDiagnostics(): CharacterAssetDiagnostics {
@@ -453,6 +479,62 @@ export class ArenaView {
       landmarkTriangles: visuals.triangles,
     };
     this.root.add(visuals.root);
+    if (
+      visuals.homesteads.length === 0 ||
+      new URLSearchParams(window.location.search).get('landmarks') === 'procedural'
+    ) return;
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      landmarkMode: 'loading',
+      externalRequested: true,
+    };
+    void this.installImportedHomesteads(visuals.homesteads);
+  }
+
+  private async installImportedHomesteads(
+    slots: readonly HomesteadVisualSlot[],
+  ): Promise<void> {
+    let visibleMeshes = this.environmentDiagnostics.landmarkMeshes;
+    let visibleTriangles = this.environmentDiagnostics.landmarkTriangles;
+    let importedHomesteads = 0;
+    try {
+      for (const slot of slots) {
+        const imported = await createMedievalHouseVisual(slot.targetWidth);
+        if (this.disposed) {
+          disposeObject3D(imported.root);
+          return;
+        }
+        slot.fallback.visible = false;
+        slot.mount.add(imported.root);
+        importedHomesteads += 1;
+        visibleMeshes += imported.meshes - slot.fallbackMeshes;
+        visibleTriangles += imported.triangles - slot.fallbackTriangles;
+        this.environmentDiagnostics = {
+          ...this.environmentDiagnostics,
+          importedHomesteads,
+          landmarkMeshes: visibleMeshes,
+          landmarkTriangles: visibleTriangles,
+          landmarkAssetMeshes: imported.meshes,
+          landmarkAssetTriangles: imported.triangles,
+          landmarkAssetMaterials: imported.materials,
+          landmarkAssetTextures: imported.textures,
+          landmarkHouseBounds: { ...imported.bounds },
+        };
+      }
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        landmarkMode: 'imported',
+        landmarkLastFailure: null,
+      };
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : String(error);
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        landmarkMode: importedHomesteads > 0 ? 'imported' : 'procedural',
+        landmarkLastFailure: failure,
+        lastFailure: failure,
+      };
+    }
   }
 
   private createFence(): void {

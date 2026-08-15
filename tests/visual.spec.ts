@@ -67,7 +67,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
       )
       .toMatchObject({
         audio: { fetchedSamples: 10, failedSamples: 0 },
-        environment: { treeMode: 'imported', lastFailure: null },
+        environment: { treeMode: 'imported', landmarkMode: 'imported', lastFailure: null },
         characters: {
           guard1Mode: 'imported',
           guard2Mode: 'imported',
@@ -444,13 +444,17 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
   });
 });
 
-test('Nature Pack trees and fruit load within the mobile render budget and retain procedural fallbacks', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop-chrome', 'Tree asset loading only needs one installed Chrome run.');
+test('Nature Pack trees, fruit, and KayKit cottage load within budget and retain procedural fallbacks', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Environment asset loading only needs one installed Chrome run.');
   const assetResponses: Array<{ path: string; status: number }> = [];
+  const houseResponses: Array<{ path: string; status: number }> = [];
   page.on('response', (response) => {
     const url = new URL(response.url());
     if (url.pathname.includes('/assets/models/animal-crossing/')) {
       assetResponses.push({ path: url.pathname, status: response.status() });
+    }
+    if (url.pathname.includes('/assets/models/kaykit-medieval/')) {
+      houseResponses.push({ path: url.pathname, status: response.status() });
     }
   });
 
@@ -473,21 +477,39 @@ test('Nature Pack trees and fruit load within the mobile render budget and retai
       clearings: 0,
       landmarks: 2,
       terrainZones: 10,
-      landmarkMeshes: 24,
-      landmarkTriangles: 1208,
+      landmarkMode: 'imported',
+      importedHomesteads: 1,
+      landmarkMeshes: 20,
+      landmarkTriangles: 2754,
+      landmarkAssetMeshes: 5,
+      landmarkAssetTriangles: 1666,
+      landmarkAssetMaterials: 5,
+      landmarkAssetTextures: 0,
+      landmarkLastFailure: null,
       arenaWidth: 72,
       arenaDepth: 54,
       lastFailure: null,
     });
   expect(assetResponses).toHaveLength(1);
   expect(assetResponses.every((response) => response.status === 200), JSON.stringify(assetResponses)).toBe(true);
+  expect(houseResponses).toEqual([
+    { path: '/assets/models/kaykit-medieval/house.glb', status: 200 },
+  ]);
+  const houseBounds = await page.evaluate(() =>
+    window.__THREE_GAME_DIAGNOSTICS__?.environment.landmarkHouseBounds);
+  expect(houseBounds?.width).toBeGreaterThanOrEqual(5.5);
+  expect(houseBounds?.width).toBeLessThanOrEqual(6.21);
+  expect(houseBounds?.height).toBeGreaterThan(2.9);
+  expect(houseBounds?.height).toBeLessThan(3.5);
+  expect(houseBounds?.depth).toBeGreaterThan(5.3);
+  expect(houseBounds?.depth).toBeLessThan(6.3);
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
   expect(renderer?.calls).toBeLessThanOrEqual(75);
   expect(renderer?.triangles).toBeLessThanOrEqual(300_000);
   expect(renderer?.textures).toBeLessThanOrEqual(12);
 
-  await page.goto('/?audio=procedural&trees=procedural&fruit=procedural');
+  await page.goto('/?audio=procedural&trees=procedural&fruit=procedural&landmarks=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment)).toMatchObject({
     treeMode: 'procedural',
@@ -501,8 +523,37 @@ test('Nature Pack trees and fruit load within the mobile render budget and retai
     fruitInstances: 6,
     fruitTriangles: 0,
     landmarks: 2,
+    landmarkMode: 'procedural',
+    importedHomesteads: 0,
+    landmarkMeshes: 24,
+    landmarkTriangles: 1208,
+    landmarkAssetMeshes: 0,
+    landmarkAssetTriangles: 0,
+    landmarkAssetMaterials: 0,
+    landmarkAssetTextures: 0,
+    landmarkHouseBounds: null,
+    landmarkLastFailure: null,
     lastFailure: null,
   });
+  expect(houseResponses).toHaveLength(1);
+});
+
+test('KayKit cottage load failure keeps the procedural house visible', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Cottage failure handling only needs one installed Chrome run.');
+  await page.route('**/assets/models/kaykit-medieval/house.glb', (route) => route.abort('failed'));
+  await page.goto('/?audio=procedural&trees=procedural&fruit=procedural');
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
+    .toMatchObject({
+      landmarkMode: 'procedural',
+      importedHomesteads: 0,
+      landmarkMeshes: 24,
+      landmarkTriangles: 1208,
+    });
+  const environment = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment);
+  expect(environment?.landmarkLastFailure).toBeTruthy();
+  expect(environment?.lastFailure).toBeTruthy();
 });
 
 test('KayKit Knight guards and Rogue kid load once and map key states independently', async ({ page }, testInfo) => {
