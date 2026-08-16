@@ -219,6 +219,46 @@ input[type="text"],
 input[type="range"] { width: 100%; accent-color: var(--gold); }
 .tool-hint { margin: 16px 0 0; color: rgba(242,230,191,.58); font-size: 0.66rem; line-height: 1.6; }
 
+.island-geometry-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 17px;
+  padding: 12px;
+  border: 1px solid rgba(225, 184, 81, .42);
+  border-radius: 4px 14px 4px 14px;
+  background: rgba(225, 184, 81, .08);
+}
+.island-geometry-panel[hidden],
+.island-geometry-fields[hidden] { display: none; }
+.island-geometry-heading small {
+  display: block;
+  color: var(--gold);
+  font: 700 .5rem/1.2 ui-monospace, monospace;
+  letter-spacing: .16em;
+}
+.island-geometry-heading strong { display: block; margin-top: 3px; font-size: .72rem; }
+.island-geometry-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.island-geometry-fields label {
+  display: grid;
+  gap: 4px;
+  color: var(--fern);
+  font-size: .56rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+}
+.island-geometry-fields input { min-height: 34px; padding: 0 7px; font: 700 .68rem ui-monospace, monospace; }
+.island-geometry-fields input:disabled { color: #6d705e; background: #cfc4a0; }
+.island-geometry-panel p { margin: 0; color: rgba(242,230,191,.66); font-size: .59rem; line-height: 1.45; }
+.island-geometry-panel button {
+  min-height: 36px;
+  border: 1px solid var(--gold);
+  border-radius: 4px 12px 4px 12px;
+  color: var(--forest-950);
+  background: var(--gold);
+  font-size: .65rem;
+  font-weight: 900;
+}
+
 .map-board {
   display: grid;
   grid-template-rows: auto minmax(430px, 1fr) auto;

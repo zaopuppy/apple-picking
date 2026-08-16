@@ -293,7 +293,7 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   if (new Set(deliveryZones.map((zone) => zone.id)).size !== deliveryZones.length) {
     errors.push('投递区 ID 不能重复。');
   }
-  validateIslandLayout(map.islandLayout, errors);
+  validateIslandLayout(map.islandLayout, map.landmarks, errors);
   if (map.trees.length > 360) warnings.push('树木较多，可能切碎开放地形并遮挡角色。');
 
   const importantPoints = [
@@ -370,7 +370,11 @@ export function deliveryZonesForMap(map: OrchardMap): readonly OrchardDeliveryZo
   return [{ id: 'delivery-primary', ...map.deliveryZone }];
 }
 
-function validateIslandLayout(layout: OrchardIslandLayout | undefined, errors: string[]): void {
+function validateIslandLayout(
+  layout: OrchardIslandLayout | undefined,
+  landmarks: readonly OrchardLandmark[],
+  errors: string[],
+): void {
   if (!layout) return;
   if (layout.outline.length < 3 || layout.outline.length > MAX_ISLAND_OUTLINE_POINTS) {
     errors.push(`岛屿轮廓需要 3-${MAX_ISLAND_OUTLINE_POINTS} 个点。`);
@@ -420,10 +424,23 @@ function validateIslandLayout(layout: OrchardIslandLayout | undefined, errors: s
       layout.bridges.some((bridge) => !positiveFiniteDimensions(bridge.width, bridge.depth))) {
     errors.push('岛屿水系或桥梁包含无效尺寸。');
   }
+  const collisionBlocks = [...layout.routeBlocks, ...layout.waterBlocks];
+  if (collisionBlocks.some((block) => {
+    const proxy = landmarks.find((landmark) => landmark.id === block.id);
+    return !proxy || proxy.kind !== 'homestead' || proxy.rotationY !== 0 ||
+      !approximatelyEqual(proxy.x, block.x) || !approximatelyEqual(proxy.z, block.z) ||
+      !approximatelyEqual(proxy.radiusX, block.radiusX) || !approximatelyEqual(proxy.radiusZ, block.radiusZ);
+  })) {
+    errors.push('岛屿通路或水域碰撞代理与语义结构不同步。');
+  }
 }
 
 function positiveFiniteDimensions(first: number, second: number): boolean {
   return Number.isFinite(first) && first > 0 && Number.isFinite(second) && second > 0;
+}
+
+function approximatelyEqual(first: number, second: number): boolean {
+  return Math.abs(first - second) < 0.0001;
 }
 
 export function landmarkBlocksPoint(

@@ -421,7 +421,10 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
     clone.islandLayout.bridges[0].x += 1;
     const malformed = JSON.parse(JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP));
     malformed.islandLayout.outline = [{ x: 0, z: 0 }, { x: 1, z: 1 }];
+    const desynchronized = orchardMaps.cloneOrchardMap(parsed);
+    desynchronized.islandLayout.routeBlocks[0].x += 1;
     const validation = orchardMaps.validateOrchardMap(parsed);
+    const desynchronizedValidation = orchardMaps.validateOrchardMap(desynchronized);
     return {
       version: parsed.version,
       valid: validation.valid,
@@ -442,6 +445,8 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
         bridgeX: parsed.islandLayout.bridges[0].x,
       },
       malformedRejected: orchardMaps.parseOrchardMap(malformed) === null,
+      desynchronizedRejected: !desynchronizedValidation.valid &&
+        desynchronizedValidation.errors.includes('岛屿通路或水域碰撞代理与语义结构不同步。'),
     };
   });
 
@@ -457,6 +462,7 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
   });
   expect(result.parsedAfterCloneMutation).toEqual(result.original);
   expect(result.malformedRejected).toBe(true);
+  expect(result.desynchronizedRejected).toBe(true);
 });
 
 test('island v5 editor displays and selects semantic layout with matching 3D preview', async ({ page }, testInfo) => {
@@ -512,6 +518,129 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   await expect(page.locator('#preview-status')).toContainText('岛屿 v5 已同步 · 5 区域');
   await page.screenshot({
     path: testInfo.outputPath('island-v5-editor-3d.png'),
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test('island geometry editor keeps route and bridge collision proxies synchronized', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Island editor work is desktop-first.');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    localStorage.setItem(
+      'apple-picking.active-map.v5',
+      JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP),
+    );
+  });
+  await page.goto('/editor.html');
+
+  const canvas = page.getByLabel('果园地图编辑画布');
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+  const clickWorld = async (x: number, z: number) => {
+    await canvas.scrollIntoViewIfNeeded();
+    const currentBox = await canvas.boundingBox();
+    if (!currentBox) throw new Error('Island editor canvas is not visible.');
+    const padding = Math.min(24, Math.max(10, Math.min(currentBox.width, currentBox.height) * 0.04));
+    const scale = Math.min(
+      (currentBox.width - padding * 2) / 72,
+      (currentBox.height - padding * 2) / 54,
+    );
+    await page.mouse.click(
+      currentBox.x + currentBox.width / 2 + x * scale,
+      currentBox.y + currentBox.height / 2 + z * scale,
+    );
+  };
+
+  await page.getByRole('button', { name: /岛屿结构/ }).click();
+  await clickWorld(-21, -13);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-region-orchard');
+  await page.getByLabel('中心 X').fill('-20.5');
+  await page.getByLabel('中心 Z').fill('-12.5');
+  await page.getByLabel('半径 X').fill('11');
+  await page.getByLabel('半径 Z').fill('6');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await expect(page.getByText('岛屿区域已更新。')).toBeVisible();
+
+  await clickWorld(-8, -10);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-route-orchard-hedge');
+  await expect(page.locator('#island-geometry-panel')).toHaveAttribute('data-editable', 'true');
+  await page.getByLabel('中心 X').fill('-7.2');
+  await page.getByLabel('中心 Z').fill('-9.4');
+  await page.getByLabel('半宽 X').fill('4.6');
+  await page.getByLabel('半深 Z').fill('2.4');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await expect(page.getByText('矩形通路块与碰撞代理已同步。')).toBeVisible();
+  await page.getByRole('button', { name: '撤销' }).click();
+  await page.getByRole('button', { name: '重做' }).click();
+
+  await page.getByRole('button', { name: /岛屿结构/ }).click();
+  await clickWorld(-22, -5.8);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-bridge-west');
+  await expect(page.getByLabel('中心 Z')).toBeDisabled();
+  await page.getByLabel('中心 X').fill('-18.5');
+  await page.getByLabel('桥梁宽度').fill('4.4');
+  await page.getByLabel('桥梁深度').fill('5.8');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await expect(page.getByText('桥梁与水域碰撞缺口已同步。')).toBeVisible();
+  await page.getByRole('button', { name: '保存地图' }).click();
+
+  const result = await page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
+    const route = saved.islandLayout.routeBlocks.find(
+      (entry: { id: string }) => entry.id === 'island-route-orchard-hedge',
+    );
+    const region = saved.islandLayout.regions.find(
+      (entry: { id: string }) => entry.id === 'island-region-orchard',
+    );
+    const routeProxy = saved.landmarks.find((entry: { id: string }) => entry.id === route.id);
+    const bridge = saved.islandLayout.bridges.find(
+      (entry: { id: string }) => entry.id === 'island-bridge-west',
+    );
+    const westBlocks = saved.islandLayout.waterBlocks
+      .filter((entry: { z: number }) => Math.abs(entry.z + 5.8) < 0.001)
+      .sort((first: { x: number }, second: { x: number }) => first.x - second.x);
+    const waterProxies = westBlocks.map((block: { id: string }) =>
+      saved.landmarks.find((entry: { id: string }) => entry.id === block.id));
+    return { region, route, routeProxy, bridge, westBlocks, waterProxies };
+  });
+  expect(result.region).toMatchObject({ x: -20.5, z: -12.5, radiusX: 11, radiusZ: 6 });
+  expect(result.route).toMatchObject({ x: -7.2, z: -9.4, radiusX: 4.6, radiusZ: 2.4 });
+  expect(result.routeProxy).toMatchObject({
+    id: result.route.id,
+    x: result.route.x,
+    z: result.route.z,
+    radiusX: result.route.radiusX,
+    radiusZ: result.route.radiusZ,
+    kind: 'homestead',
+  });
+  expect(result.bridge).toMatchObject({ x: -18.5, z: -5.8, width: 4.4, depth: 5.8 });
+  expect(result.westBlocks).toHaveLength(2);
+  for (const block of result.westBlocks) {
+    const blockStart = block.x - block.radiusX;
+    const blockEnd = block.x + block.radiusX;
+    const bridgeStart = result.bridge.x - result.bridge.width / 2;
+    const bridgeEnd = result.bridge.x + result.bridge.width / 2;
+    expect(blockEnd <= bridgeStart || blockStart >= bridgeEnd).toBe(true);
+  }
+  expect(result.waterProxies).toEqual(result.westBlocks.map((block: object) => ({
+    ...block,
+    kind: 'homestead',
+    rotationY: 0,
+  })));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: testInfo.outputPath('island-v5-geometry-editor.png'),
     fullPage: true,
   });
   expect(consoleErrors).toEqual([]);
