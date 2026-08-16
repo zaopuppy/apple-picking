@@ -134,6 +134,7 @@ declare global {
       textures: number;
     };
     camera: {
+      controlMode: 'manual' | 'mouse';
       viewWidth: number;
       viewHeight: number;
       verticalOffset: number;
@@ -141,6 +142,12 @@ declare global {
       positionX: number;
       positionY: number;
       positionZ: number;
+      targetX: number;
+      targetY: number;
+      targetZ: number;
+      directionX: number;
+      directionY: number;
+      directionZ: number;
       angleFromGroundNormal: number;
       zoom: number;
     };

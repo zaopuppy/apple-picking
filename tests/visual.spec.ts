@@ -286,6 +286,10 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
     expect(layout.camera?.positionX).toBeGreaterThan(79);
     expect(layout.camera?.positionY).toBeCloseTo(170, 5);
     expect(layout.camera?.positionZ).toBeCloseTo(0, 5);
+    expect(layout.camera?.targetX).toBeCloseTo(0, 5);
+    expect(layout.camera?.targetY).toBeCloseTo(0, 5);
+    expect(layout.camera?.targetZ).toBeCloseTo(0, 5);
+    expect(layout.camera?.directionX).toBeLessThan(0);
     expect(layout.camera?.zoom).toBeCloseTo(1.08, 5);
   } else {
     expect(layout.camera?.portraitLayout).toBe(false);
@@ -295,6 +299,10 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
     expect(layout.camera?.positionX).toBeCloseTo(0, 5);
     expect(layout.camera?.positionY).toBeCloseTo(117.5, 5);
     expect(layout.camera?.positionZ).toBeGreaterThan(79);
+    expect(layout.camera?.targetX).toBeCloseTo(0, 5);
+    expect(layout.camera?.targetY).toBeCloseTo(0, 5);
+    expect(layout.camera?.targetZ).toBeCloseTo(0, 5);
+    expect(layout.camera?.directionZ).toBeLessThan(0);
     expect(layout.camera?.angleFromGroundNormal).toBeCloseTo(34, 5);
     expect(layout.camera?.zoom).toBeCloseTo(1.08, 5);
   }
@@ -309,6 +317,8 @@ test('development tuning panel is live and can be hidden by the visual test hook
   await expect(panel).toBeVisible();
   await expect(panel.getByText('竖屏倾角（度）')).toHaveCount(0);
   await expect(panel.getByText('横屏倾角（度）')).toBeVisible();
+  await expect(panel.getByText('横屏位置', { exact: true })).toBeVisible();
+  await expect(panel.getByText('朝向目标', { exact: true })).toBeVisible();
   await expect(panel.getByText('基准速度')).toBeVisible();
   await expect(panel.getByText('Guard 速度系数')).toBeVisible();
   await expect(panel.getByText('Kid 速度系数')).toBeVisible();
@@ -319,11 +329,43 @@ test('development tuning panel is live and can be hidden by the visual test hook
   const kidMultiplier = panel.getByRole('textbox', { name: 'Kid 速度系数' });
   await landscapeAngle.fill('120');
   await landscapeAngle.press('Enter');
-  await expect(landscapeAngle).toHaveValue('100');
+  await expect(landscapeAngle).toHaveValue('82');
   await landscapeAngle.fill('10');
   await landscapeAngle.press('Enter');
-  await expect(landscapeAngle).toHaveValue('25');
+  await expect(landscapeAngle).toHaveValue('15');
   await landscapeAngle.fill('50');
+  await landscapeAngle.press('Enter');
+  await panel.getByText('横屏位置', { exact: true }).click();
+  await panel.getByText('朝向目标', { exact: true }).click();
+  const cameraPositionX = panel.getByRole('textbox', { name: '位置 X' });
+  const cameraPositionY = panel.getByRole('textbox', { name: '位置 Y' });
+  const cameraPositionZ = panel.getByRole('textbox', { name: '位置 Z' });
+  const cameraTargetX = panel.getByRole('textbox', { name: '目标 X' });
+  const cameraTargetY = panel.getByRole('textbox', { name: '目标 Y' });
+  const cameraTargetZ = panel.getByRole('textbox', { name: '目标 Z' });
+  await cameraPositionX.fill('12.5');
+  await cameraPositionY.fill('130');
+  await cameraPositionZ.fill('80');
+  await cameraTargetX.fill('3');
+  await cameraTargetY.fill('2');
+  await cameraTargetZ.fill('-4');
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera))
+    .toMatchObject({
+      positionX: 12.5,
+      positionY: 130,
+      positionZ: 80,
+      targetX: 3,
+      targetY: 2,
+      targetZ: -4,
+    });
+  const tunedCameraState = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera);
+  expect(Math.hypot(
+    tunedCameraState?.directionX ?? 0,
+    tunedCameraState?.directionY ?? 0,
+    tunedCameraState?.directionZ ?? 0,
+  )).toBeCloseTo(1, 5);
+  expect(tunedCameraState?.directionY).toBeLessThan(0);
+  expect(tunedCameraState?.directionZ).toBeLessThan(0);
   await baseSpeed.fill('3');
   await baseSpeed.press('Enter');
   await expect(baseSpeed).toHaveValue('5');
@@ -355,8 +397,104 @@ test('development tuning panel is live and can be hidden by the visual test hook
   expect(movement.guardDistance).toBeCloseTo(7.5 / 60, 5);
   expect(movement.kidDistance).toBeCloseTo(22.5 / 60, 5);
 
+  await panel.getByRole('button', { name: '恢复推荐值' }).click();
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera))
+    .toMatchObject({
+      positionX: 0,
+      positionY: 117.5,
+      targetX: 0,
+      targetY: 0,
+      targetZ: 0,
+      angleFromGroundNormal: 34,
+      zoom: 1.08,
+    });
+
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true));
   await expect(panel).toBeHidden();
+});
+
+test('mouse camera mode zooms, orbits, pans, and focuses the debug panel', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Mouse camera controls only need one desktop target.');
+  await page.goto('/?world=classic');
+  await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+
+  const panel = page.locator('[data-testid="debug-panel"]');
+  const canvas = page.locator('#game-canvas');
+  await panel.getByRole('button', { name: '进入鼠标调镜头' }).click();
+  await expect(panel).toHaveAttribute('data-camera-control', 'mouse');
+  await expect(panel.getByRole('button', { name: '退出鼠标调镜头' })).toBeVisible();
+  await expect(panel.getByRole('textbox', { name: '鼠标操作' }))
+    .toHaveValue('滚轮缩放 · 左键旋转 · 右键移动');
+  await expect(panel.getByText('移动速度', { exact: true })).toBeHidden();
+  await expect(panel.getByText('光照', { exact: true })).toBeHidden();
+  await expect(panel.getByText('表现', { exact: true })).toBeHidden();
+  await expect(panel.getByRole('button', { name: '恢复推荐值' })).toBeHidden();
+  await expect(panel.getByRole('textbox', { name: '位置 X' })).toBeDisabled();
+  await expect(canvas).toHaveClass(/camera-pointer-mode/);
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera.controlMode))
+    .toBe('mouse');
+
+  const bounds = await canvas.boundingBox();
+  if (!bounds) throw new Error('Game canvas has no bounds.');
+  const centerX = bounds.x + bounds.width * 0.5;
+  const centerY = bounds.y + bounds.height * 0.56;
+  const initial = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera);
+
+  await page.mouse.move(centerX, centerY);
+  await page.mouse.wheel(0, -420);
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera.zoom))
+    .not.toBeCloseTo(initial.zoom, 3);
+
+  const beforeOrbit = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera);
+  await page.mouse.move(centerX, centerY);
+  await page.mouse.down({ button: 'left' });
+  await page.mouse.move(centerX + 96, centerY - 46, { steps: 8 });
+  await page.mouse.up({ button: 'left' });
+  await expect.poll(async () => page.evaluate(() => {
+    const camera = window.__THREE_GAME_DIAGNOSTICS__!.camera;
+    return Math.hypot(
+      camera.positionX - camera.targetX,
+      camera.positionZ - camera.targetZ,
+    );
+  })).not.toBeCloseTo(Math.hypot(
+    beforeOrbit.positionX - beforeOrbit.targetX,
+    beforeOrbit.positionZ - beforeOrbit.targetZ,
+  ), 1);
+  const afterOrbit = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera);
+  expect(afterOrbit.targetX).toBeCloseTo(beforeOrbit.targetX, 3);
+  expect(afterOrbit.targetY).toBeCloseTo(beforeOrbit.targetY, 3);
+  expect(afterOrbit.targetZ).toBeCloseTo(beforeOrbit.targetZ, 3);
+
+  const beforePan = afterOrbit;
+  await page.mouse.move(centerX, centerY);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(centerX + 88, centerY + 52, { steps: 8 });
+  await page.mouse.up({ button: 'right' });
+  await expect.poll(async () => page.evaluate(() => {
+    const camera = window.__THREE_GAME_DIAGNOSTICS__!.camera;
+    return Math.hypot(camera.targetX, camera.targetY, camera.targetZ);
+  })).toBeGreaterThan(1);
+  const afterPan = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera);
+  expect(Math.hypot(
+    afterPan.targetX - beforePan.targetX,
+    afterPan.targetY - beforePan.targetY,
+    afterPan.targetZ - beforePan.targetZ,
+  )).toBeGreaterThan(1);
+
+  await panel.getByRole('button', { name: '退出鼠标调镜头' }).click();
+  await expect(panel).toHaveAttribute('data-camera-control', 'manual');
+  await expect(panel.getByText('移动速度', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '恢复推荐值' })).toBeVisible();
+  await expect(canvas).not.toHaveClass(/camera-pointer-mode/);
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera.controlMode))
+    .toBe('manual');
+
+  await panel.getByRole('button', { name: '进入鼠标调镜头' }).click();
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true));
+  await expect(panel).toBeHidden();
+  await expect(canvas).not.toHaveClass(/camera-pointer-mode/);
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera.controlMode))
+    .toBe('manual');
 });
 
 test('right shift delivers exactly one apple through the real input path', async ({ page }, testInfo) => {

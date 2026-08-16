@@ -47,6 +47,14 @@ body {
   touch-action: none;
 }
 
+#game-canvas.camera-pointer-mode {
+  cursor: grab;
+}
+
+#game-canvas.camera-pointer-mode:active {
+  cursor: grabbing;
+}
+
 #map-editor-link {
   position: absolute;
   z-index: 3;
