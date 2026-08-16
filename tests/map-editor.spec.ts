@@ -646,3 +646,143 @@ test('island geometry editor keeps route and bridge collision proxies synchroniz
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+test('delivery zone manager adds, moves, removes and reorders stable zones', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Delivery editor work is desktop-first.');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    localStorage.setItem(
+      'apple-picking.active-map.v5',
+      JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP),
+    );
+  });
+  await page.goto('/editor.html');
+
+  const canvas = page.getByLabel('果园地图编辑画布');
+  const clickWorld = async (x: number, z: number) => {
+    await canvas.scrollIntoViewIfNeeded();
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('Delivery editor canvas is not visible.');
+    const padding = Math.min(24, Math.max(10, Math.min(box.width, box.height) * 0.04));
+    const scale = Math.min((box.width - padding * 2) / 72, (box.height - padding * 2) / 54);
+    await page.mouse.click(
+      box.x + box.width / 2 + x * scale,
+      box.y + box.height / 2 + z * scale,
+    );
+  };
+
+  await page.getByRole('button', { name: /投递区 W/ }).click();
+  const panel = page.getByLabel('多投递点管理');
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#delivery-zone-count')).toHaveText('4 / 4');
+  await expect(page.getByRole('button', { name: '添加新点' })).toBeDisabled();
+  await expect(canvas).toHaveAttribute('data-delivery-zones', '4');
+
+  await page.getByRole('button', {
+    name: '选择投递点 4 island-delivery-garden',
+  }).click();
+  await expect(canvas).toHaveAttribute('data-selected-delivery-zone-id', 'island-delivery-garden');
+  await clickWorld(24, 15);
+  await expect(page.getByText('选中投递点已移动。')).toBeVisible();
+  await expect(page.getByRole('button', {
+    name: '选择投递点 4 island-delivery-garden',
+  })).toContainText('X 24 · Z 15');
+
+  await page.getByRole('button', { name: '上移选中投递点' }).click();
+  await expect(page.getByRole('button', {
+    name: '选择投递点 3 island-delivery-garden',
+  })).toBeVisible();
+  await page.getByRole('button', { name: '删除选中' }).click();
+  await expect(page.locator('#delivery-zone-count')).toHaveText('3 / 4');
+  await expect(page.getByRole('button', { name: '添加新点' })).toBeEnabled();
+
+  await page.getByRole('button', { name: '添加新点' }).click();
+  await expect(page.getByRole('button', { name: '取消添加' })).toHaveAttribute('data-placing', 'true');
+  await clickWorld(-4, 20);
+  await expect(canvas).toHaveAttribute('data-selected-delivery-zone-id', 'delivery-custom-1');
+  await expect(page.locator('#delivery-zone-count')).toHaveText('4 / 4');
+  await expect(page.getByRole('button', { name: '添加新点' })).toBeDisabled();
+
+  const moveUp = page.getByRole('button', { name: '上移选中投递点' });
+  await moveUp.click();
+  await moveUp.click();
+  await moveUp.click();
+  await expect(page.getByRole('button', {
+    name: '选择投递点 1 delivery-custom-1',
+  })).toContainText('主点');
+  await page.getByRole('button', { name: '撤销' }).click();
+  await expect(page.getByRole('button', {
+    name: '选择投递点 2 delivery-custom-1',
+  })).toBeVisible();
+  await page.getByRole('button', { name: '重做' }).click();
+  await expect(page.getByRole('button', {
+    name: '选择投递点 1 delivery-custom-1',
+  })).toContainText('主点');
+
+  await page.getByRole('button', { name: '保存地图' }).click();
+  const result = await page.evaluate(async () => {
+    const saved = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const deliveryEditingPath = String('/src/game/maps/DeliveryZoneEditing.ts');
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const deliveryEditing = await import(/* @vite-ignore */ deliveryEditingPath);
+    const mismatched = orchardMaps.cloneOrchardMap(saved);
+    mismatched.deliveryZone.x += 1;
+    const mismatchValidation = orchardMaps.validateOrchardMap(mismatched);
+    const legacy = orchardMaps.cloneOrchardMap(saved);
+    delete legacy.deliveryZones;
+    const addedLegacyZone = deliveryEditing.addDeliveryZone(legacy, { x: 3, z: 4 });
+    const promotedIds = legacy.deliveryZones.map((zone: { id: string }) => zone.id);
+    deliveryEditing.removeDeliveryZone(legacy, 'delivery-primary');
+    const lastZoneRemovalRejected = !deliveryEditing.removeDeliveryZone(
+      legacy,
+      addedLegacyZone?.id ?? '',
+    );
+    return {
+      ids: saved.deliveryZones.map((zone: { id: string }) => zone.id),
+      primary: saved.deliveryZone,
+      first: saved.deliveryZones[0],
+      mismatchRejected: !mismatchValidation.valid && mismatchValidation.errors.includes(
+        '主投递区兼容字段必须与投递区列表第一项一致。',
+      ),
+      legacyPromotion: {
+        promotedIds,
+        remaining: legacy.deliveryZones,
+        primary: legacy.deliveryZone,
+        lastZoneRemovalRejected,
+      },
+    };
+  });
+  expect(result.ids).toEqual([
+    'delivery-custom-1',
+    'island-delivery-homestead',
+    'island-delivery-orchard-market',
+    'island-delivery-beach-dock',
+  ]);
+  expect(result.first.id).toBe('delivery-custom-1');
+  expect(result.first.x).toBeCloseTo(-4);
+  expect(result.first.z).toBeCloseTo(20);
+  expect(result.primary).toEqual({ x: result.first.x, z: result.first.z });
+  expect(result.mismatchRejected).toBe(true);
+  expect(result.legacyPromotion).toEqual({
+    promotedIds: ['delivery-primary', 'delivery-custom-1'],
+    remaining: [{ id: 'delivery-custom-1', x: 3, z: 4 }],
+    primary: { x: 3, z: 4 },
+    lastZoneRemovalRejected: true,
+  });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: testInfo.outputPath('delivery-zone-manager.png'),
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

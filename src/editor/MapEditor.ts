@@ -14,6 +14,7 @@ import {
   KAYKIT_WORLD_THEMES,
   landmarkBlocksPoint,
   landmarkInsideArena,
+  MAX_DELIVERY_ZONES,
   MAX_MAP_APPLES,
   MAX_MAP_LANDMARKS,
   MAX_TERRAIN_ZONES,
@@ -24,6 +25,7 @@ import {
   type KayKitTileShape,
   type KayKitWorldTheme,
   type LandmarkKind,
+  type OrchardDeliveryZone,
   type OrchardLandmark,
   type OrchardIslandLayout,
   type OrchardMap,
@@ -33,6 +35,12 @@ import {
   validateOrchardMap,
 } from '../game/maps/OrchardMap';
 import type { Vec2 } from '../game/types';
+import {
+  addDeliveryZone,
+  moveDeliveryZone,
+  removeDeliveryZone,
+  reorderDeliveryZone,
+} from '../game/maps/DeliveryZoneEditing';
 import {
   applyIslandGeometryUpdate,
   type EditableIslandGeometryKind,
@@ -153,6 +161,14 @@ export class MapEditor {
   private readonly islandGeometrySizeZLabel = getElement<HTMLElement>('#island-geometry-size-z-label');
   private readonly islandGeometryNote = getElement<HTMLElement>('#island-geometry-note');
   private readonly islandGeometryApply = getElement<HTMLButtonElement>('#island-geometry-apply');
+  private readonly deliveryZonePanel = getElement<HTMLElement>('#delivery-zone-panel');
+  private readonly deliveryZoneCount = getElement<HTMLElement>('#delivery-zone-count');
+  private readonly deliveryZoneList = getElement<HTMLElement>('#delivery-zone-list');
+  private readonly deliveryZoneNote = getElement<HTMLElement>('#delivery-zone-note');
+  private readonly deliveryZoneAdd = getElement<HTMLButtonElement>('#delivery-zone-add');
+  private readonly deliveryZoneDelete = getElement<HTMLButtonElement>('#delivery-zone-delete');
+  private readonly deliveryZoneUp = getElement<HTMLButtonElement>('#delivery-zone-up');
+  private readonly deliveryZoneDown = getElement<HTMLButtonElement>('#delivery-zone-down');
 
   private map = loadActiveMap();
   private candidates: OrchardMap[] = [];
@@ -160,6 +176,8 @@ export class MapEditor {
   private future: OrchardMap[] = [];
   private tool: EditorTool = 'tree';
   private selectedIsland: IslandSelection | null = null;
+  private selectedDeliveryZoneId: string | null = null;
+  private placingDeliveryZone = false;
   private pointerWorld: Vec2 | null = null;
   private drawing = false;
   private lastStamp: Vec2 | null = null;
@@ -257,6 +275,10 @@ export class MapEditor {
       event.preventDefault();
       this.applySelectedIslandGeometry();
     }, { signal });
+    this.deliveryZoneAdd.addEventListener('click', () => this.toggleDeliveryPlacement(), { signal });
+    this.deliveryZoneDelete.addEventListener('click', () => this.deleteSelectedDeliveryZone(), { signal });
+    this.deliveryZoneUp.addEventListener('click', () => this.reorderSelectedDeliveryZone(-1), { signal });
+    this.deliveryZoneDown.addEventListener('click', () => this.reorderSelectedDeliveryZone(1), { signal });
   }
 
   private readonly onPointerDown = (event: PointerEvent): void => {
@@ -265,6 +287,10 @@ export class MapEditor {
     if (!insideArena(point, 0.15)) return;
     if (this.tool === 'island-select') {
       this.selectIslandAt(point);
+      return;
+    }
+    if (this.tool === 'delivery') {
+      this.handleDeliveryPointer(point);
       return;
     }
     this.canvas.setPointerCapture(event.pointerId);
@@ -320,10 +346,14 @@ export class MapEditor {
 
   private selectTool(tool: EditorTool): void {
     this.tool = tool;
+    if (tool !== 'delivery') this.placingDeliveryZone = false;
     this.canvas.classList.toggle('island-select-mode', tool === 'island-select');
+    this.canvas.classList.toggle('delivery-place-mode', tool === 'delivery' && this.placingDeliveryZone);
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
       button.classList.toggle('active', button.dataset.tool === tool);
     }
+    this.updateIslandGeometryPanel();
+    this.updateDeliveryZonePanel();
     this.draw();
   }
 
@@ -373,7 +403,7 @@ export class MapEditor {
   private updateIslandGeometryPanel(): void {
     const layout = this.map.islandLayout;
     const selection = this.selectedIsland;
-    this.islandGeometryPanel.hidden = !layout || this.canvas.hidden;
+    this.islandGeometryPanel.hidden = !layout || this.canvas.hidden || this.tool !== 'island-select';
     if (!layout || !selection || !islandSelectionExists(layout, selection)) {
       this.islandGeometryTitle.textContent = '选择岛屿结构';
       this.islandGeometryFields.hidden = true;
@@ -436,6 +466,142 @@ export class MapEditor {
         : '岛屿区域已更新。');
   }
 
+  private handleDeliveryPointer(point: Vec2): void {
+    const zones = deliveryZonesForMap(this.map);
+    if (this.placingDeliveryZone) {
+      this.pushHistory();
+      const zone = addDeliveryZone(this.map, point);
+      if (!zone) {
+        this.history.pop();
+        this.placingDeliveryZone = false;
+        this.updateDeliveryZonePanel();
+        this.showToast(`投递点最多 ${MAX_DELIVERY_ZONES} 个。`);
+        return;
+      }
+      this.selectedDeliveryZoneId = zone.id;
+      this.placingDeliveryZone = false;
+      this.eraseTrees(zone, GAME_CONFIG.deliveryRadius + 1);
+      this.refresh();
+      this.showToast(`已添加投递点 ${deliveryZonesForMap(this.map).length}。`);
+      return;
+    }
+
+    const hit = nearestDeliveryZoneAt(zones, point);
+    if (hit) {
+      this.selectDeliveryZone(hit.id);
+      return;
+    }
+
+    const selectedId = zones.some((zone) => zone.id === this.selectedDeliveryZoneId)
+      ? this.selectedDeliveryZoneId
+      : zones[0]?.id;
+    if (!selectedId) return;
+    this.pushHistory();
+    if (!moveDeliveryZone(this.map, selectedId, point)) {
+      this.history.pop();
+      return;
+    }
+    const moved = deliveryZonesForMap(this.map).find((zone) => zone.id === selectedId);
+    if (moved) this.eraseTrees(moved, GAME_CONFIG.deliveryRadius + 1);
+    this.refresh();
+    this.showToast('选中投递点已移动。');
+  }
+
+  private selectDeliveryZone(id: string): void {
+    if (!deliveryZonesForMap(this.map).some((zone) => zone.id === id)) return;
+    this.selectedDeliveryZoneId = id;
+    this.placingDeliveryZone = false;
+    this.updateDeliveryZonePanel();
+    this.draw();
+    this.showToast('已选择投递点；点击空白地图可移动。');
+  }
+
+  private toggleDeliveryPlacement(): void {
+    const zones = deliveryZonesForMap(this.map);
+    if (zones.length >= MAX_DELIVERY_ZONES) return;
+    this.placingDeliveryZone = !this.placingDeliveryZone;
+    this.canvas.classList.toggle('delivery-place-mode', this.placingDeliveryZone);
+    this.updateDeliveryZonePanel();
+    this.draw();
+    this.showToast(this.placingDeliveryZone ? '请在地图上点击新投递点位置。' : '已取消添加投递点。');
+  }
+
+  private deleteSelectedDeliveryZone(): void {
+    const zones = deliveryZonesForMap(this.map);
+    const index = zones.findIndex((zone) => zone.id === this.selectedDeliveryZoneId);
+    if (index < 0 || zones.length <= 1) return;
+    this.pushHistory();
+    if (!removeDeliveryZone(this.map, zones[index].id)) {
+      this.history.pop();
+      return;
+    }
+    const remaining = deliveryZonesForMap(this.map);
+    this.selectedDeliveryZoneId = remaining[Math.min(index, remaining.length - 1)]?.id ?? null;
+    this.placingDeliveryZone = false;
+    this.refresh();
+    this.showToast('选中投递点已删除。');
+  }
+
+  private reorderSelectedDeliveryZone(offset: -1 | 1): void {
+    const id = this.selectedDeliveryZoneId;
+    if (!id) return;
+    this.pushHistory();
+    if (!reorderDeliveryZone(this.map, id, offset)) {
+      this.history.pop();
+      return;
+    }
+    this.refresh();
+    this.showToast(offset < 0 ? '投递点顺序已上移。' : '投递点顺序已下移。');
+  }
+
+  private updateDeliveryZonePanel(): void {
+    const zones = deliveryZonesForMap(this.map);
+    this.deliveryZonePanel.hidden = this.tool !== 'delivery' || this.canvas.hidden;
+    if (!zones.some((zone) => zone.id === this.selectedDeliveryZoneId)) {
+      this.selectedDeliveryZoneId = zones[0]?.id ?? null;
+    }
+    const selectedIndex = zones.findIndex((zone) => zone.id === this.selectedDeliveryZoneId);
+    this.deliveryZoneCount.textContent = `${zones.length} / ${MAX_DELIVERY_ZONES}`;
+    this.deliveryZoneList.replaceChildren();
+    zones.forEach((zone, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'delivery-zone-entry';
+      button.classList.toggle('selected', zone.id === this.selectedDeliveryZoneId);
+      button.setAttribute('aria-label', `选择投递点 ${index + 1} ${zone.id}`);
+      button.setAttribute('aria-current', zone.id === this.selectedDeliveryZoneId ? 'true' : 'false');
+      button.title = zone.id;
+      const number = document.createElement('span');
+      number.textContent = String(index + 1);
+      const name = document.createElement('strong');
+      name.textContent = index === 0 ? `主点 · ${zone.id}` : zone.id;
+      const position = document.createElement('small');
+      position.textContent = `X ${formatGeometryNumber(zone.x)} · Z ${formatGeometryNumber(zone.z)}`;
+      button.append(number, name, position);
+      button.addEventListener('click', () => this.selectDeliveryZone(zone.id), {
+        signal: this.listeners.signal,
+      });
+      this.deliveryZoneList.append(button);
+    });
+    this.deliveryZoneNote.textContent = this.placingDeliveryZone
+      ? '添加模式：点击地图放置新点；再次点击“取消添加”退出。'
+      : selectedIndex >= 0
+        ? `已选择投递点 ${selectedIndex + 1}；点击空白地图移动它。`
+        : '选择一个点，再点击地图移动它。';
+    this.deliveryZoneAdd.disabled = zones.length >= MAX_DELIVERY_ZONES;
+    this.deliveryZoneAdd.textContent = this.placingDeliveryZone ? '取消添加' : '添加新点';
+    this.deliveryZoneAdd.dataset.placing = String(this.placingDeliveryZone);
+    this.deliveryZoneDelete.disabled = zones.length <= 1 || selectedIndex < 0;
+    this.deliveryZoneUp.disabled = selectedIndex <= 0;
+    this.deliveryZoneDown.disabled = selectedIndex < 0 || selectedIndex >= zones.length - 1;
+    this.canvas.dataset.deliveryZones = String(zones.length);
+    if (this.selectedDeliveryZoneId) {
+      this.canvas.dataset.selectedDeliveryZoneId = this.selectedDeliveryZoneId;
+    } else {
+      delete this.canvas.dataset.selectedDeliveryZoneId;
+    }
+  }
+
   private applyTool(point: Vec2, initial: boolean): void {
     switch (this.tool) {
       case 'island-select':
@@ -482,13 +648,7 @@ export class MapEditor {
         this.eraseTrees(point, 2);
         break;
       case 'delivery':
-        if (!initial) return;
-        this.map.deliveryZone = { ...point };
-        if (this.map.deliveryZones?.[0]) {
-          this.map.deliveryZones[0] = { ...this.map.deliveryZones[0], ...point };
-        }
-        this.eraseTrees(point, GAME_CONFIG.deliveryRadius + 1);
-        break;
+        return;
     }
   }
 
@@ -660,6 +820,8 @@ export class MapEditor {
   private setMap(map: OrchardMap): void {
     this.map = cloneOrchardMap(map);
     this.selectedIsland = null;
+    this.selectedDeliveryZoneId = null;
+    this.placingDeliveryZone = false;
     this.nameInput.value = this.map.name;
     this.syncWorldStyleControls();
     this.refresh();
@@ -826,6 +988,7 @@ export class MapEditor {
       this.validationList.append(chip);
     }
     this.updateIslandSelectionInfo();
+    this.updateDeliveryZonePanel();
     this.preview.setMap(this.map);
     this.draw();
   }
@@ -838,8 +1001,12 @@ export class MapEditor {
     if (previewVisible) {
       this.islandSelection.hidden = true;
       this.islandGeometryPanel.hidden = true;
+      this.deliveryZonePanel.hidden = true;
     }
-    else this.updateIslandSelectionInfo();
+    else {
+      this.updateIslandSelectionInfo();
+      this.updateDeliveryZonePanel();
+    }
     this.preview.setVisible(previewVisible);
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-editor-view]')) {
       const active = button.dataset.editorView === view;
@@ -872,9 +1039,14 @@ export class MapEditor {
       rect.width,
       rect.height,
       this.pointerWorld,
-      this.tool === 'island-select' ? 0 : this.brushSize,
+      this.tool === 'island-select'
+        ? 0
+        : this.tool === 'delivery'
+          ? GAME_CONFIG.deliveryRadius
+          : this.brushSize,
       true,
       this.selectedIsland,
+      this.tool === 'delivery' ? this.selectedDeliveryZoneId : null,
     );
   }
 
@@ -1135,6 +1307,7 @@ function drawMap(
   brushSize: number,
   detailed: boolean,
   selectedIsland: IslandSelection | null,
+  selectedDeliveryZoneId: string | null = null,
 ): void {
   context.clearRect(0, 0, width, height);
   context.fillStyle = worldBorderColor(map.worldStyle.theme);
@@ -1250,13 +1423,29 @@ function drawMap(
   drawMarker(context, toScreen(map.guardStarts[1]), '#477b47', '2', detailed);
   for (const [index, zone] of deliveryZonesForMap(map).entries()) {
     const delivery = toScreen(zone);
+    const selected = zone.id === selectedDeliveryZoneId;
     context.beginPath();
     context.arc(delivery.x, delivery.y, GAME_CONFIG.deliveryRadius * transform.scale, 0, Math.PI * 2);
     context.fillStyle = 'rgba(241, 202, 92, 0.24)';
     context.fill();
     context.strokeStyle = '#e5b94d';
-    context.lineWidth = detailed ? 3 : 1.5;
+    context.lineWidth = selected ? 4 : detailed ? 3 : 1.5;
     context.stroke();
+    if (selected) {
+      context.beginPath();
+      context.setLineDash([5, 4]);
+      context.arc(
+        delivery.x,
+        delivery.y,
+        (GAME_CONFIG.deliveryRadius + 0.65) * transform.scale,
+        0,
+        Math.PI * 2,
+      );
+      context.strokeStyle = '#fff8d2';
+      context.lineWidth = 2;
+      context.stroke();
+      context.setLineDash([]);
+    }
     if (detailed && deliveryZonesForMap(map).length > 1) {
       context.fillStyle = '#6b4b16';
       context.font = '700 11px system-ui, sans-serif';
@@ -1778,6 +1967,17 @@ function getElement<T extends Element>(selector: string): T {
 
 function distance(first: Vec2, second: Vec2): number {
   return Math.hypot(first.x - second.x, first.z - second.z);
+}
+
+function nearestDeliveryZoneAt(
+  zones: readonly OrchardDeliveryZone[],
+  point: Vec2,
+): OrchardDeliveryZone | null {
+  return zones
+    .map((zone) => ({ zone, distance: distance(zone, point) }))
+    .filter((candidate) => candidate.distance <= GAME_CONFIG.deliveryRadius)
+    .sort((first, second) => first.distance - second.distance ||
+      first.zone.id.localeCompare(second.zone.id))[0]?.zone ?? null;
 }
 
 function snapSquareRoadPoint(previous: Vec2, point: Vec2): Vec2 {

@@ -293,6 +293,11 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   if (new Set(deliveryZones.map((zone) => zone.id)).size !== deliveryZones.length) {
     errors.push('投递区 ID 不能重复。');
   }
+  if (map.deliveryZones?.[0] &&
+    (!approximatelyEqual(map.deliveryZone.x, map.deliveryZones[0].x) ||
+      !approximatelyEqual(map.deliveryZone.z, map.deliveryZones[0].z))) {
+    errors.push('主投递区兼容字段必须与投递区列表第一项一致。');
+  }
   validateIslandLayout(map.islandLayout, map.landmarks, errors);
   if (map.trees.length > 360) warnings.push('树木较多，可能切碎开放地形并遮挡角色。');
 
