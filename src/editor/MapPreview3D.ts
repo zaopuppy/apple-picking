@@ -31,6 +31,9 @@ export type MapPreviewSelectionKind =
   | 'delivery-zone';
 
 export type MapPreviewPlacementKind =
+  | 'tree'
+  | 'erase'
+  | 'path'
   | 'homestead'
   | 'pond'
   | 'orchard'
@@ -646,6 +649,9 @@ function constrainPreviewMove(
 
 function previewPlacementLabel(kind: MapPreviewPlacementKind): string {
   const labels: Record<MapPreviewPlacementKind, string> = {
+    tree: '树木',
+    erase: '擦除范围',
+    path: '道路节点',
     homestead: '建筑',
     pond: '池塘',
     orchard: '果园地块',

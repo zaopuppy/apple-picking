@@ -225,6 +225,7 @@ export class MapEditor {
   private placingDeliveryZone = false;
   private previewSelection: MapPreviewSelection | null = null;
   private activeView: '2d' | '3d' = '2d';
+  private previewPathStart: Vec2 | null = null;
   private islandDraggingIndex: number | null = null;
   private islandDragPointerStart: Vec2 | null = null;
   private islandDragHistoryPushed = false;
@@ -475,6 +476,10 @@ export class MapEditor {
   };
 
   private selectTool(tool: EditorTool): void {
+    if (this.tool === 'path' && tool !== 'path') {
+      this.previewPathStart = null;
+      this.activePathId = null;
+    }
     this.tool = tool;
     if (tool !== 'delivery') this.placingDeliveryZone = false;
     if (tool !== 'island-select') {
@@ -727,7 +732,28 @@ export class MapEditor {
     const previousLandmarks = this.map.landmarks.length;
     const previousTerrain = this.map.terrainZones.length;
     const previousApples = this.map.appleSpawns.length;
-    if (kind === 'homestead' || kind === 'pond') this.placeLandmark(position, kind);
+    const previousClearings = this.map.clearings.length;
+    const previousPaths = this.map.paths.length;
+    const previousPathPoints = this.map.paths.reduce((total, path) => total + path.points.length, 0);
+    const previousTrees = this.map.trees.length;
+    if (kind === 'tree') {
+      this.lastStamp = null;
+      this.stampTrees(position);
+    } else if (kind === 'erase') {
+      this.lastStamp = null;
+      this.eraseAt(position, this.brushSize);
+    } else if (kind === 'path') {
+      if (!this.previewPathStart && !this.activePathId) {
+        this.previewPathStart = { ...position };
+        this.showToast('道路起点已确定；继续点击 3D 地面添加路段。');
+        return { ok: true };
+      }
+      if (!this.activePathId && this.previewPathStart) {
+        this.placePathPoint(this.previewPathStart, true);
+      }
+      this.placePathPoint(position, false);
+      this.previewPathStart = { ...position };
+    } else if (kind === 'homestead' || kind === 'pond') this.placeLandmark(position, kind);
     else if (kind === 'orchard' || kind === 'meadow') this.placeTerrainZone(position, kind);
     else if (kind === 'apple' && this.map.appleSpawns.length < MAX_MAP_APPLES) {
       this.map.appleSpawns.push({ ...position });
@@ -739,11 +765,19 @@ export class MapEditor {
     const changed = this.map.landmarks.length !== previousLandmarks ||
       this.map.terrainZones.length !== previousTerrain ||
       this.map.appleSpawns.length !== previousApples ||
+      this.map.clearings.length !== previousClearings ||
+      this.map.paths.length !== previousPaths ||
+      this.map.paths.reduce((total, path) => total + path.points.length, 0) !== previousPathPoints ||
+      this.map.trees.length !== previousTrees ||
       (kind === 'kid' || kind === 'guard1' || kind === 'guard2');
     if (!changed) return { ok: false };
     const validation = validateOrchardMap(this.map);
     if (!validation.valid) {
       this.map = previous;
+      if (kind === 'path') {
+        this.previewPathStart = null;
+        this.activePathId = null;
+      }
       this.showToast(validation.errors[0] ?? '当前位置无法安全放置。');
       return { ok: false };
     }
@@ -1398,6 +1432,7 @@ export class MapEditor {
     this.placingIslandObject = null;
     this.selectedDeliveryZoneId = null;
     this.previewSelection = null;
+    this.previewPathStart = null;
     this.placingDeliveryZone = false;
     this.islandDraggingIndex = null;
     this.islandDragPointerStart = null;
@@ -1583,6 +1618,10 @@ export class MapEditor {
   }
 
   private selectView(view: '2d' | '3d'): void {
+    if (view !== this.activeView) {
+      this.previewPathStart = null;
+      this.activePathId = null;
+    }
     this.activeView = view;
     const previewVisible = view === '3d';
     this.canvas.hidden = previewVisible;
@@ -1592,7 +1631,7 @@ export class MapEditor {
     this.updateDeliveryZonePanel();
     this.updatePreviewObjectPanel();
     this.preview.setVisible(previewVisible);
-    this.syncPreviewPlacement();
+    this.preview.setPlacement(null);
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-editor-view]')) {
       const active = button.dataset.editorView === view;
       button.classList.toggle('active', active);
@@ -1855,13 +1894,17 @@ function isIslandObjectKindValue(kind: MapPreviewPlacementKind): kind is IslandO
 }
 
 function previewPlacementForTool(tool: EditorTool): MapPreviewPlacementKind | null {
-  return tool === 'homestead' || tool === 'pond' || tool === 'orchard' || tool === 'meadow' ||
+  return tool === 'tree' || tool === 'erase' || tool === 'path' ||
+    tool === 'homestead' || tool === 'pond' || tool === 'orchard' || tool === 'meadow' ||
     tool === 'apple' || tool === 'kid' || tool === 'guard1' || tool === 'guard2'
     ? tool
     : null;
 }
 
 function previewPlacementLabel(kind: MapPreviewPlacementKind): string {
+  if (kind === 'tree') return '树木';
+  if (kind === 'erase') return '擦除范围';
+  if (kind === 'path') return '道路节点';
   if (kind === 'homestead') return '建筑';
   if (kind === 'pond') return '池塘';
   if (kind === 'orchard') return '果园地块';

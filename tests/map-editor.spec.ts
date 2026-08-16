@@ -636,13 +636,30 @@ test('3D editor places, duplicates and deletes buildings through real pointer in
   await page.getByRole('button', { name: '3D 预览' }).click();
   const preview = page.getByLabel('KayKit 地图三维预览');
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
-  const previewBox = await preview.boundingBox();
-  if (!previewBox) throw new Error('3D editor preview is unavailable.');
+  const clickPreviewAt = async (xRatio: number, yRatio: number) => {
+    await preview.scrollIntoViewIfNeeded();
+    const box = await preview.boundingBox();
+    if (!box) throw new Error('3D editor preview is unavailable.');
+    await page.mouse.click(box.x + box.width * xRatio, box.y + box.height * yRatio);
+  };
+  const stampPoints = [{ x: 0.22, y: 0.34 }, { x: 0.78, y: 0.68 }];
+  await page.getByRole('button', { name: /种树 1/ }).click();
+  for (const point of stampPoints) await clickPreviewAt(point.x, point.y);
+  await expect(page.locator('#map-status')).toContainText(/[1-9]\d* 木本点缀/);
+  await page.locator('#brush-size').fill('11');
+  await page.getByRole('button', { name: /擦除 2/ }).click();
+  for (const point of stampPoints) await clickPreviewAt(point.x, point.y);
+  await expect(page.locator('#map-status')).toContainText('0 木本点缀');
+  await page.locator('#brush-size').fill('4.5');
+  await page.getByRole('button', { name: /铺设宽路 E/ }).click();
+  await clickPreviewAt(0.34, 0.62);
+  await expect(page.getByText('道路起点已确定；继续点击 3D 地面添加路段。')).toBeVisible();
+  await clickPreviewAt(0.58, 0.62);
 
   await page.getByRole('button', { name: /KayKit 建筑 3/ }).click();
   await page.getByLabel('建筑模型').selectOption('market');
   await expect(preview).toHaveAttribute('data-placement-kind', 'homestead');
-  await page.mouse.click(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+  await clickPreviewAt(0.5, 0.5);
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-selected-kind', 'landmark');
   await expect(page.locator('#preview-object-panel')).toBeVisible();
@@ -661,6 +678,10 @@ test('3D editor places, duplicates and deletes buildings through real pointer in
   expect(buildings).toHaveLength(2);
   expect(buildings.every((landmark: { asset?: string; rotationY: number }) =>
     landmark.asset === 'market' && landmark.rotationY === 0)).toBe(true);
+  const paths = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].paths);
+  expect(paths).toHaveLength(1);
+  expect(paths[0].points.length).toBeGreaterThanOrEqual(2);
 
   await page.getByRole('button', { name: '删除 Delete' }).click();
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
@@ -677,10 +698,7 @@ test('3D editor places, duplicates and deletes buildings through real pointer in
   await page.getByRole('button', { name: /投递区 W/ }).click();
   await page.getByRole('button', { name: '添加新点' }).click();
   await expect(preview).toHaveAttribute('data-placement-kind', 'delivery');
-  await page.mouse.click(
-    previewBox.x + previewBox.width * 0.28,
-    previewBox.y + previewBox.height * 0.72,
-  );
+  await clickPreviewAt(0.28, 0.72);
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-selected-kind', 'delivery-zone');
   await page.getByRole('button', { name: '保存地图' }).click();
