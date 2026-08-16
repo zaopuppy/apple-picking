@@ -30,6 +30,7 @@
             <div><small>TOOL SHED</small><strong>造景工具</strong></div>
           </div>
           <div id="tool-list" class="tool-list">
+            <button class="tool" data-tool="island-select" type="button"><b>◇</b><span>岛屿结构<small>R</small></span></button>
             <button class="tool active" data-tool="tree" type="button"><b>♣</b><span>种树<small>1</small></span></button>
             <button class="tool" data-tool="erase" type="button"><b>⌫</b><span>擦除<small>2</small></span></button>
             <button class="tool" data-tool="homestead" type="button"><b>⌂</b><span>KayKit 建筑<small>3</small></span></button>
@@ -98,7 +99,7 @@
             <label for="brush-size">画笔半径 <output id="brush-size-value">4.5</output></label>
             <input id="brush-size" type="range" min="1.5" max="11" step="0.5" value="4.5" />
           </div>
-          <p class="tool-hint">先在 2D 中画宽路和放建筑，再切到 3D 检查比例。方格道路会自动选择直路、弯道、T 字口与十字口。</p>
+          <p class="tool-hint">先在 2D 中画宽路和放建筑，再切到 3D 检查比例。v5 岛屿可用 R 选择轮廓、区域、水系与桥梁；P4b1 暂时只读，避免碰撞代理失配。</p>
         </aside>
 
         <section class="map-board">
@@ -120,11 +121,13 @@
             <canvas id="map-preview-canvas" aria-label="KayKit 地图三维预览" hidden></canvas>
             <div id="preview-status" class="preview-status" hidden>正在准备 3D 预览…</div>
             <div id="preview-help" class="preview-help" hidden>拖拽旋转 · 滚轮缩放 · 右键平移</div>
+            <div id="island-selection" class="island-selection" aria-live="polite" hidden></div>
             <div id="map-legend" class="map-legend" aria-hidden="true">
               <span><i class="legend-kid"></i>小偷</span>
               <span><i class="legend-guard"></i>守卫</span>
               <span><i class="legend-apple"></i>果实</span>
               <span><i class="legend-goal"></i>投递区</span>
+              <span><i class="legend-island"></i>岛屿语义</span>
             </div>
           </div>
           <div id="validation-list" class="validation-list" aria-live="polite"></div>

@@ -116,6 +116,9 @@ export type EnvironmentAssetDiagnostics = {
   groundMaterialMode: 'flat-color' | 'grass-texture';
   deliveryMarkerMode: 'ring' | 'parcel-sign';
   deliveryMarkerLabels: number;
+  islandLayoutSource: 'none' | 'map-v5';
+  islandOutlinePoints: number;
+  islandRegions: number;
   waterSegments: number;
   waterCollisionBlocks: number;
   bridges: number;
@@ -222,6 +225,9 @@ export class ArenaView {
     groundMaterialMode: 'flat-color',
     deliveryMarkerMode: 'ring',
     deliveryMarkerLabels: 0,
+    islandLayoutSource: 'none',
+    islandOutlinePoints: 0,
+    islandRegions: 0,
     waterSegments: 0,
     waterCollisionBlocks: 0,
     bridges: 0,
@@ -497,6 +503,9 @@ export class ArenaView {
         worldTileShape: null,
         worldLastFailure: null,
         groundMaterialMode: 'grass-texture',
+        islandLayoutSource: 'map-v5',
+        islandOutlinePoints: this.map.islandLayout?.outline.length ?? 0,
+        islandRegions: this.map.islandLayout?.regions.length ?? 0,
         waterSegments: island.waterSegments,
         waterCollisionBlocks: island.waterCollisionBlocks,
         bridges: island.bridges,

@@ -458,3 +458,62 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
   expect(result.parsedAfterCloneMutation).toEqual(result.original);
   expect(result.malformedRejected).toBe(true);
 });
+
+test('island v5 editor displays and selects semantic layout with matching 3D preview', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Island editor work is desktop-first.');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    localStorage.setItem(
+      'apple-picking.active-map.v5',
+      JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP),
+    );
+  });
+  await page.goto('/editor.html');
+
+  const canvas = page.getByLabel('果园地图编辑画布');
+  await expect(canvas).toHaveAttribute('data-layout-mode', 'island-v5');
+  await expect(canvas).toHaveAttribute('data-island-regions', '5');
+  await expect(page.locator('#map-status')).toContainText('岛屿 v5 · 5 区域');
+  await expect(page.locator('#island-selection')).toContainText('使用“岛屿结构”选择查看');
+
+  await page.getByRole('button', { name: /岛屿结构/ }).click();
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    const padding = Math.min(24, Math.max(10, Math.min(box.width, box.height) * 0.04));
+    const scale = Math.min((box.width - padding * 2) / 72, (box.height - padding * 2) / 54);
+    await page.mouse.click(
+      box.x + box.width / 2 - 22 * scale,
+      box.y + box.height / 2 - 5.8 * scale,
+    );
+  }
+  await expect(canvas).toHaveAttribute('data-selected-island-kind', 'bridge');
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-bridge-west');
+  await expect(page.locator('#island-selection')).toContainText('桥梁 · island-bridge-west');
+  await page.screenshot({
+    path: testInfo.outputPath('island-v5-editor-2d.png'),
+    fullPage: true,
+  });
+
+  await page.getByRole('button', { name: '3D 预览' }).click();
+  const preview = page.getByLabel('KayKit 地图三维预览');
+  await expect(preview).toBeVisible();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-world-mode', 'island-v5');
+  await expect(preview).toHaveAttribute('data-island-regions', '5');
+  await expect(page.locator('#preview-status')).toContainText('岛屿 v5 已同步 · 5 区域');
+  await page.screenshot({
+    path: testInfo.outputPath('island-v5-editor-3d.png'),
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

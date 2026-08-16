@@ -1,14 +1,9 @@
 import * as THREE from 'three';
 import {
-  ISLAND_BRIDGES,
-  ISLAND_ROUTE_BLOCKS,
-  ISLAND_WATER_BLOCKS,
-  ISLAND_WATER_SEGMENTS,
-  type IslandBridge,
-  type IslandRouteBlock,
-} from '../game/maps/IslandTourMap';
-import {
   treeColliderRadius,
+  type OrchardIslandBridge,
+  type OrchardIslandLayout,
+  type OrchardIslandRouteBlock,
   type OrchardMap,
   type OrchardPath,
 } from '../game/maps/OrchardMap';
@@ -84,31 +79,14 @@ type WorldStats = {
   textures: number;
 };
 
-const ISLAND_OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [-31, -23],
-  [-18, -25],
-  [0, -24.5],
-  [19, -25],
-  [30, -21],
-  [34, -10],
-  [34, 5],
-  [31, 18],
-  [22, 24],
-  [7, 26],
-  [-9, 25.5],
-  [-23, 24],
-  [-32, 19],
-  [-35, 9],
-  [-35, -7],
-  [-34, -17],
-];
-
 const WATERFALL_OUTLETS = [
   { id: 'west', side: -1, x: -34.95, z: -5.8 },
   { id: 'east', side: 1, x: 34.95, z: -7.2 },
 ] as const;
 
 export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
+  const layout = map.islandLayout;
+  if (!layout) throw new Error('Island world requires a v5 islandLayout.');
   const root = new THREE.Group();
   const materials = createIslandMaterials();
   const waves: WaveStrip[] = [];
@@ -120,7 +98,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
 
   root.name = 'sweet-orchard-island-world';
   root.add(createOcean(materials, waves));
-  root.add(createIslandBody(materials));
+  root.add(createIslandBody(layout, materials));
   root.add(createNorthTerrace(materials));
   root.add(createHouseTerrace(materials));
   root.add(createTerrainPatches(map, materials));
@@ -128,7 +106,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   const contactShadows = createContactShadows(map, materials);
   propInstances += contactShadows.instances;
   root.add(contactShadows.root);
-  const waterway = createWaterway(materials, waves);
+  const waterway = createWaterway(layout, materials, waves);
   propInstances += waterway.userData.propInstances as number;
   root.add(waterway);
   root.add(createPond(materials));
@@ -150,7 +128,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   propInstances += coast.userData.propInstances as number;
   root.add(coast);
 
-  const routeBlocks = createRouteBlocks(materials);
+  const routeBlocks = createRouteBlocks(layout.routeBlocks, materials);
   propInstances += routeBlocks.userData.propInstances as number;
   root.add(routeBlocks);
 
@@ -165,9 +143,9 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
     root,
     tileInstances: 3,
     propInstances,
-    waterSegments: ISLAND_WATER_SEGMENTS.length,
-    waterCollisionBlocks: ISLAND_WATER_BLOCKS.length,
-    bridges: ISLAND_BRIDGES.length,
+    waterSegments: layout.waterSegments.length,
+    waterCollisionBlocks: layout.waterBlocks.length,
+    bridges: layout.bridges.length,
     waterfalls: WATERFALL_OUTLETS.length,
     regionPropClusters: regionProps.clusters,
     regionPropInstances: regionProps.propInstances,
@@ -272,28 +250,32 @@ function createOcean(materials: IslandMaterials, waves: WaveStrip[]): THREE.Grou
   return group;
 }
 
-function createWaterway(materials: IslandMaterials, waves: WaveStrip[]): THREE.Group {
+function createWaterway(
+  layout: OrchardIslandLayout,
+  materials: IslandMaterials,
+  waves: WaveStrip[],
+): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-stepped-waterway-and-bridges';
   const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
   const bankMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.cliffDark,
-    ISLAND_WATER_SEGMENTS.length,
+    layout.waterSegments.length,
   );
   const waterMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.water,
-    ISLAND_WATER_SEGMENTS.length,
+    layout.waterSegments.length,
   );
   const foamMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.waterLight,
-    ISLAND_WATER_SEGMENTS.length * 2,
+    layout.waterSegments.length * 2,
   );
   const matrix = new THREE.Object3D();
 
-  ISLAND_WATER_SEGMENTS.forEach((segment, index) => {
+  layout.waterSegments.forEach((segment, index) => {
     setInstanceTransform(
       bankMesh,
       index,
@@ -328,11 +310,11 @@ function createWaterway(materials: IslandMaterials, waves: WaveStrip[]): THREE.G
   foamMesh.instanceMatrix.needsUpdate = true;
   group.add(bankMesh, waterMesh, foamMesh);
 
-  const bridges = createWaterwayBridges(materials, blockGeometry, matrix);
+  const bridges = createWaterwayBridges(layout.bridges, materials, blockGeometry, matrix);
   const waterfalls = createWaterfallOutlets(materials, blockGeometry, matrix, waves);
   group.add(bridges, waterfalls);
   group.userData.propInstances =
-    ISLAND_WATER_SEGMENTS.length * 4 +
+    layout.waterSegments.length * 4 +
     (bridges.userData.propInstances as number) +
     (waterfalls.userData.propInstances as number);
   return group;
@@ -418,6 +400,7 @@ function createWaterfallOutlets(
 }
 
 function createWaterwayBridges(
+  bridges: readonly OrchardIslandBridge[],
   materials: IslandMaterials,
   blockGeometry: THREE.BoxGeometry,
   matrix: THREE.Object3D,
@@ -428,15 +411,15 @@ function createWaterwayBridges(
   const plankMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.wood,
-    ISLAND_BRIDGES.length * plankCountPerBridge,
+    bridges.length * plankCountPerBridge,
   );
   const supportMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.woodDark,
-    ISLAND_BRIDGES.length * 2,
+    bridges.length * 2,
   );
 
-  ISLAND_BRIDGES.forEach((bridge, bridgeIndex) => {
+  bridges.forEach((bridge, bridgeIndex) => {
     appendBridgePlanks(plankMesh, bridge, bridgeIndex, plankCountPerBridge, matrix);
     for (const side of [-1, 1]) {
       setInstanceTransform(
@@ -462,7 +445,7 @@ function createWaterwayBridges(
 
 function appendBridgePlanks(
   plankMesh: THREE.InstancedMesh,
-  bridge: IslandBridge,
+  bridge: OrchardIslandBridge,
   bridgeIndex: number,
   plankCount: number,
   matrix: THREE.Object3D,
@@ -480,8 +463,9 @@ function appendBridgePlanks(
   }
 }
 
-function createIslandBody(materials: IslandMaterials): THREE.Mesh {
-  const geometry = extrudePolygon(ISLAND_OUTLINE, 2.7, 0.75);
+function createIslandBody(layout: OrchardIslandLayout, materials: IslandMaterials): THREE.Mesh {
+  const outline = layout.outline.map((point) => [point.x, point.z] as const);
+  const geometry = extrudePolygon(outline, 2.7, 0.75);
   const island = new THREE.Mesh(geometry, [materials.grass, materials.cliff]);
   island.name = 'island-stepped-main-body';
   island.rotation.x = Math.PI / 2;
@@ -920,19 +904,22 @@ function createCoastalDetails(materials: IslandMaterials): THREE.Group {
   return group;
 }
 
-function createRouteBlocks(materials: IslandMaterials): THREE.Group {
+function createRouteBlocks(
+  routeBlocks: readonly OrchardIslandRouteBlock[],
+  materials: IslandMaterials,
+): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-route-defining-blocks';
   const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
   const baseMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.cliff,
-    ISLAND_ROUTE_BLOCKS.length,
+    routeBlocks.length,
   );
   const topMesh = new THREE.InstancedMesh(
     blockGeometry,
     materials.flowerWhite,
-    ISLAND_ROUTE_BLOCKS.length,
+    routeBlocks.length,
   );
   const foliageParts: RectBlockDetail[] = [];
   const totemParts: Array<{
@@ -947,7 +934,7 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
   const timberParts: RectBlockDetail[] = [];
   const matrix = new THREE.Object3D();
 
-  ISLAND_ROUTE_BLOCKS.forEach((block, index) => {
+  routeBlocks.forEach((block, index) => {
     const height = routeBlockHeight(block);
     setInstanceTransform(
       baseMesh,
@@ -1039,12 +1026,12 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
   }
 
   group.userData.propInstances =
-    ISLAND_ROUTE_BLOCKS.length * 2 + foliageParts.length + totemParts.length + timberParts.length;
+    routeBlocks.length * 2 + foliageParts.length + totemParts.length + timberParts.length;
   return group;
 }
 
 function appendRouteBlockProps(
-  block: IslandRouteBlock,
+  block: OrchardIslandRouteBlock,
   height: number,
   foliageParts: RectBlockDetail[],
   totemParts: Array<{
@@ -1156,13 +1143,13 @@ function appendRouteBlockProps(
   }
 }
 
-function routeBlockHeight(block: IslandRouteBlock): number {
+function routeBlockHeight(block: OrchardIslandRouteBlock): number {
   if (block.kind === 'hill') return 0.76;
   if (block.kind === 'shrine') return 0.24;
   return 0.4;
 }
 
-function routeBlockTopColor(kind: IslandRouteBlock['kind']): THREE.Color {
+function routeBlockTopColor(kind: OrchardIslandRouteBlock['kind']): THREE.Color {
   switch (kind) {
     case 'hedge':
       return new THREE.Color('#78aa4e');

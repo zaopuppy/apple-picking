@@ -10,8 +10,13 @@ import {
 } from '../game/maps/OrchardMap';
 import type { Vec2 } from '../game/types';
 import { createRenderer, resizeRenderer } from '../core/Renderer';
+import {
+  createIslandWorldVisual,
+  type IslandWorldVisual,
+} from '../render/IslandWorldView';
 
 const PREVIEW_BACKGROUND = '#9fba78';
+const ISLAND_PREVIEW_BACKGROUND = '#54bfd0';
 
 export class MapPreview3D {
   private readonly renderer: THREE.WebGLRenderer;
@@ -21,6 +26,7 @@ export class MapPreview3D {
   private readonly resizeObserver: ResizeObserver;
   private worldRoot: THREE.Group | null = null;
   private markerRoot: THREE.Group | null = null;
+  private islandVisual: IslandWorldVisual | null = null;
   private pendingMap: OrchardMap | null = null;
   private rebuildTimer: number | null = null;
   private animationFrame = 0;
@@ -92,6 +98,7 @@ export class MapPreview3D {
     this.controls.dispose();
     this.disposeMarkers();
     this.worldRoot?.removeFromParent();
+    this.islandVisual = null;
     this.renderer.dispose();
   }
 
@@ -111,8 +118,12 @@ export class MapPreview3D {
     this.status.textContent = '正在拼装 KayKit 3D 地图…';
     this.canvas.dataset.ready = 'false';
     try {
+      const islandMode = Boolean(map.islandLayout);
+      const islandVisual = islandMode ? createIslandWorldVisual(map) : null;
       const [world, trees] = await Promise.all([
-        createMedievalWorldVisual(map.worldStyle.theme, map),
+        islandVisual
+          ? Promise.resolve(islandVisual)
+          : createMedievalWorldVisual(map.worldStyle.theme, map),
         loadNaturePackTreeVisuals(map.trees),
       ]);
       if (this.disposed || revision !== this.revision) return;
@@ -121,13 +132,19 @@ export class MapPreview3D {
       this.worldRoot = new THREE.Group();
       this.worldRoot.name = 'map-editor-3d-world';
       this.worldRoot.add(world.root, trees.root);
+      this.islandVisual = islandVisual;
       this.scene.add(this.worldRoot);
       this.markerRoot = createPreviewMarkers(map);
       this.scene.add(this.markerRoot);
       this.canvas.dataset.ready = 'true';
       this.canvas.dataset.mapId = map.id;
+      this.canvas.dataset.worldMode = islandMode ? 'island-v5' : 'kaykit';
+      this.canvas.dataset.islandRegions = String(map.islandLayout?.regions.length ?? 0);
+      this.renderer.setClearColor(islandMode ? ISLAND_PREVIEW_BACKGROUND : PREVIEW_BACKGROUND);
       this.status.dataset.state = 'ready';
-      this.status.textContent = `3D 已同步 · ${world.tileInstances} 地块 · ${world.propInstances} 场景物件`;
+      this.status.textContent = islandMode
+        ? `岛屿 v5 已同步 · ${map.islandLayout?.regions.length ?? 0} 区域 · ${world.propInstances} 场景物件`
+        : `3D 已同步 · ${world.tileInstances} 地块 · ${world.propInstances} 场景物件`;
     } catch (error) {
       if (this.disposed || revision !== this.revision) return;
       this.canvas.dataset.ready = 'error';
@@ -149,6 +166,7 @@ export class MapPreview3D {
     this.animationFrame = window.requestAnimationFrame(this.animate);
     if (!this.visible) return;
     this.controls.update();
+    this.islandVisual?.update(performance.now() / 1000, false);
     this.renderer.render(this.scene, this.camera);
   };
 

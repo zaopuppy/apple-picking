@@ -25,6 +25,7 @@ import {
   type KayKitWorldTheme,
   type LandmarkKind,
   type OrchardLandmark,
+  type OrchardIslandLayout,
   type OrchardMap,
   type OrchardTerrainZone,
   type OrchardTree,
@@ -42,6 +43,7 @@ import {
 import { MapPreview3D } from './MapPreview3D';
 
 type EditorTool =
+  | 'island-select'
   | 'tree'
   | 'erase'
   | 'homestead'
@@ -61,7 +63,21 @@ type ViewportTransform = {
   offsetY: number;
 };
 
+type IslandSelectionKind =
+  | 'outline'
+  | 'region'
+  | 'route-block'
+  | 'water-segment'
+  | 'water-block'
+  | 'bridge';
+
+type IslandSelection = {
+  kind: IslandSelectionKind;
+  id: string;
+};
+
 const TOOL_KEYS: Record<string, EditorTool> = {
+  KeyR: 'island-select',
   Digit1: 'tree',
   Digit2: 'erase',
   Digit3: 'homestead',
@@ -121,12 +137,14 @@ export class MapEditor {
   private readonly toast = getElement<HTMLElement>('#editor-toast');
   private readonly mapLegend = getElement<HTMLElement>('#map-legend');
   private readonly previewHelp = getElement<HTMLElement>('#preview-help');
+  private readonly islandSelection = getElement<HTMLElement>('#island-selection');
 
   private map = loadActiveMap();
   private candidates: OrchardMap[] = [];
   private history: OrchardMap[] = [];
   private future: OrchardMap[] = [];
   private tool: EditorTool = 'tree';
+  private selectedIsland: IslandSelection | null = null;
   private pointerWorld: Vec2 | null = null;
   private drawing = false;
   private lastStamp: Vec2 | null = null;
@@ -226,6 +244,10 @@ export class MapEditor {
     event.preventDefault();
     const point = this.eventToWorld(event);
     if (!insideArena(point, 0.15)) return;
+    if (this.tool === 'island-select') {
+      this.selectIslandAt(point);
+      return;
+    }
     this.canvas.setPointerCapture(event.pointerId);
     this.pushHistory();
     this.drawing = true;
@@ -279,14 +301,57 @@ export class MapEditor {
 
   private selectTool(tool: EditorTool): void {
     this.tool = tool;
+    this.canvas.classList.toggle('island-select-mode', tool === 'island-select');
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
       button.classList.toggle('active', button.dataset.tool === tool);
     }
     this.draw();
   }
 
+  private selectIslandAt(point: Vec2): void {
+    if (!this.map.islandLayout) {
+      this.selectedIsland = null;
+      this.updateIslandSelectionInfo();
+      this.showToast('当前地图没有 v5 岛屿结构。');
+      this.draw();
+      return;
+    }
+    this.selectedIsland = hitTestIslandLayout(this.map.islandLayout, point);
+    this.updateIslandSelectionInfo();
+    if (this.selectedIsland) {
+      this.showToast(`已选择${islandSelectionLabel(this.map.islandLayout, this.selectedIsland)}。`);
+    }
+    this.draw();
+  }
+
+  private updateIslandSelectionInfo(): void {
+    const layout = this.map.islandLayout;
+    const selection = this.selectedIsland;
+    this.islandSelection.hidden = !layout || this.canvas.hidden;
+    this.canvas.dataset.layoutMode = layout ? 'island-v5' : 'orchard';
+    this.canvas.dataset.islandRegions = String(layout?.regions.length ?? 0);
+    if (!layout) {
+      this.islandSelection.textContent = '';
+      delete this.canvas.dataset.selectedIslandId;
+      delete this.canvas.dataset.selectedIslandKind;
+      return;
+    }
+    if (!selection || !islandSelectionExists(layout, selection)) {
+      this.selectedIsland = null;
+      this.islandSelection.textContent = `岛屿 v5 · ${layout.regions.length} 区域 · 使用“岛屿结构”选择查看`;
+      delete this.canvas.dataset.selectedIslandId;
+      delete this.canvas.dataset.selectedIslandKind;
+      return;
+    }
+    this.islandSelection.textContent = `已选择 · ${islandSelectionLabel(layout, selection)}`;
+    this.canvas.dataset.selectedIslandId = selection.id;
+    this.canvas.dataset.selectedIslandKind = selection.kind;
+  }
+
   private applyTool(point: Vec2, initial: boolean): void {
     switch (this.tool) {
+      case 'island-select':
+        return;
       case 'tree':
         if (initial || this.shouldStamp(point, Math.max(1.1, this.brushSize * 0.32))) this.stampTrees(point);
         break;
@@ -505,6 +570,7 @@ export class MapEditor {
 
   private setMap(map: OrchardMap): void {
     this.map = cloneOrchardMap(map);
+    this.selectedIsland = null;
     this.nameInput.value = this.map.name;
     this.syncWorldStyleControls();
     this.refresh();
@@ -551,7 +617,7 @@ export class MapEditor {
       }, { signal: this.listeners.signal });
       this.candidateList.append(button);
       const context = canvas.getContext('2d');
-      if (context) drawMap(context, candidate, canvas.width, canvas.height, null, 0, false);
+      if (context) drawMap(context, candidate, canvas.width, canvas.height, null, 0, false, null);
     });
   }
 
@@ -650,9 +716,12 @@ export class MapEditor {
 
   private refresh(): void {
     const validation = validateOrchardMap(this.map);
+    const islandSummary = this.map.islandLayout
+      ? ` · 岛屿 v5 · ${this.map.islandLayout.regions.length} 区域`
+      : '';
     this.status.dataset.state = validation.valid ? 'valid' : 'invalid';
     this.status.textContent = validation.valid
-      ? `可游玩 · ${this.map.worldStyle.tileShape === 'square' ? '方格' : '六边形'} · ${this.map.landmarks.length} 地标 · ${this.map.trees.length} 木本点缀（${largeTreeCount(this.map)} 大树） · ${this.map.appleSpawns.length} 果实`
+      ? `可游玩 · ${this.map.worldStyle.tileShape === 'square' ? '方格' : '六边形'}${islandSummary} · ${this.map.landmarks.length} 地标 · ${this.map.trees.length} 木本点缀（${largeTreeCount(this.map)} 大树） · ${this.map.appleSpawns.length} 果实`
       : `${validation.errors.length} 个问题需要处理`;
     this.playButton.disabled = !validation.valid;
     this.undoButton.disabled = this.history.length === 0;
@@ -667,6 +736,7 @@ export class MapEditor {
       chip.classList.toggle('error', validation.errors.includes(message));
       this.validationList.append(chip);
     }
+    this.updateIslandSelectionInfo();
     this.preview.setMap(this.map);
     this.draw();
   }
@@ -676,6 +746,8 @@ export class MapEditor {
     this.canvas.hidden = previewVisible;
     this.mapLegend.hidden = previewVisible;
     this.previewHelp.hidden = !previewVisible;
+    if (previewVisible) this.islandSelection.hidden = true;
+    else this.updateIslandSelectionInfo();
     this.preview.setVisible(previewVisible);
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-editor-view]')) {
       const active = button.dataset.editorView === view;
@@ -708,8 +780,9 @@ export class MapEditor {
       rect.width,
       rect.height,
       this.pointerWorld,
-      this.brushSize,
+      this.tool === 'island-select' ? 0 : this.brushSize,
       true,
+      this.selectedIsland,
     );
   }
 
@@ -792,6 +865,84 @@ function worldThemeLabel(theme: KayKitWorldTheme): string {
   return '林间村落';
 }
 
+function hitTestIslandLayout(layout: OrchardIslandLayout, point: Vec2): IslandSelection | null {
+  for (const bridge of layout.bridges) {
+    if (insideAxisAlignedRectangle(point, bridge, bridge.width / 2, bridge.depth / 2)) {
+      return { kind: 'bridge', id: bridge.id };
+    }
+  }
+  for (const block of layout.routeBlocks) {
+    if (insideAxisAlignedRectangle(point, block, block.radiusX, block.radiusZ)) {
+      return { kind: 'route-block', id: block.id };
+    }
+  }
+  for (const block of layout.waterBlocks) {
+    if (insideAxisAlignedRectangle(point, block, block.radiusX, block.radiusZ)) {
+      return { kind: 'water-block', id: block.id };
+    }
+  }
+  for (const segment of layout.waterSegments) {
+    if (insideAxisAlignedRectangle(point, segment, segment.sizeX / 2, segment.sizeZ / 2)) {
+      return { kind: 'water-segment', id: segment.id };
+    }
+  }
+  for (const region of layout.regions) {
+    const deltaX = point.x - region.x;
+    const deltaZ = point.z - region.z;
+    const cosine = Math.cos(region.rotationY);
+    const sine = Math.sin(region.rotationY);
+    const localX = deltaX * cosine + deltaZ * sine;
+    const localZ = -deltaX * sine + deltaZ * cosine;
+    if ((localX / region.radiusX) ** 2 + (localZ / region.radiusZ) ** 2 <= 1) {
+      return { kind: 'region', id: region.id };
+    }
+  }
+  for (let index = 0; index < layout.outline.length; index += 1) {
+    const start = layout.outline[index];
+    const end = layout.outline[(index + 1) % layout.outline.length];
+    if (distanceToEditorSegment(point, start, end) <= 1.35) {
+      return { kind: 'outline', id: 'island-outline' };
+    }
+  }
+  return null;
+}
+
+function insideAxisAlignedRectangle(
+  point: Vec2,
+  center: Vec2,
+  radiusX: number,
+  radiusZ: number,
+): boolean {
+  return Math.abs(point.x - center.x) <= radiusX && Math.abs(point.z - center.z) <= radiusZ;
+}
+
+function islandSelectionExists(layout: OrchardIslandLayout, selection: IslandSelection): boolean {
+  if (selection.kind === 'outline') return selection.id === 'island-outline';
+  if (selection.kind === 'region') return layout.regions.some((entry) => entry.id === selection.id);
+  if (selection.kind === 'route-block') {
+    return layout.routeBlocks.some((entry) => entry.id === selection.id);
+  }
+  if (selection.kind === 'water-segment') {
+    return layout.waterSegments.some((entry) => entry.id === selection.id);
+  }
+  if (selection.kind === 'water-block') {
+    return layout.waterBlocks.some((entry) => entry.id === selection.id);
+  }
+  return layout.bridges.some((entry) => entry.id === selection.id);
+}
+
+function islandSelectionLabel(layout: OrchardIslandLayout, selection: IslandSelection): string {
+  if (selection.kind === 'outline') return `岛屿轮廓 · ${layout.outline.length} 节点`;
+  if (selection.kind === 'region') {
+    const region = layout.regions.find((entry) => entry.id === selection.id);
+    return region ? `${islandRegionLabel(region.kind)}区域 · ${region.id}` : selection.id;
+  }
+  if (selection.kind === 'route-block') return `矩形通路块 · ${selection.id}`;
+  if (selection.kind === 'water-segment') return `可见水面 · ${selection.id}`;
+  if (selection.kind === 'water-block') return `水域碰撞块 · ${selection.id}`;
+  return `桥梁 · ${selection.id}`;
+}
+
 function drawMap(
   context: CanvasRenderingContext2D,
   map: OrchardMap,
@@ -800,6 +951,7 @@ function drawMap(
   pointer: Vec2 | null,
   brushSize: number,
   detailed: boolean,
+  selectedIsland: IslandSelection | null,
 ): void {
   context.clearRect(0, 0, width, height);
   context.fillStyle = worldBorderColor(map.worldStyle.theme);
@@ -821,15 +973,19 @@ function drawMap(
   );
   context.clip();
 
-  context.fillStyle = worldGroundColor(map.worldStyle.theme);
-  context.fillRect(
-    topLeft.x,
-    topLeft.y,
-    GAME_CONFIG.arenaHalfWidth * 2 * transform.scale,
-    GAME_CONFIG.arenaHalfDepth * 2 * transform.scale,
-  );
-
-  if (detailed) drawEditorTileGrid(context, map.worldStyle.tileShape, transform, toScreen);
+  if (map.islandLayout) {
+    drawIslandBase(context, map.islandLayout, transform, toScreen);
+    drawIslandRegions(context, map.islandLayout, transform, toScreen, detailed);
+  } else {
+    context.fillStyle = worldGroundColor(map.worldStyle.theme);
+    context.fillRect(
+      topLeft.x,
+      topLeft.y,
+      GAME_CONFIG.arenaHalfWidth * 2 * transform.scale,
+      GAME_CONFIG.arenaHalfDepth * 2 * transform.scale,
+    );
+    if (detailed) drawEditorTileGrid(context, map.worldStyle.tileShape, transform, toScreen);
+  }
 
   for (const zone of map.terrainZones) {
     const screen = toScreen(zone);
@@ -851,6 +1007,10 @@ function drawMap(
     context.globalAlpha = detailed ? 0.82 : 0.72;
     context.fill();
     context.globalAlpha = 1;
+  }
+
+  if (map.islandLayout) {
+    drawIslandWater(context, map.islandLayout, transform, toScreen, detailed);
   }
 
   context.lineCap = 'round';
@@ -881,7 +1041,12 @@ function drawMap(
     context.fill();
   }
 
+  if (map.islandLayout) {
+    drawIslandStructures(context, map.islandLayout, transform, toScreen, detailed);
+  }
+
   for (const landmark of map.landmarks) {
+    if (map.islandLayout && isIslandProxyLandmark(map.islandLayout, landmark.id)) continue;
     drawLandmark(context, landmark, toScreen(landmark), transform.scale, detailed);
   }
 
@@ -930,6 +1095,9 @@ function drawMap(
     context.stroke();
     context.setLineDash([]);
   }
+  if (map.islandLayout && selectedIsland) {
+    drawIslandSelection(context, map.islandLayout, selectedIsland, transform, toScreen);
+  }
   context.restore();
 
   context.strokeStyle = '#f0dfac';
@@ -940,6 +1108,253 @@ function drawMap(
     GAME_CONFIG.arenaHalfWidth * 2 * transform.scale,
     GAME_CONFIG.arenaHalfDepth * 2 * transform.scale,
   );
+}
+
+function drawIslandBase(
+  context: CanvasRenderingContext2D,
+  layout: OrchardIslandLayout,
+  transform: ViewportTransform,
+  toScreen: (point: Vec2) => { x: number; y: number },
+): void {
+  const topLeft = toScreen({ x: -GAME_CONFIG.arenaHalfWidth, z: -GAME_CONFIG.arenaHalfDepth });
+  context.fillStyle = '#58b7c8';
+  context.fillRect(
+    topLeft.x,
+    topLeft.y,
+    GAME_CONFIG.arenaHalfWidth * 2 * transform.scale,
+    GAME_CONFIG.arenaHalfDepth * 2 * transform.scale,
+  );
+  traceIslandOutline(context, layout, toScreen);
+  context.fillStyle = '#78b968';
+  context.fill();
+  context.strokeStyle = '#e6d395';
+  context.lineWidth = 2.5;
+  context.stroke();
+}
+
+function drawIslandRegions(
+  context: CanvasRenderingContext2D,
+  layout: OrchardIslandLayout,
+  transform: ViewportTransform,
+  toScreen: (point: Vec2) => { x: number; y: number },
+  detailed: boolean,
+): void {
+  for (const region of layout.regions) {
+    const screen = toScreen(region);
+    context.beginPath();
+    context.ellipse(
+      screen.x,
+      screen.y,
+      region.radiusX * transform.scale,
+      region.radiusZ * transform.scale,
+      -region.rotationY,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = islandRegionColor(region.kind);
+    context.globalAlpha = detailed ? 0.2 : 0.14;
+    context.fill();
+    context.globalAlpha = 1;
+    context.strokeStyle = 'rgba(255, 248, 211, 0.68)';
+    context.lineWidth = detailed ? 1.5 : 0.8;
+    context.stroke();
+    if (!detailed) continue;
+    context.fillStyle = '#315843';
+    context.font = '800 10px "Microsoft YaHei", sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(islandRegionLabel(region.kind), screen.x, screen.y);
+  }
+}
+
+function drawIslandWater(
+  context: CanvasRenderingContext2D,
+  layout: OrchardIslandLayout,
+  transform: ViewportTransform,
+  toScreen: (point: Vec2) => { x: number; y: number },
+  detailed: boolean,
+): void {
+  for (const segment of layout.waterSegments) {
+    const screen = toScreen(segment);
+    const width = segment.sizeX * transform.scale;
+    const depth = segment.sizeZ * transform.scale;
+    context.fillStyle = '#4fa9c0';
+    context.fillRect(screen.x - width / 2, screen.y - depth / 2, width, depth);
+    context.strokeStyle = '#c8eef0';
+    context.lineWidth = detailed ? 2 : 1;
+    context.strokeRect(screen.x - width / 2, screen.y - depth / 2, width, depth);
+  }
+  if (!detailed) return;
+  context.save();
+  context.setLineDash([5, 4]);
+  context.strokeStyle = 'rgba(37, 83, 104, 0.78)';
+  context.lineWidth = 1.5;
+  for (const block of layout.waterBlocks) {
+    const screen = toScreen(block);
+    context.strokeRect(
+      screen.x - block.radiusX * transform.scale,
+      screen.y - block.radiusZ * transform.scale,
+      block.radiusX * 2 * transform.scale,
+      block.radiusZ * 2 * transform.scale,
+    );
+  }
+  context.restore();
+}
+
+function drawIslandStructures(
+  context: CanvasRenderingContext2D,
+  layout: OrchardIslandLayout,
+  transform: ViewportTransform,
+  toScreen: (point: Vec2) => { x: number; y: number },
+  detailed: boolean,
+): void {
+  for (const block of layout.routeBlocks) {
+    const screen = toScreen(block);
+    const width = block.radiusX * 2 * transform.scale;
+    const depth = block.radiusZ * 2 * transform.scale;
+    context.fillStyle = islandRouteBlockColor(block.kind);
+    context.fillRect(screen.x - width / 2, screen.y - depth / 2, width, depth);
+    context.strokeStyle = '#4d6541';
+    context.lineWidth = detailed ? 2 : 1;
+    context.strokeRect(screen.x - width / 2, screen.y - depth / 2, width, depth);
+  }
+  for (const bridge of layout.bridges) {
+    const screen = toScreen(bridge);
+    const width = bridge.width * transform.scale;
+    const depth = bridge.depth * transform.scale;
+    context.fillStyle = '#a9764e';
+    context.fillRect(screen.x - width / 2, screen.y - depth / 2, width, depth);
+    context.strokeStyle = '#68472f';
+    context.lineWidth = detailed ? 2 : 1;
+    context.strokeRect(screen.x - width / 2, screen.y - depth / 2, width, depth);
+    if (!detailed) continue;
+    context.strokeStyle = 'rgba(242, 211, 151, 0.78)';
+    context.lineWidth = 1;
+    for (let index = 1; index < 5; index += 1) {
+      const y = screen.y - depth / 2 + depth * index / 5;
+      context.beginPath();
+      context.moveTo(screen.x - width / 2, y);
+      context.lineTo(screen.x + width / 2, y);
+      context.stroke();
+    }
+  }
+}
+
+function drawIslandSelection(
+  context: CanvasRenderingContext2D,
+  layout: OrchardIslandLayout,
+  selection: IslandSelection,
+  transform: ViewportTransform,
+  toScreen: (point: Vec2) => { x: number; y: number },
+): void {
+  context.save();
+  context.strokeStyle = '#fff5b8';
+  context.lineWidth = 4;
+  context.setLineDash([8, 4]);
+  if (selection.kind === 'outline') {
+    traceIslandOutline(context, layout, toScreen);
+    context.stroke();
+    context.restore();
+    return;
+  }
+  if (selection.kind === 'region') {
+    const region = layout.regions.find((candidate) => candidate.id === selection.id);
+    if (region) {
+      const screen = toScreen(region);
+      context.beginPath();
+      context.ellipse(
+        screen.x,
+        screen.y,
+        region.radiusX * transform.scale,
+        region.radiusZ * transform.scale,
+        -region.rotationY,
+        0,
+        Math.PI * 2,
+      );
+      context.stroke();
+    }
+    context.restore();
+    return;
+  }
+  const rectangle = islandSelectionRectangle(layout, selection);
+  if (rectangle) {
+    const screen = toScreen(rectangle);
+    context.strokeRect(
+      screen.x - rectangle.radiusX * transform.scale,
+      screen.y - rectangle.radiusZ * transform.scale,
+      rectangle.radiusX * 2 * transform.scale,
+      rectangle.radiusZ * 2 * transform.scale,
+    );
+  }
+  context.restore();
+}
+
+function traceIslandOutline(
+  context: CanvasRenderingContext2D,
+  layout: OrchardIslandLayout,
+  toScreen: (point: Vec2) => { x: number; y: number },
+): void {
+  context.beginPath();
+  layout.outline.forEach((point, index) => {
+    const screen = toScreen(point);
+    if (index === 0) context.moveTo(screen.x, screen.y);
+    else context.lineTo(screen.x, screen.y);
+  });
+  context.closePath();
+}
+
+function islandSelectionRectangle(
+  layout: OrchardIslandLayout,
+  selection: IslandSelection,
+): (Vec2 & { radiusX: number; radiusZ: number }) | null {
+  if (selection.kind === 'route-block') {
+    return layout.routeBlocks.find((candidate) => candidate.id === selection.id) ?? null;
+  }
+  if (selection.kind === 'water-block') {
+    return layout.waterBlocks.find((candidate) => candidate.id === selection.id) ?? null;
+  }
+  if (selection.kind === 'water-segment') {
+    const segment = layout.waterSegments.find((candidate) => candidate.id === selection.id);
+    return segment
+      ? { x: segment.x, z: segment.z, radiusX: segment.sizeX / 2, radiusZ: segment.sizeZ / 2 }
+      : null;
+  }
+  if (selection.kind === 'bridge') {
+    const bridge = layout.bridges.find((candidate) => candidate.id === selection.id);
+    return bridge
+      ? { x: bridge.x, z: bridge.z, radiusX: bridge.width / 2, radiusZ: bridge.depth / 2 }
+      : null;
+  }
+  return null;
+}
+
+function isIslandProxyLandmark(layout: OrchardIslandLayout, id: string): boolean {
+  return id.startsWith('island-boundary-') || id === 'island-north-terrace' ||
+    layout.routeBlocks.some((block) => block.id === id) ||
+    layout.waterBlocks.some((block) => block.id === id);
+}
+
+function islandRegionColor(kind: OrchardIslandLayout['regions'][number]['kind']): string {
+  if (kind === 'orchard') return '#d7b76d';
+  if (kind === 'homestead') return '#e4c98a';
+  if (kind === 'plaza') return '#ebd17e';
+  if (kind === 'garden') return '#b8d783';
+  return '#ead09a';
+}
+
+function islandRegionLabel(kind: OrchardIslandLayout['regions'][number]['kind']): string {
+  if (kind === 'orchard') return '果园';
+  if (kind === 'homestead') return '住宅';
+  if (kind === 'plaza') return '广场';
+  if (kind === 'garden') return '花园';
+  return '海滩';
+}
+
+function islandRouteBlockColor(kind: OrchardIslandLayout['routeBlocks'][number]['kind']): string {
+  if (kind === 'hedge') return '#6f9d50';
+  if (kind === 'hill') return '#8ab662';
+  if (kind === 'shrine') return '#d8bd76';
+  return '#92694b';
 }
 
 function drawEditorTileGrid(

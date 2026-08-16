@@ -1031,6 +1031,9 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     groundMaterialMode: 'grass-texture',
     deliveryMarkerMode: 'parcel-sign',
     deliveryMarkerLabels: 4,
+    islandLayoutSource: 'map-v5',
+    islandOutlinePoints: 16,
+    islandRegions: 5,
     waterSegments: 3,
     waterCollisionBlocks: 5,
     bridges: 2,
@@ -1060,6 +1063,51 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     shadowMapSize: 2048,
     shadowCastingLights: 1,
     postPasses: 0,
+  });
+  const semanticDataSource = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const islandViewPath = String('/src/render/IslandWorldView.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const islandView = await import(/* @vite-ignore */ islandViewPath);
+    const map = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+    if (!map.islandLayout) throw new Error('Missing island layout.');
+    map.islandLayout.outline = [
+      { x: -10, z: -8 },
+      { x: 10, z: -8 },
+      { x: 10, z: 8 },
+      { x: -10, z: 8 },
+    ];
+    map.islandLayout.routeBlocks = map.islandLayout.routeBlocks.slice(0, 1);
+    map.islandLayout.waterSegments = map.islandLayout.waterSegments.slice(0, 1);
+    map.islandLayout.waterBlocks = map.islandLayout.waterBlocks.slice(0, 2);
+    map.islandLayout.bridges = map.islandLayout.bridges.slice(0, 1);
+    const visual = islandView.createIslandWorldVisual(map);
+    const body = visual.root.getObjectByName('island-stepped-main-body');
+    const geometry = (body as { geometry?: { computeBoundingBox(): void; boundingBox: {
+      min: { x: number; y: number };
+      max: { x: number; y: number };
+    } | null } } | undefined)?.geometry;
+    geometry?.computeBoundingBox();
+    return {
+      waterSegments: visual.waterSegments,
+      waterBlocks: visual.waterCollisionBlocks,
+      bridges: visual.bridges,
+      bodyWidth: geometry?.boundingBox
+        ? geometry.boundingBox.max.x - geometry.boundingBox.min.x
+        : 0,
+      bodyDepth: geometry?.boundingBox
+        ? geometry.boundingBox.max.y - geometry.boundingBox.min.y
+        : 0,
+    };
+  });
+  expect(semanticDataSource).toMatchObject({
+    waterSegments: 1,
+    waterBlocks: 2,
+    bridges: 1,
+    bodyWidth: 21.5,
+    bodyDepth: 17.5,
   });
   await expect(page.locator('[data-world-layout="island"]')).toHaveAttribute('aria-current', 'page');
 

@@ -288,10 +288,12 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 }
 #map-preview-canvas { cursor: grab; }
 #map-preview-canvas:active { cursor: grabbing; }
+#map-editor-canvas.island-select-mode { cursor: pointer; }
 #map-editor-canvas[hidden],
 #map-preview-canvas[hidden],
 .preview-status[hidden],
 .preview-help[hidden],
+.island-selection[hidden],
 .map-legend[hidden] { display: none; }
 .preview-status,
 .preview-help {
@@ -311,6 +313,23 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 .preview-status[data-state="ready"] { border-color: rgba(182, 199, 127, .72); }
 .preview-status[data-state="error"] { border-color: rgba(201, 75, 56, .8); color: #ffd7cb; }
 .preview-help { right: 10px; bottom: 10px; color: rgba(242, 230, 191, .78); }
+.island-selection {
+  position: absolute;
+  z-index: 3;
+  left: 10px;
+  bottom: 9px;
+  max-width: min(58%, 440px);
+  overflow: hidden;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 245, 184, .72);
+  border-radius: 4px 14px 4px 14px;
+  color: #263226;
+  background: rgba(255, 245, 184, .88);
+  font: 800 .58rem/1.2 ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .map-legend {
   position: absolute;
   right: 10px;
@@ -331,6 +350,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 .legend-guard { background: #356fa1; }
 .legend-apple { background: var(--apple); }
 .legend-goal { border: 2px solid #bf8c1f; background: transparent; }
+.legend-island { border-radius: 2px !important; background: #58b7c8; box-shadow: inset 0 0 0 2px #fff5b8; }
 
 .validation-list {
   display: flex;
