@@ -1017,10 +1017,12 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P1',
+    mapName: '甜日果园岛 · P1.1',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
+    paths: 5,
+    landmarks: 14,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
@@ -1050,6 +1052,44 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     });
     expect(validation.valid, validation.errors.join('\n')).toBe(true);
     expect(validation.reachableTargets).toBe(validation.totalTargets);
+
+    const routeBlockCollision = await page.evaluate(async () => {
+      const islandPath = String('/src/game/maps/IslandTourMap.ts');
+      const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+      const simulationPath = String('/src/game/GameSimulation.ts');
+      const configPath = String('/src/game/config.ts');
+      const typesPath = String('/src/game/types.ts');
+      const island = await import(/* @vite-ignore */ islandPath);
+      const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+      const simulationModule = await import(/* @vite-ignore */ simulationPath);
+      const config = await import(/* @vite-ignore */ configPath);
+      const types = await import(/* @vite-ignore */ typesPath);
+      const block = island.ISLAND_ROUTE_BLOCKS.find(
+        (candidate: { id: string }) => candidate.id === 'island-route-west-hill',
+      );
+      if (!block) throw new Error('Missing west route block.');
+      const map = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+      map.kidStart = {
+        x: block.x - block.radiusX - 2,
+        z: block.z,
+      };
+      map.guardStarts = [
+        { x: 28, z: -16 },
+        { x: 28, z: 18 },
+      ];
+      const simulation = new simulationModule.GameSimulation(map);
+      simulation.loadScenario('active-play');
+      const commands = types.createEmptyCommands();
+      commands.kid.moveX = 1;
+      let snapshot = simulation.getSnapshot();
+      for (let tick = 0; tick < 120; tick += 1) snapshot = simulation.step(commands).snapshot;
+      return {
+        kidX: snapshot.kid.position.x,
+        maximumX: block.x - block.radiusX - config.GAME_CONFIG.kidRadius,
+      };
+    });
+    expect(routeBlockCollision.kidX).toBeLessThanOrEqual(routeBlockCollision.maximumX + 0.0001);
+    expect(routeBlockCollision.kidX).toBeCloseTo(routeBlockCollision.maximumX, 4);
   }
 });
 

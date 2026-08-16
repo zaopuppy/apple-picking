@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  ISLAND_ROUTE_BLOCKS,
+  type IslandRouteBlock,
+} from '../game/maps/IslandTourMap';
 import type { OrchardMap, OrchardPath } from '../game/maps/OrchardMap';
 import { createIslandMaterials, type IslandMaterials } from './IslandMaterials';
 
@@ -76,6 +80,10 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   const coast = createCoastalDetails(materials);
   propInstances += coast.userData.propInstances as number;
   root.add(coast);
+
+  const routeBlocks = createRouteBlocks(materials);
+  propInstances += routeBlocks.userData.propInstances as number;
+  root.add(routeBlocks);
 
   root.add(createPlazaDetails(materials));
   const stats = measureWorld(root);
@@ -204,6 +212,13 @@ function createPaths(paths: readonly OrchardPath[], materials: IslandMaterials):
   group.name = 'island-sand-path-network';
   const capGeometry = new THREE.CylinderGeometry(1, 1, 0.075, 28);
   const caps: Array<{ x: number; z: number; radius: number }> = [];
+  const segments: Array<{
+    x: number;
+    z: number;
+    length: number;
+    width: number;
+    rotationY: number;
+  }> = [];
 
   for (const path of paths) {
     path.points.forEach((point) => caps.push({ x: point.x, z: point.z, radius: path.width / 2 }));
@@ -213,30 +228,50 @@ function createPaths(paths: readonly OrchardPath[], materials: IslandMaterials):
       const dx = end.x - start.x;
       const dz = end.z - start.z;
       const length = Math.hypot(dx, dz);
-      const segment = new THREE.Mesh(
-        new THREE.BoxGeometry(length, 0.075, path.width),
-        materials.sand,
-      );
-      segment.name = `${path.id}-segment-${index}`;
-      segment.position.set((start.x + end.x) / 2, 0.07, (start.z + end.z) / 2);
-      segment.rotation.y = -Math.atan2(dz, dx);
-      segment.receiveShadow = true;
-      group.add(segment);
+      segments.push({
+        x: (start.x + end.x) / 2,
+        z: (start.z + end.z) / 2,
+        length,
+        width: path.width,
+        rotationY: -Math.atan2(dz, dx),
+      });
     }
   }
 
-  const capMesh = new THREE.InstancedMesh(capGeometry, materials.sand, caps.length);
   const matrix = new THREE.Object3D();
+  const segmentMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 0.075, 1),
+    materials.sand,
+    segments.length,
+  );
+  segments.forEach((segment, index) => {
+    setInstanceTransform(
+      segmentMesh,
+      index,
+      matrix,
+      [segment.x, 0.07, segment.z],
+      [segment.length, 1, segment.width],
+      [0, segment.rotationY, 0],
+    );
+  });
+  segmentMesh.name = 'island-path-segments';
+  segmentMesh.receiveShadow = true;
+  segmentMesh.instanceMatrix.needsUpdate = true;
+
+  const capMesh = new THREE.InstancedMesh(capGeometry, materials.sand, caps.length);
   caps.forEach((cap, index) => {
-    matrix.position.set(cap.x, 0.07, cap.z);
-    matrix.scale.set(cap.radius, 1, cap.radius);
-    matrix.updateMatrix();
-    capMesh.setMatrixAt(index, matrix.matrix);
+    setInstanceTransform(
+      capMesh,
+      index,
+      matrix,
+      [cap.x, 0.07, cap.z],
+      [cap.radius, 1, cap.radius],
+    );
   });
   capMesh.name = 'island-path-rounded-caps';
   capMesh.receiveShadow = true;
   capMesh.instanceMatrix.needsUpdate = true;
-  group.add(capMesh);
+  group.add(segmentMesh, capMesh);
   return group;
 }
 
@@ -401,6 +436,10 @@ function createBeachDetails(materials: IslandMaterials): THREE.Group {
 function createGardenDetails(materials: IslandMaterials): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-flower-garden-details';
+  if (window.matchMedia('(max-width: 600px)').matches) {
+    group.userData.propInstances = 0;
+    return group;
+  }
   const positions: Array<readonly [number, number]> = [];
   for (let row = 0; row < 4; row += 1) {
     for (let column = 0; column < 7; column += 1) {
@@ -506,13 +545,262 @@ function createCoastalDetails(materials: IslandMaterials): THREE.Group {
   return group;
 }
 
+function createRouteBlocks(materials: IslandMaterials): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'island-route-defining-blocks';
+  const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+  const baseMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.cliff,
+    ISLAND_ROUTE_BLOCKS.length,
+  );
+  const topMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.flowerWhite,
+    ISLAND_ROUTE_BLOCKS.length,
+  );
+  const hedgeParts: Array<{ x: number; y: number; z: number; scale: number }> = [];
+  const totemParts: Array<{
+    x: number;
+    y: number;
+    z: number;
+    scaleX: number;
+    scaleY: number;
+    scaleZ: number;
+    color: THREE.ColorRepresentation;
+  }> = [];
+  const logParts: Array<{ x: number; y: number; z: number; length: number }> = [];
+  const matrix = new THREE.Object3D();
+
+  ISLAND_ROUTE_BLOCKS.forEach((block, index) => {
+    const height = routeBlockHeight(block);
+    setInstanceTransform(
+      baseMesh,
+      index,
+      matrix,
+      [block.x, height / 2, block.z],
+      [block.radiusX * 2, height, block.radiusZ * 2],
+    );
+    setInstanceTransform(
+      topMesh,
+      index,
+      matrix,
+      [block.x, height + 0.055, block.z],
+      [block.radiusX * 2 - 0.26, 0.11, block.radiusZ * 2 - 0.26],
+    );
+    topMesh.setColorAt(index, routeBlockTopColor(block.kind));
+    appendRouteBlockProps(block, height, hedgeParts, totemParts, logParts);
+  });
+  baseMesh.name = 'island-route-block-cliff-bases';
+  topMesh.name = 'island-route-block-colored-tops';
+  baseMesh.castShadow = true;
+  baseMesh.receiveShadow = true;
+  topMesh.receiveShadow = true;
+  baseMesh.instanceMatrix.needsUpdate = true;
+  topMesh.instanceMatrix.needsUpdate = true;
+  if (topMesh.instanceColor) topMesh.instanceColor.needsUpdate = true;
+  group.add(baseMesh, topMesh);
+
+  if (hedgeParts.length > 0) {
+    const hedges = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.5, 0),
+      materials.foliage,
+      hedgeParts.length,
+    );
+    hedgeParts.forEach((part, index) => {
+      setInstanceTransform(
+        hedges,
+        index,
+        matrix,
+        [part.x, part.y, part.z],
+        [part.scale * 1.15, part.scale * 0.78, part.scale],
+        [0, index * 0.63, 0],
+      );
+    });
+    hedges.name = 'island-route-block-hedges';
+    hedges.castShadow = true;
+    hedges.instanceMatrix.needsUpdate = true;
+    group.add(hedges);
+  }
+
+  if (totemParts.length > 0) {
+    const totems = new THREE.InstancedMesh(blockGeometry, materials.flowerWhite, totemParts.length);
+    totemParts.forEach((part, index) => {
+      setInstanceTransform(
+        totems,
+        index,
+        matrix,
+        [part.x, part.y, part.z],
+        [part.scaleX, part.scaleY, part.scaleZ],
+        [0, index * 0.24, 0],
+      );
+      totems.setColorAt(index, new THREE.Color(part.color));
+    });
+    totems.name = 'island-route-block-totems';
+    totems.castShadow = true;
+    totems.instanceMatrix.needsUpdate = true;
+    if (totems.instanceColor) totems.instanceColor.needsUpdate = true;
+    group.add(totems);
+  }
+
+  if (logParts.length > 0) {
+    const logs = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.22, 0.25, 1, 8),
+      materials.wood,
+      logParts.length,
+    );
+    logParts.forEach((part, index) => {
+      setInstanceTransform(
+        logs,
+        index,
+        matrix,
+        [part.x, part.y, part.z],
+        [1, part.length, 1],
+        [0, index * 0.07, Math.PI / 2],
+      );
+    });
+    logs.name = 'island-route-block-woodpile';
+    logs.castShadow = true;
+    logs.instanceMatrix.needsUpdate = true;
+    group.add(logs);
+  }
+
+  group.userData.propInstances =
+    ISLAND_ROUTE_BLOCKS.length * 2 + hedgeParts.length + totemParts.length + logParts.length;
+  return group;
+}
+
+function appendRouteBlockProps(
+  block: IslandRouteBlock,
+  height: number,
+  hedgeParts: Array<{ x: number; y: number; z: number; scale: number }>,
+  totemParts: Array<{
+    x: number;
+    y: number;
+    z: number;
+    scaleX: number;
+    scaleY: number;
+    scaleZ: number;
+    color: THREE.ColorRepresentation;
+  }>,
+  logParts: Array<{ x: number; y: number; z: number; length: number }>,
+): void {
+  if (block.kind === 'hedge') {
+    for (let x = -block.radiusX + 0.6; x <= block.radiusX - 0.6; x += 1.15) {
+      hedgeParts.push(
+        { x: block.x + x, y: height + 0.57, z: block.z - block.radiusZ + 0.38, scale: 0.92 },
+        { x: block.x + x, y: height + 0.57, z: block.z + block.radiusZ - 0.38, scale: 0.92 },
+      );
+    }
+    for (let z = -block.radiusZ + 1.15; z <= block.radiusZ - 1.15; z += 1.15) {
+      hedgeParts.push(
+        { x: block.x - block.radiusX + 0.38, y: height + 0.57, z: block.z + z, scale: 0.92 },
+        { x: block.x + block.radiusX - 0.38, y: height + 0.57, z: block.z + z, scale: 0.92 },
+      );
+    }
+    return;
+  }
+
+  if (block.kind === 'hill') {
+    const offsets: ReadonlyArray<readonly [number, number, number]> = [
+      [-0.55, -0.28, 1.18],
+      [0.1, 0.32, 1.05],
+      [0.62, -0.18, 0.92],
+    ];
+    offsets.forEach(([xFactor, zFactor, scale]) => hedgeParts.push({
+      x: block.x + block.radiusX * xFactor,
+      y: height + 0.55 * scale,
+      z: block.z + block.radiusZ * zFactor,
+      scale,
+    }));
+    return;
+  }
+
+  if (block.kind === 'shrine') {
+    const baseY = height + 0.12;
+    totemParts.push(
+      {
+        x: block.x,
+        y: baseY + 0.62,
+        z: block.z,
+        scaleX: 0.42,
+        scaleY: 1.24,
+        scaleZ: 0.42,
+        color: '#7d4b32',
+      },
+      {
+        x: block.x,
+        y: baseY + 1.36,
+        z: block.z,
+        scaleX: 0.88,
+        scaleY: 0.38,
+        scaleZ: 0.72,
+        color: '#de6e5d',
+      },
+      {
+        x: block.x,
+        y: baseY + 1.76,
+        z: block.z,
+        scaleX: 0.58,
+        scaleY: 0.42,
+        scaleZ: 0.58,
+        color: '#f0d35f',
+      },
+    );
+    return;
+  }
+
+  for (let index = -2; index <= 2; index += 1) {
+    logParts.push({
+      x: block.x,
+      y: height + 0.32 + Math.abs(index) * 0.035,
+      z: block.z + index * 0.68,
+      length: Math.min(3.2, block.radiusX * 0.9),
+    });
+  }
+}
+
+function routeBlockHeight(block: IslandRouteBlock): number {
+  if (block.kind === 'hill') return 0.76;
+  if (block.kind === 'shrine') return 0.24;
+  return 0.4;
+}
+
+function routeBlockTopColor(kind: IslandRouteBlock['kind']): THREE.Color {
+  switch (kind) {
+    case 'hedge':
+      return new THREE.Color('#78aa4e');
+    case 'hill':
+      return new THREE.Color('#9ac966');
+    case 'shrine':
+      return new THREE.Color('#e5c77f');
+    case 'woodlot':
+      return new THREE.Color('#9b6a48');
+  }
+}
+
+function setInstanceTransform(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  matrix: THREE.Object3D,
+  position: readonly [number, number, number],
+  scale: readonly [number, number, number],
+  rotation: readonly [number, number, number] = [0, 0, 0],
+): void {
+  matrix.position.set(...position);
+  matrix.scale.set(...scale);
+  matrix.rotation.set(...rotation);
+  matrix.updateMatrix();
+  mesh.setMatrixAt(index, matrix.matrix);
+}
+
 function createPlazaDetails(materials: IslandMaterials): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-central-plaza';
-  const plaza = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 6.4, 0.12, 48), materials.sandLight);
+  const plaza = new THREE.Mesh(new THREE.CylinderGeometry(4.35, 4.35, 0.12, 40), materials.sandLight);
   plaza.position.set(0, 0.07, 3);
   plaza.receiveShadow = true;
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(5.35, 0.12, 8, 48), materials.stone);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(3.55, 0.1, 8, 40), materials.stone);
   ring.position.set(0, 0.17, 3);
   ring.rotation.x = Math.PI / 2;
   group.add(plaza, ring);
