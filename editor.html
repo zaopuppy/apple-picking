@@ -151,7 +151,7 @@
               <button id="delivery-zone-down" type="button" aria-label="下移选中投递点">↓ 下移</button>
             </div>
           </section>
-          <p class="tool-hint">先在 2D 中画宽路和放建筑，再切到 3D 检查比例。v5 岛屿可用 R 选择结构；区域和矩形通路块可编辑，桥梁会沿水面移动并自动同步碰撞缺口。</p>
+          <p class="tool-hint">2D 适合海岸节点和精确拓扑；3D 中可直接选择并拖动区域、矩形障碍、水面和桥梁，松开后自动校验并写入撤销记录。</p>
         </aside>
 
         <section class="map-board">
@@ -172,7 +172,7 @@
             <canvas id="map-editor-canvas" aria-label="果园地图编辑画布"></canvas>
             <canvas id="map-preview-canvas" aria-label="KayKit 地图三维预览" hidden></canvas>
             <div id="preview-status" class="preview-status" hidden>正在准备 3D 预览…</div>
-            <div id="preview-help" class="preview-help" hidden>拖拽旋转 · 滚轮缩放 · 右键平移</div>
+            <div id="preview-help" class="preview-help" hidden>左键选择/拖动物件 · 空白处拖拽旋转 · 滚轮缩放 · 右键平移</div>
             <div id="island-selection" class="island-selection" aria-live="polite" hidden></div>
             <div id="map-legend" class="map-legend" aria-hidden="true">
               <span><i class="legend-kid"></i>小偷</span>

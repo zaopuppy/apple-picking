@@ -551,11 +551,47 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-world-mode', 'island-v5');
   await expect(preview).toHaveAttribute('data-island-regions', '5');
+  await expect(preview).toHaveAttribute('data-editor-proxies', '17');
+  await expect(preview).toHaveAttribute('data-selected-kind', 'bridge');
+  await expect(preview).toHaveAttribute('data-selected-id', 'island-bridge-west');
+  await expect(page.locator('#island-geometry-panel')).toBeVisible();
   await expect(preview).toHaveAttribute(
     'data-island-landmark-signature',
     /island-main-house:21\.00:-17\.00\|island-pond:19\.50:11\.00/,
   );
   await expect(page.locator('#preview-status')).toContainText('岛屿 v5 已同步 · 5 区域');
+  const dragBridge = async () => {
+    const previewBox = await preview.boundingBox();
+    const screens = JSON.parse(await preview.getAttribute('data-editor-proxy-screens') ?? '[]') as Array<{
+      id: string;
+      x: number;
+      y: number;
+    }>;
+    const bridgeScreen = screens.find((entry) => entry.id === 'island-bridge-west');
+    if (!previewBox || !bridgeScreen) throw new Error('3D bridge projection is unavailable.');
+    const startX = previewBox.x + bridgeScreen.x;
+    const startY = previewBox.y + bridgeScreen.y;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 24, startY, { steps: 5 });
+    await page.mouse.up();
+  };
+  await dragBridge();
+  await expect(page.getByText('桥梁已沿水面移动，碰撞缺口已同步。')).toBeVisible();
+  await expect(page.getByRole('button', { name: '撤销' })).toBeEnabled();
+  await expect(page.getByLabel('中心 X')).not.toHaveValue('-22');
+  await page.getByRole('button', { name: '撤销' }).click();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  const restoredBox = await preview.boundingBox();
+  const restoredScreens = JSON.parse(await preview.getAttribute('data-editor-proxy-screens') ?? '[]') as Array<{
+    id: string;
+    x: number;
+    y: number;
+  }>;
+  const restoredBridge = restoredScreens.find((entry) => entry.id === 'island-bridge-west');
+  if (!restoredBox || !restoredBridge) throw new Error('Restored 3D bridge projection is unavailable.');
+  await page.mouse.click(restoredBox.x + restoredBridge.x, restoredBox.y + restoredBridge.y);
+  await expect(page.getByLabel('中心 X')).toHaveValue('-22');
   await page.screenshot({
     path: testInfo.outputPath('island-v5-editor-3d.png'),
     fullPage: true,
