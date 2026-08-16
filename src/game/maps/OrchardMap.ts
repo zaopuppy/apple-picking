@@ -1,6 +1,11 @@
 import { ARENA_SCALE, GAME_CONFIG } from '../config';
 import type { Vec2 } from '../types';
 import { createSeededRandom } from '../../utils/random';
+import {
+  distanceToIslandOutline,
+  pointInsideIslandOutline,
+  validateIslandOutlineGeometry,
+} from './IslandOutline';
 
 export const ORCHARD_MAP_VERSION = 5;
 export const MIN_MAP_APPLES = 6;
@@ -272,6 +277,12 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
   const deliveryZones = deliveryZonesForMap(map);
+  const importantPoints = [
+    map.kidStart,
+    ...map.guardStarts,
+    ...deliveryZones,
+    ...map.appleSpawns,
+  ];
   if (map.appleSpawns.length < MIN_MAP_APPLES) {
     errors.push(`至少需要 ${MIN_MAP_APPLES} 个果实出生点。`);
   }
@@ -298,19 +309,14 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
       !approximatelyEqual(map.deliveryZone.z, map.deliveryZones[0].z))) {
     errors.push('主投递区兼容字段必须与投递区列表第一项一致。');
   }
-  validateIslandLayout(map.islandLayout, map.landmarks, errors);
+  validateIslandLayout(map.islandLayout, map.landmarks, importantPoints, errors);
   if (map.trees.length > 360) warnings.push('树木较多，可能切碎开放地形并遮挡角色。');
 
-  const importantPoints = [
-    map.kidStart,
-    ...map.guardStarts,
-    ...deliveryZones,
-    ...map.appleSpawns,
-  ];
   if (importantPoints.some((point) => !insideArena(point, 0.65))) {
     errors.push('出生点、果实或投递区超出了可玩边界。');
   }
-  const outOfBoundsLandmarks = map.landmarks.filter((landmark) => !landmarkInsideArena(landmark)).length;
+  const outOfBoundsLandmarks = map.landmarks.filter((landmark) =>
+    !landmark.id.startsWith('island-coast-edge-') && !landmarkInsideArena(landmark)).length;
   if (outOfBoundsLandmarks > 0) errors.push(`有 ${outOfBoundsLandmarks} 个地标超出了可玩边界。`);
 
   const treeIndex = createTreeSpatialIndex(map.trees);
@@ -378,6 +384,7 @@ export function deliveryZonesForMap(map: OrchardMap): readonly OrchardDeliveryZo
 function validateIslandLayout(
   layout: OrchardIslandLayout | undefined,
   landmarks: readonly OrchardLandmark[],
+  importantPoints: readonly Vec2[],
   errors: string[],
 ): void {
   if (!layout) return;
@@ -412,6 +419,24 @@ function validateIslandLayout(
   }
   if (layout.outline.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.z))) {
     errors.push('岛屿轮廓包含无效坐标。');
+  }
+  const outlineErrors = validateIslandOutlineGeometry(layout.outline);
+  for (const error of outlineErrors) {
+    if (!errors.includes(error)) errors.push(error);
+  }
+  if (outlineErrors.length === 0) {
+    const semanticCenters = [
+      ...importantPoints,
+      ...layout.regions,
+      ...layout.routeBlocks,
+      ...layout.waterSegments,
+      ...layout.bridges,
+    ];
+    if (semanticCenters.some((point) =>
+      !pointInsideIslandOutline(point, layout.outline) ||
+        distanceToIslandOutline(point, layout.outline) < 0.3)) {
+      errors.push('海岸线必须包住出生点、目标和岛屿语义中心。');
+    }
   }
   if (layout.regions.some((region) =>
     !ISLAND_REGION_KINDS.includes(region.kind) ||

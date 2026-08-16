@@ -1,4 +1,11 @@
 import { GAME_CONFIG } from '../config';
+import type { Vec2 } from '../types';
+import {
+  distanceToIslandOutline,
+  pointInsideIslandOutline,
+  signedIslandOutlineArea,
+  validateIslandOutlineGeometry,
+} from './IslandOutline';
 import type {
   OrchardIslandBridge,
   OrchardIslandLayout,
@@ -6,6 +13,11 @@ import type {
   OrchardIslandWaterSegment,
   OrchardLandmark,
   OrchardMap,
+} from './OrchardMap';
+import {
+  deliveryZonesForMap,
+  MAX_ISLAND_OUTLINE_POINTS,
+  MAX_MAP_LANDMARKS,
 } from './OrchardMap';
 
 export type EditableIslandGeometryKind = 'region' | 'route-block' | 'bridge';
@@ -20,6 +32,92 @@ export type IslandGeometryUpdate = {
 const ARENA_PADDING = 0.4;
 const WATER_BANK_PADDING = 0.35;
 const MIN_WATER_BLOCK_WIDTH = 1;
+const COAST_COLLIDER_HALF_DEPTH = 0.36;
+const COAST_COLLIDER_OVERLAP = 0.18;
+const COAST_CONTENT_PADDING = 0.3;
+
+export type IslandOutlineEditResult = {
+  ok: boolean;
+  index: number;
+  error?: string;
+};
+
+export function moveIslandOutlinePoint(
+  map: OrchardMap,
+  index: number,
+  point: Vec2,
+): IslandOutlineEditResult {
+  const outline = map.islandLayout?.outline;
+  if (!outline || !outline[index]) return outlineFailure(index, '找不到对应的海岸节点。');
+  const candidate = outline.map((entry, entryIndex) => entryIndex === index ? { ...point } : { ...entry });
+  const error = validateOutlineCandidate(map, candidate);
+  if (error) return outlineFailure(index, error);
+  map.islandLayout!.outline = candidate;
+  synchronizeIslandCoastCollisionProxies(map);
+  return { ok: true, index };
+}
+
+export function insertIslandOutlinePoint(
+  map: OrchardMap,
+  afterIndex: number,
+): IslandOutlineEditResult {
+  const outline = map.islandLayout?.outline;
+  if (!outline || !outline[afterIndex]) return outlineFailure(afterIndex, '找不到对应的海岸节点。');
+  if (outline.length >= MAX_ISLAND_OUTLINE_POINTS) {
+    return outlineFailure(afterIndex, `海岸节点最多 ${MAX_ISLAND_OUTLINE_POINTS} 个。`);
+  }
+  const nextIndex = (afterIndex + 1) % outline.length;
+  const start = outline[afterIndex];
+  const end = outline[nextIndex];
+  const insertedIndex = afterIndex + 1;
+  const candidate = outline.map((point) => ({ ...point }));
+  candidate.splice(insertedIndex, 0, {
+    x: (start.x + end.x) / 2,
+    z: (start.z + end.z) / 2,
+  });
+  const error = validateOutlineCandidate(map, candidate);
+  if (error) return outlineFailure(afterIndex, error);
+  map.islandLayout!.outline = candidate;
+  synchronizeIslandCoastCollisionProxies(map);
+  return { ok: true, index: insertedIndex };
+}
+
+export function removeIslandOutlinePoint(
+  map: OrchardMap,
+  index: number,
+): IslandOutlineEditResult {
+  const outline = map.islandLayout?.outline;
+  if (!outline || !outline[index]) return outlineFailure(index, '找不到对应的海岸节点。');
+  if (outline.length <= 3) return outlineFailure(index, '岛屿轮廓至少保留 3 个节点。');
+  const candidate = outline.filter((_, entryIndex) => entryIndex !== index).map((point) => ({ ...point }));
+  const error = validateOutlineCandidate(map, candidate);
+  if (error) return outlineFailure(index, error);
+  map.islandLayout!.outline = candidate;
+  synchronizeIslandCoastCollisionProxies(map);
+  return { ok: true, index: Math.min(index, candidate.length - 1) };
+}
+
+export function synchronizeIslandCoastCollisionProxies(map: OrchardMap): void {
+  const outline = map.islandLayout?.outline;
+  if (!outline) return;
+  const preserved = map.landmarks.filter((landmark) =>
+    !landmark.id.startsWith('island-boundary-') &&
+      !landmark.id.startsWith('island-coast-edge-'));
+  map.landmarks = [...preserved, ...outline.map((start, index) => {
+    const end = outline[(index + 1) % outline.length];
+    const deltaX = end.x - start.x;
+    const deltaZ = end.z - start.z;
+    return {
+      id: `island-coast-edge-${index + 1}`,
+      kind: 'homestead' as const,
+      x: (start.x + end.x) / 2,
+      z: (start.z + end.z) / 2,
+      rotationY: -Math.atan2(deltaZ, deltaX),
+      radiusX: Math.hypot(deltaX, deltaZ) / 2 + COAST_COLLIDER_OVERLAP,
+      radiusZ: COAST_COLLIDER_HALF_DEPTH,
+    };
+  })];
+}
 
 export function applyIslandGeometryUpdate(
   map: OrchardMap,
@@ -205,6 +303,42 @@ function clampCenter(value: number, radius: number, halfExtent: number): number 
 function validUpdate(update: IslandGeometryUpdate): boolean {
   return Number.isFinite(update.x) && Number.isFinite(update.z) &&
     Number.isFinite(update.sizeX) && Number.isFinite(update.sizeZ);
+}
+
+function validateOutlineCandidate(map: OrchardMap, candidate: readonly Vec2[]): string | null {
+  const geometryError = validateIslandOutlineGeometry(candidate)[0];
+  if (geometryError) return geometryError;
+  const currentArea = signedIslandOutlineArea(map.islandLayout?.outline ?? []);
+  const candidateArea = signedIslandOutlineArea(candidate);
+  if (currentArea !== 0 && Math.sign(currentArea) !== Math.sign(candidateArea)) {
+    return '海岸节点顺序不能翻转。';
+  }
+  const anchors = [
+    map.kidStart,
+    ...map.guardStarts,
+    ...deliveryZonesForMap(map),
+    ...map.appleSpawns,
+    ...(map.islandLayout?.regions ?? []),
+    ...(map.islandLayout?.routeBlocks ?? []),
+    ...(map.islandLayout?.waterSegments ?? []),
+    ...(map.islandLayout?.bridges ?? []),
+  ];
+  if (anchors.some((point) =>
+    !pointInsideIslandOutline(point, candidate) ||
+      distanceToIslandOutline(point, candidate) < COAST_CONTENT_PADDING)) {
+    return '海岸线必须包住出生点、目标和岛屿语义中心。';
+  }
+  const preservedLandmarks = map.landmarks.filter((landmark) =>
+    !landmark.id.startsWith('island-boundary-') &&
+      !landmark.id.startsWith('island-coast-edge-')).length;
+  if (preservedLandmarks + candidate.length > MAX_MAP_LANDMARKS) {
+    return `海岸碰撞代理会让地标超过 ${MAX_MAP_LANDMARKS} 个上限。`;
+  }
+  return null;
+}
+
+function outlineFailure(index: number, error: string): IslandOutlineEditResult {
+  return { ok: false, index, error };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

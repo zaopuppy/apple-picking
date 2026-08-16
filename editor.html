@@ -111,15 +111,19 @@
               <label for="island-geometry-z">中心 Z
                 <input id="island-geometry-z" type="number" step="0.1" />
               </label>
-              <label for="island-geometry-size-x"><span id="island-geometry-size-x-label">半宽 X</span>
+              <label class="island-geometry-size-field" for="island-geometry-size-x"><span id="island-geometry-size-x-label">半宽 X</span>
                 <input id="island-geometry-size-x" type="number" min="0.5" step="0.1" />
               </label>
-              <label for="island-geometry-size-z"><span id="island-geometry-size-z-label">半深 Z</span>
+              <label class="island-geometry-size-field" for="island-geometry-size-z"><span id="island-geometry-size-z-label">半深 Z</span>
                 <input id="island-geometry-size-z" type="number" min="0.5" step="0.1" />
               </label>
             </div>
             <p id="island-geometry-note">在画布中选择区域、矩形通路块或桥梁。</p>
-            <button id="island-geometry-apply" type="submit" disabled>应用结构修改</button>
+            <div class="island-geometry-actions">
+              <button id="island-geometry-apply" type="submit" disabled>应用结构修改</button>
+              <button id="island-node-insert" type="button" hidden>在此后插入节点</button>
+              <button id="island-node-delete" type="button" hidden>删除海岸节点</button>
+            </div>
           </form>
           <section id="delivery-zone-panel" class="delivery-zone-panel" aria-label="多投递点管理" hidden>
             <div class="delivery-zone-heading">

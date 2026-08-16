@@ -786,3 +786,114 @@ test('delivery zone manager adds, moves, removes and reorders stable zones', asy
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+test('coast editor safely moves, inserts and removes outline nodes with collision sync', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Island editor work is desktop-first.');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    localStorage.setItem(
+      'apple-picking.active-map.v5',
+      JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP),
+    );
+  });
+  await page.goto('/editor.html');
+
+  const canvas = page.getByLabel('果园地图编辑画布');
+  const worldToScreen = async (x: number, z: number) => {
+    await canvas.scrollIntoViewIfNeeded();
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('Island editor canvas is not visible.');
+    const padding = Math.min(24, Math.max(10, Math.min(box.width, box.height) * 0.04));
+    const scale = Math.min((box.width - padding * 2) / 72, (box.height - padding * 2) / 54);
+    return {
+      x: box.x + box.width / 2 + x * scale,
+      y: box.y + box.height / 2 + z * scale,
+    };
+  };
+
+  await page.getByRole('button', { name: /岛屿结构/ }).click();
+  const firstNode = await worldToScreen(-31, -23);
+  await page.mouse.click(firstNode.x, firstNode.y);
+  await expect(canvas).toHaveAttribute('data-selected-island-kind', 'outline');
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-outline-node-0');
+  await expect(page.locator('#island-selection')).toContainText('海岸节点 1/16');
+  await expect(page.getByRole('button', { name: '在此后插入节点' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除海岸节点' })).toBeVisible();
+
+  await page.getByLabel('中心 X').fill('-30.5');
+  await page.getByLabel('中心 Z').fill('-22.5');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await expect(page.locator('#editor-toast')).toHaveText('海岸节点与沿岸碰撞已同步。');
+  await page.getByRole('button', { name: '在此后插入节点' }).click();
+  await expect(page.locator('#island-selection')).toContainText('海岸节点 2/17');
+  await page.getByRole('button', { name: '删除海岸节点' }).click();
+  await expect(page.locator('#island-selection')).toContainText('海岸节点 2/16');
+
+  const selectedNode = await worldToScreen(-18, -25);
+  const draggedNode = await worldToScreen(-17.4, -24.4);
+  await page.mouse.move(selectedNode.x, selectedNode.y);
+  await page.mouse.down();
+  await page.mouse.move(draggedNode.x, draggedNode.y, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.getByText('海岸节点与沿岸碰撞已同步。')).toBeVisible();
+  await page.getByRole('button', { name: '撤销' }).click();
+  await page.getByRole('button', { name: '重做' }).click();
+  await page.getByRole('button', { name: '保存地图' }).click();
+
+  const result = await page.evaluate(async () => {
+    const saved = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const editingPath = String('/src/game/maps/IslandLayoutEditing.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const editing = await import(/* @vite-ignore */ editingPath);
+    const invalid = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+    const invalidResult = editing.moveIslandOutlinePoint(invalid, 0, { x: 0, z: 0 });
+    const malformed = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+    malformed.islandLayout.outline = [
+      { x: -20, z: -20 },
+      { x: 20, z: 20 },
+      { x: -20, z: 20 },
+      { x: 20, z: -20 },
+    ];
+    return {
+      outline: saved.islandLayout.outline,
+      coastProxies: saved.landmarks.filter(
+        (landmark: { id: string }) => landmark.id.startsWith('island-coast-edge-'),
+      ),
+      legacyBoundaries: saved.landmarks.filter(
+        (landmark: { id: string }) => landmark.id.startsWith('island-boundary-'),
+      ),
+      valid: orchardMaps.validateOrchardMap(saved).valid,
+      invalidResult,
+      invalidFirstNode: invalid.islandLayout.outline[0],
+      malformedErrors: orchardMaps.validateOrchardMap(malformed).errors,
+    };
+  });
+  expect(result.outline).toHaveLength(16);
+  expect(result.outline[0]).toEqual({ x: -30.5, z: -22.5 });
+  expect(result.outline[1].x).toBeCloseTo(-17.4, 1);
+  expect(result.outline[1].z).toBeCloseTo(-24.4, 1);
+  expect(result.coastProxies).toHaveLength(16);
+  expect(result.legacyBoundaries).toHaveLength(0);
+  expect(result.valid).toBe(true);
+  expect(result.invalidResult.ok).toBe(false);
+  expect(result.invalidFirstNode).toEqual({ x: -31, z: -23 });
+  expect(result.malformedErrors).toContain('岛屿轮廓不能自相交。');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: testInfo.outputPath('island-coast-editor.png'),
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

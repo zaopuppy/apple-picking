@@ -229,7 +229,9 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
   background: rgba(225, 184, 81, .08);
 }
 .island-geometry-panel[hidden],
-.island-geometry-fields[hidden] { display: none; }
+.island-geometry-fields[hidden],
+.island-geometry-size-field[hidden],
+.island-geometry-actions button[hidden] { display: none; }
 .island-geometry-heading small {
   display: block;
   color: var(--gold);
@@ -257,6 +259,18 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
   background: var(--gold);
   font-size: .65rem;
   font-weight: 900;
+}
+.island-geometry-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.island-geometry-actions #island-geometry-apply { grid-column: 1 / -1; }
+.island-geometry-actions #island-node-insert {
+  border-color: rgba(225, 184, 81, .58);
+  color: var(--gold);
+  background: rgba(225, 184, 81, .1);
+}
+.island-geometry-actions #island-node-delete {
+  border-color: rgba(230, 120, 88, .62);
+  color: #ffd4be;
+  background: rgba(171, 65, 39, .22);
 }
 
 .delivery-zone-panel {

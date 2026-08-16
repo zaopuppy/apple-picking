@@ -15,6 +15,7 @@ import {
   landmarkBlocksPoint,
   landmarkInsideArena,
   MAX_DELIVERY_ZONES,
+  MAX_ISLAND_OUTLINE_POINTS,
   MAX_MAP_APPLES,
   MAX_MAP_LANDMARKS,
   MAX_TERRAIN_ZONES,
@@ -43,6 +44,9 @@ import {
 } from '../game/maps/DeliveryZoneEditing';
 import {
   applyIslandGeometryUpdate,
+  insertIslandOutlinePoint,
+  moveIslandOutlinePoint,
+  removeIslandOutlinePoint,
   type EditableIslandGeometryKind,
 } from '../game/maps/IslandLayoutEditing';
 import {
@@ -161,6 +165,11 @@ export class MapEditor {
   private readonly islandGeometrySizeZLabel = getElement<HTMLElement>('#island-geometry-size-z-label');
   private readonly islandGeometryNote = getElement<HTMLElement>('#island-geometry-note');
   private readonly islandGeometryApply = getElement<HTMLButtonElement>('#island-geometry-apply');
+  private readonly islandGeometrySizeFields = Array.from(
+    document.querySelectorAll<HTMLElement>('.island-geometry-size-field'),
+  );
+  private readonly islandNodeInsert = getElement<HTMLButtonElement>('#island-node-insert');
+  private readonly islandNodeDelete = getElement<HTMLButtonElement>('#island-node-delete');
   private readonly deliveryZonePanel = getElement<HTMLElement>('#delivery-zone-panel');
   private readonly deliveryZoneCount = getElement<HTMLElement>('#delivery-zone-count');
   private readonly deliveryZoneList = getElement<HTMLElement>('#delivery-zone-list');
@@ -178,6 +187,10 @@ export class MapEditor {
   private selectedIsland: IslandSelection | null = null;
   private selectedDeliveryZoneId: string | null = null;
   private placingDeliveryZone = false;
+  private islandDraggingIndex: number | null = null;
+  private islandDragPointerStart: Vec2 | null = null;
+  private islandDragHistoryPushed = false;
+  private islandDragError: string | null = null;
   private pointerWorld: Vec2 | null = null;
   private drawing = false;
   private lastStamp: Vec2 | null = null;
@@ -275,6 +288,8 @@ export class MapEditor {
       event.preventDefault();
       this.applySelectedIslandGeometry();
     }, { signal });
+    this.islandNodeInsert.addEventListener('click', () => this.insertSelectedIslandNode(), { signal });
+    this.islandNodeDelete.addEventListener('click', () => this.deleteSelectedIslandNode(), { signal });
     this.deliveryZoneAdd.addEventListener('click', () => this.toggleDeliveryPlacement(), { signal });
     this.deliveryZoneDelete.addEventListener('click', () => this.deleteSelectedDeliveryZone(), { signal });
     this.deliveryZoneUp.addEventListener('click', () => this.reorderSelectedDeliveryZone(-1), { signal });
@@ -287,6 +302,14 @@ export class MapEditor {
     if (!insideArena(point, 0.15)) return;
     if (this.tool === 'island-select') {
       this.selectIslandAt(point);
+      const nodeIndex = outlineNodeIndex(this.selectedIsland);
+      if (nodeIndex !== null) {
+        this.canvas.setPointerCapture(event.pointerId);
+        this.islandDraggingIndex = nodeIndex;
+        this.islandDragPointerStart = { ...point };
+        this.islandDragHistoryPushed = false;
+        this.islandDragError = null;
+      }
       return;
     }
     if (this.tool === 'delivery') {
@@ -303,6 +326,26 @@ export class MapEditor {
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     this.pointerWorld = this.eventToWorld(event);
+    if (this.islandDraggingIndex !== null) {
+      if (!insideArena(this.pointerWorld)) return;
+      if (!this.islandDragHistoryPushed && this.islandDragPointerStart &&
+        distance(this.pointerWorld, this.islandDragPointerStart) < 0.3) {
+        this.draw();
+        return;
+      }
+      if (!this.islandDragHistoryPushed) this.pushHistory();
+      const result = moveIslandOutlinePoint(this.map, this.islandDraggingIndex, this.pointerWorld);
+      if (!result.ok) {
+        if (!this.islandDragHistoryPushed) this.history.pop();
+        this.islandDragError = result.error ?? '海岸节点移动失败。';
+        this.draw();
+        return;
+      }
+      this.islandDragHistoryPushed = true;
+      this.islandDragError = null;
+      this.refresh();
+      return;
+    }
     if (this.drawing && insideArena(this.pointerWorld, 0.1)) {
       this.applyTool(this.pointerWorld, false);
       this.refresh();
@@ -312,6 +355,19 @@ export class MapEditor {
   };
 
   private readonly onPointerUp = (event: PointerEvent): void => {
+    if (this.islandDraggingIndex !== null) {
+      event.preventDefault();
+      const moved = this.islandDragHistoryPushed;
+      const error = this.islandDragError;
+      this.islandDraggingIndex = null;
+      this.islandDragPointerStart = null;
+      this.islandDragHistoryPushed = false;
+      this.islandDragError = null;
+      if (moved) this.showToast('海岸节点与沿岸碰撞已同步。');
+      else if (error) this.showToast(error);
+      this.draw();
+      return;
+    }
     if (!this.drawing) return;
     event.preventDefault();
     this.drawing = false;
@@ -347,6 +403,12 @@ export class MapEditor {
   private selectTool(tool: EditorTool): void {
     this.tool = tool;
     if (tool !== 'delivery') this.placingDeliveryZone = false;
+    if (tool !== 'island-select') {
+      this.islandDraggingIndex = null;
+      this.islandDragPointerStart = null;
+      this.islandDragHistoryPushed = false;
+      this.islandDragError = null;
+    }
     this.canvas.classList.toggle('island-select-mode', tool === 'island-select');
     this.canvas.classList.toggle('delivery-place-mode', tool === 'delivery' && this.placingDeliveryZone);
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
@@ -407,16 +469,23 @@ export class MapEditor {
     if (!layout || !selection || !islandSelectionExists(layout, selection)) {
       this.islandGeometryTitle.textContent = '选择岛屿结构';
       this.islandGeometryFields.hidden = true;
-      this.islandGeometryNote.textContent = '在画布中选择区域、矩形通路块或桥梁。';
+      this.islandGeometryNote.textContent = '在画布中选择海岸节点、区域、矩形通路块或桥梁。';
       this.islandGeometryApply.disabled = true;
+      this.islandNodeInsert.hidden = true;
+      this.islandNodeDelete.hidden = true;
       this.islandGeometryPanel.dataset.editable = 'false';
       return;
     }
 
     const geometry = islandGeometryView(layout, selection);
+    const nodeIndex = outlineNodeIndex(selection);
     this.islandGeometryTitle.textContent = islandSelectionLabel(layout, selection);
     this.islandGeometryFields.hidden = geometry === null;
     this.islandGeometryApply.disabled = !geometry?.editable;
+    this.islandNodeInsert.hidden = nodeIndex === null;
+    this.islandNodeDelete.hidden = nodeIndex === null;
+    this.islandNodeInsert.disabled = layout.outline.length >= MAX_ISLAND_OUTLINE_POINTS;
+    this.islandNodeDelete.disabled = layout.outline.length <= 3;
     this.islandGeometryPanel.dataset.editable = String(geometry?.editable ?? false);
     if (!geometry) {
       this.islandGeometryNote.textContent = '轮廓节点编辑将在海岸线工具阶段开放。';
@@ -429,19 +498,39 @@ export class MapEditor {
     this.islandGeometrySizeZ.value = formatGeometryNumber(geometry.sizeZ);
     this.islandGeometrySizeXLabel.textContent = geometry.sizeXLabel;
     this.islandGeometrySizeZLabel.textContent = geometry.sizeZLabel;
-    for (const input of [
-      this.islandGeometryX,
-      this.islandGeometryZ,
-      this.islandGeometrySizeX,
-      this.islandGeometrySizeZ,
-    ]) input.disabled = !geometry.editable;
+    for (const field of this.islandGeometrySizeFields) field.hidden = !geometry.hasSize;
+    this.islandGeometryX.disabled = !geometry.editable;
+    this.islandGeometrySizeX.disabled = !geometry.editable || !geometry.hasSize;
+    this.islandGeometrySizeZ.disabled = !geometry.editable || !geometry.hasSize;
     this.islandGeometryZ.disabled = !geometry.editable || selection.kind === 'bridge';
     this.islandGeometryNote.textContent = geometry.note;
   }
 
   private applySelectedIslandGeometry(): void {
     const selection = this.selectedIsland;
-    if (!this.map.islandLayout || !selection || !isEditableIslandSelection(selection)) return;
+    if (!this.map.islandLayout || !selection) return;
+    const nodeIndex = outlineNodeIndex(selection);
+    if (nodeIndex !== null) {
+      const point = {
+        x: Number(this.islandGeometryX.value),
+        z: Number(this.islandGeometryZ.value),
+      };
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.z)) {
+        this.showToast('请输入有效的海岸节点坐标。');
+        return;
+      }
+      this.pushHistory();
+      const result = moveIslandOutlinePoint(this.map, nodeIndex, point);
+      if (!result.ok) {
+        this.history.pop();
+        this.showToast(result.error ?? '海岸节点移动失败。');
+        return;
+      }
+      this.refresh();
+      this.showToast('海岸节点与沿岸碰撞已同步。');
+      return;
+    }
+    if (!isEditableIslandSelection(selection)) return;
     const update = {
       x: Number(this.islandGeometryX.value),
       z: Number(this.islandGeometryZ.value),
@@ -464,6 +553,36 @@ export class MapEditor {
       : selection.kind === 'route-block'
         ? '矩形通路块与碰撞代理已同步。'
         : '岛屿区域已更新。');
+  }
+
+  private insertSelectedIslandNode(): void {
+    const nodeIndex = outlineNodeIndex(this.selectedIsland);
+    if (nodeIndex === null) return;
+    this.pushHistory();
+    const result = insertIslandOutlinePoint(this.map, nodeIndex);
+    if (!result.ok) {
+      this.history.pop();
+      this.showToast(result.error ?? '海岸节点插入失败。');
+      return;
+    }
+    this.selectedIsland = { kind: 'outline', id: outlineNodeId(result.index) };
+    this.refresh();
+    this.showToast('已插入海岸节点，并重建沿岸碰撞。');
+  }
+
+  private deleteSelectedIslandNode(): void {
+    const nodeIndex = outlineNodeIndex(this.selectedIsland);
+    if (nodeIndex === null) return;
+    this.pushHistory();
+    const result = removeIslandOutlinePoint(this.map, nodeIndex);
+    if (!result.ok) {
+      this.history.pop();
+      this.showToast(result.error ?? '海岸节点删除失败。');
+      return;
+    }
+    this.selectedIsland = { kind: 'outline', id: outlineNodeId(result.index) };
+    this.refresh();
+    this.showToast('已删除海岸节点，并重建沿岸碰撞。');
   }
 
   private handleDeliveryPointer(point: Vec2): void {
@@ -822,6 +941,10 @@ export class MapEditor {
     this.selectedIsland = null;
     this.selectedDeliveryZoneId = null;
     this.placingDeliveryZone = false;
+    this.islandDraggingIndex = null;
+    this.islandDragPointerStart = null;
+    this.islandDragHistoryPushed = false;
+    this.islandDragError = null;
     this.nameInput.value = this.map.name;
     this.syncWorldStyleControls();
     this.refresh();
@@ -1136,6 +1259,7 @@ type IslandGeometryView = {
   sizeZ: number;
   sizeXLabel: string;
   sizeZLabel: string;
+  hasSize: boolean;
   editable: boolean;
   note: string;
 };
@@ -1144,7 +1268,21 @@ function islandGeometryView(
   layout: OrchardIslandLayout,
   selection: IslandSelection,
 ): IslandGeometryView | null {
-  if (selection.kind === 'outline') return null;
+  if (selection.kind === 'outline') {
+    const index = outlineNodeIndex(selection);
+    const point = index === null ? null : layout.outline[index];
+    return point ? {
+      x: point.x,
+      z: point.z,
+      sizeX: 0,
+      sizeZ: 0,
+      sizeXLabel: '',
+      sizeZLabel: '',
+      hasSize: false,
+      editable: true,
+      note: '可直接拖动节点；每次修改都会检查自交、面积、边界和关键内容，并同步沿岸碰撞。',
+    } : null;
+  }
   if (selection.kind === 'region') {
     const region = layout.regions.find((entry) => entry.id === selection.id);
     return region ? {
@@ -1154,6 +1292,7 @@ function islandGeometryView(
       sizeZ: region.radiusZ,
       sizeXLabel: '半径 X',
       sizeZLabel: '半径 Z',
+      hasSize: true,
       editable: true,
       note: '区域只控制视觉分区，不生成额外碰撞。',
     } : null;
@@ -1167,6 +1306,7 @@ function islandGeometryView(
       sizeZ: block.radiusZ,
       sizeXLabel: '半宽 X',
       sizeZLabel: '半深 Z',
+      hasSize: true,
       editable: true,
       note: '应用时同步同 ID 的矩形碰撞代理。',
     } : null;
@@ -1180,6 +1320,7 @@ function islandGeometryView(
       sizeZ: segment.sizeZ,
       sizeXLabel: '水面长度',
       sizeZLabel: '水面宽度',
+      hasSize: true,
       editable: false,
       note: '水面是桥梁和碰撞块的约束源，本阶段只读。',
     } : null;
@@ -1193,6 +1334,7 @@ function islandGeometryView(
       sizeZ: block.radiusZ,
       sizeXLabel: '碰撞半宽',
       sizeZLabel: '碰撞半深',
+      hasSize: true,
       editable: false,
       note: '碰撞块由水面与桥梁自动推导，不能直接修改。',
     } : null;
@@ -1205,6 +1347,7 @@ function islandGeometryView(
     sizeZ: bridge.depth,
     sizeXLabel: '桥梁宽度',
     sizeZLabel: '桥梁深度',
+    hasSize: true,
     editable: true,
     note: 'Z 锁定到所属水面；应用后自动重算两侧碰撞缺口。',
   } : null;
@@ -1216,11 +1359,28 @@ function isEditableIslandSelection(
   return selection.kind === 'region' || selection.kind === 'route-block' || selection.kind === 'bridge';
 }
 
+function outlineNodeId(index: number): string {
+  return `island-outline-node-${index}`;
+}
+
+function outlineNodeIndex(selection: IslandSelection | null): number | null {
+  if (selection?.kind !== 'outline') return null;
+  const match = /^island-outline-node-(\d+)$/.exec(selection.id);
+  if (!match) return null;
+  const index = Number(match[1]);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 function formatGeometryNumber(value: number): string {
   return Number(value.toFixed(2)).toString();
 }
 
 function hitTestIslandLayout(layout: OrchardIslandLayout, point: Vec2): IslandSelection | null {
+  for (let index = 0; index < layout.outline.length; index += 1) {
+    if (distance(point, layout.outline[index]) <= 1.55) {
+      return { kind: 'outline', id: outlineNodeId(index) };
+    }
+  }
   for (const bridge of layout.bridges) {
     if (insideAxisAlignedRectangle(point, bridge, bridge.width / 2, bridge.depth / 2)) {
       return { kind: 'bridge', id: bridge.id };
@@ -1256,7 +1416,10 @@ function hitTestIslandLayout(layout: OrchardIslandLayout, point: Vec2): IslandSe
     const start = layout.outline[index];
     const end = layout.outline[(index + 1) % layout.outline.length];
     if (distanceToEditorSegment(point, start, end) <= 1.35) {
-      return { kind: 'outline', id: 'island-outline' };
+      const closestIndex = distance(point, start) <= distance(point, end)
+        ? index
+        : (index + 1) % layout.outline.length;
+      return { kind: 'outline', id: outlineNodeId(closestIndex) };
     }
   }
   return null;
@@ -1272,7 +1435,10 @@ function insideAxisAlignedRectangle(
 }
 
 function islandSelectionExists(layout: OrchardIslandLayout, selection: IslandSelection): boolean {
-  if (selection.kind === 'outline') return selection.id === 'island-outline';
+  if (selection.kind === 'outline') {
+    const index = outlineNodeIndex(selection);
+    return index !== null && Boolean(layout.outline[index]);
+  }
   if (selection.kind === 'region') return layout.regions.some((entry) => entry.id === selection.id);
   if (selection.kind === 'route-block') {
     return layout.routeBlocks.some((entry) => entry.id === selection.id);
@@ -1287,7 +1453,12 @@ function islandSelectionExists(layout: OrchardIslandLayout, selection: IslandSel
 }
 
 function islandSelectionLabel(layout: OrchardIslandLayout, selection: IslandSelection): string {
-  if (selection.kind === 'outline') return `岛屿轮廓 · ${layout.outline.length} 节点`;
+  if (selection.kind === 'outline') {
+    const index = outlineNodeIndex(selection);
+    return index === null
+      ? `岛屿轮廓 · ${layout.outline.length} 节点`
+      : `海岸节点 ${index + 1}/${layout.outline.length}`;
+  }
   if (selection.kind === 'region') {
     const region = layout.regions.find((entry) => entry.id === selection.id);
     return region ? `${islandRegionLabel(region.kind)}区域 · ${region.id}` : selection.id;
@@ -1626,6 +1797,18 @@ function drawIslandSelection(
   if (selection.kind === 'outline') {
     traceIslandOutline(context, layout, toScreen);
     context.stroke();
+    context.setLineDash([]);
+    const selectedIndex = outlineNodeIndex(selection);
+    layout.outline.forEach((point, index) => {
+      const screen = toScreen(point);
+      context.beginPath();
+      context.arc(screen.x, screen.y, index === selectedIndex ? 6 : 3.5, 0, Math.PI * 2);
+      context.fillStyle = index === selectedIndex ? '#fff5b8' : '#315843';
+      context.fill();
+      context.strokeStyle = index === selectedIndex ? '#315843' : '#fff5b8';
+      context.lineWidth = index === selectedIndex ? 2.5 : 1.5;
+      context.stroke();
+    });
     context.restore();
     return;
   }
@@ -1701,7 +1884,8 @@ function islandSelectionRectangle(
 }
 
 function isIslandProxyLandmark(layout: OrchardIslandLayout, id: string): boolean {
-  return id.startsWith('island-boundary-') || id === 'island-north-terrace' ||
+  return id.startsWith('island-boundary-') || id.startsWith('island-coast-edge-') ||
+    id === 'island-north-terrace' ||
     layout.routeBlocks.some((block) => block.id === id) ||
     layout.waterBlocks.some((block) => block.id === id);
 }
