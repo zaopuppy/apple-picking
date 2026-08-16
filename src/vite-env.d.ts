@@ -135,6 +135,9 @@ declare global {
     };
     camera: {
       controlMode: 'manual' | 'mouse';
+      projectionMode: 'orthographic' | 'weak-perspective';
+      perspectiveFov: number | null;
+      distance: number;
       viewWidth: number;
       viewHeight: number;
       verticalOffset: number;

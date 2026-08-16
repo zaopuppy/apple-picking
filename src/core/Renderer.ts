@@ -7,6 +7,9 @@ const LANDSCAPE_WORLD_HEIGHT = GAME_CONFIG.arenaHalfDepth * 2 * 1.12;
 const PORTRAIT_WORLD_HEIGHT = GAME_CONFIG.arenaHalfWidth * 2 * 1.25;
 const PORTRAIT_LAYOUT_THRESHOLD = 0.86;
 
+export type CameraProjection = 'orthographic' | 'weak-perspective';
+export type ResponsiveCamera = THREE.OrthographicCamera | THREE.PerspectiveCamera;
+
 export function usesPortraitArenaLayout(aspect: number): boolean {
   return aspect < PORTRAIT_LAYOUT_THRESHOLD;
 }
@@ -28,7 +31,7 @@ export function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
 
 export function resizeRenderer(
   renderer: THREE.WebGLRenderer,
-  camera: THREE.OrthographicCamera,
+  camera: ResponsiveCamera,
   maxDpr = 2,
 ): boolean {
   const canvas = renderer.domElement;
@@ -42,7 +45,19 @@ export function resizeRenderer(
   if (needsResize) {
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
-    const aspect = width / height;
+    updateCameraProjection(camera, width, height);
+  }
+
+  return needsResize;
+}
+
+export function updateCameraProjection(
+  camera: ResponsiveCamera,
+  width: number,
+  height: number,
+): void {
+  const aspect = Math.max(1, width) / Math.max(1, height);
+  if (camera instanceof THREE.OrthographicCamera) {
     const portraitLayout = usesPortraitArenaLayout(aspect);
     const minimumWorldWidth = portraitLayout ? PORTRAIT_WORLD_WIDTH : LANDSCAPE_WORLD_WIDTH;
     const minimumWorldHeight = portraitLayout ? PORTRAIT_WORLD_HEIGHT : LANDSCAPE_WORLD_HEIGHT;
@@ -52,8 +67,8 @@ export function resizeRenderer(
     camera.right = viewWidth / 2;
     camera.top = viewHeight / 2;
     camera.bottom = -viewHeight / 2;
-    camera.updateProjectionMatrix();
+  } else {
+    camera.aspect = aspect;
   }
-
-  return needsResize;
+  camera.updateProjectionMatrix();
 }

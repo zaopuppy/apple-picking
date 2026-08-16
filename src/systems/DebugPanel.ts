@@ -1,9 +1,13 @@
 import GUI, { type Controller } from 'lil-gui';
+import type { CameraProjection } from '../core/Renderer';
 import type { MovementTuning } from '../game/config';
 
 export type DebugTuning = MovementTuning & {
+  cameraProjection: CameraProjection;
+  perspectiveFov: number;
   landscapeCameraAngle: number;
   cameraZoom: number;
+  cameraDistance: number;
   cameraPositionX: number;
   cameraPositionY: number;
   cameraPositionZ: number;
@@ -17,6 +21,8 @@ export type DebugTuning = MovementTuning & {
 
 type DebugPanelCallbacks = {
   cameraPointerModeChanged(enabled: boolean): void;
+  cameraProjectionChanged(): void;
+  perspectiveFovChanged(): void;
   cameraAngleChanged(): void;
   cameraChanged(): void;
   movementChanged(): void;
@@ -34,6 +40,8 @@ export class DebugPanel {
   private readonly cameraValueControllers: Controller[];
   private readonly cameraModeController: Controller;
   private readonly cameraHintController: Controller;
+  private readonly perspectiveFovController: Controller;
+  private readonly cameraDistanceController: Controller;
   private readonly resetController: Controller;
   private cameraPointerMode = false;
 
@@ -49,12 +57,26 @@ export class DebugPanel {
       gesture: '滚轮缩放 · 左键旋转 · 右键移动',
     }, 'gesture').name('鼠标操作').disable().hide();
 
+    this.cameraFolder.add(tuning, 'cameraProjection', {
+      '正交 · 尺寸不随距离变化': 'orthographic',
+      '弱透视 · 轻微近大远小': 'weak-perspective',
+    }).name('投影模式').onChange((projection: CameraProjection) => {
+      this.setCameraProjection(projection);
+      callbacks.cameraProjectionChanged();
+    });
+    this.perspectiveFovController = this.cameraFolder.add(tuning, 'perspectiveFov', 12, 35, 1)
+      .name('透视视野（度）')
+      .onChange(callbacks.perspectiveFovChanged);
+
     const landscapeAngle = this.cameraFolder.add(tuning, 'landscapeCameraAngle', 15, 82, 1)
       .name('横屏倾角（度）')
       .onChange(callbacks.cameraAngleChanged);
     const cameraZoom = this.cameraFolder.add(tuning, 'cameraZoom', 0.55, 1.8, 0.01)
       .name('画面缩放')
       .onChange(callbacks.cameraChanged);
+    this.cameraDistanceController = this.cameraFolder.add(tuning, 'cameraDistance', 0, 500, 0.01)
+      .name('镜头距离')
+      .disable();
     this.cameraPositionFolder = this.cameraFolder.addFolder('横屏位置');
     const cameraPositionX = this.cameraPositionFolder.add(tuning, 'cameraPositionX', -240, 240, 0.25)
       .name('位置 X')
@@ -80,6 +102,7 @@ export class DebugPanel {
     this.cameraValueControllers = [
       landscapeAngle,
       cameraZoom,
+      this.cameraDistanceController,
       cameraPositionX,
       cameraPositionY,
       cameraPositionZ,
@@ -114,6 +137,7 @@ export class DebugPanel {
 
     this.auxiliaryFolders = [movement, lighting, presentation];
     this.resetController = this.gui.add({ reset: callbacks.reset }, 'reset').name('恢复推荐值');
+    this.setCameraProjection(tuning.cameraProjection);
   }
 
   setHidden(hidden: boolean): void {
@@ -126,6 +150,12 @@ export class DebugPanel {
 
   refreshCamera(): void {
     for (const controller of this.cameraValueControllers) controller.updateDisplay();
+    this.perspectiveFovController.updateDisplay();
+  }
+
+  setCameraProjection(projection: CameraProjection): void {
+    this.gui.domElement.dataset.cameraProjection = projection;
+    this.perspectiveFovController.show(projection === 'weak-perspective');
   }
 
   setCameraPointerMode(enabled: boolean): void {
@@ -135,6 +165,7 @@ export class DebugPanel {
     this.cameraModeController.name(enabled ? '退出鼠标调镜头' : '进入鼠标调镜头');
     this.cameraHintController.show(enabled);
     for (const controller of this.cameraValueControllers) controller.disable(enabled);
+    this.cameraDistanceController.disable();
     for (const folder of this.auxiliaryFolders) folder.show(!enabled);
     this.resetController.show(!enabled);
     this.cameraFolder.open();

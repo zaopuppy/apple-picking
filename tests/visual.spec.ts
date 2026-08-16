@@ -267,6 +267,8 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
   });
 
   expect(layout.overflow).toBe(false);
+  expect(layout.camera?.projectionMode).toBe('orthographic');
+  expect(layout.camera?.perspectiveFov).toBeNull();
   expect(layout.backgrounds).toEqual({
     score: 'rgba(0, 0, 0, 0)',
   });
@@ -322,6 +324,9 @@ test('development tuning panel is live and can be hidden by the visual test hook
   await expect(panel.getByText('基准速度')).toBeVisible();
   await expect(panel.getByText('Guard 速度系数')).toBeVisible();
   await expect(panel.getByText('Kid 速度系数')).toBeVisible();
+  await expect(panel.getByRole('combobox', { name: '投影模式' }))
+    .toHaveValue('正交 · 尺寸不随距离变化');
+  await expect(panel.getByRole('textbox', { name: '透视视野（度）' })).toBeHidden();
 
   const landscapeAngle = panel.getByRole('textbox', { name: '横屏倾角（度）' });
   const baseSpeed = panel.getByRole('textbox', { name: '基准速度' });
@@ -480,6 +485,41 @@ test('mouse camera mode zooms, orbits, pans, and focuses the debug panel', async
     afterPan.targetY - beforePan.targetY,
     afterPan.targetZ - beforePan.targetZ,
   )).toBeGreaterThan(1);
+
+  await page.waitForTimeout(700);
+  const beforeProjectionSwitch = await page.evaluate(
+    () => window.__THREE_GAME_DIAGNOSTICS__!.camera,
+  );
+  const projectionMode = panel.getByRole('combobox', { name: '投影模式' });
+  await projectionMode.selectOption({ label: '弱透视 · 轻微近大远小' });
+  await expect(panel).toHaveAttribute('data-camera-projection', 'weak-perspective');
+  const perspectiveFov = panel.getByRole('textbox', { name: '透视视野（度）' });
+  await expect(perspectiveFov).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera))
+    .toMatchObject({
+      projectionMode: 'weak-perspective',
+      perspectiveFov: 22,
+    });
+  const weakPerspectiveBeforeZoom = await page.evaluate(
+    () => window.__THREE_GAME_DIAGNOSTICS__!.camera,
+  );
+  expect(Math.hypot(
+    weakPerspectiveBeforeZoom.targetX - beforeProjectionSwitch.targetX,
+    weakPerspectiveBeforeZoom.targetY - beforeProjectionSwitch.targetY,
+    weakPerspectiveBeforeZoom.targetZ - beforeProjectionSwitch.targetZ,
+  )).toBeLessThan(0.05);
+  await page.mouse.move(centerX, centerY);
+  await page.mouse.wheel(0, -360);
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera.distance))
+    .toBeLessThan(weakPerspectiveBeforeZoom.distance);
+  await perspectiveFov.fill('18');
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera.perspectiveFov))
+    .toBe(18);
+
+  await projectionMode.selectOption({ label: '正交 · 尺寸不随距离变化' });
+  await expect(perspectiveFov).toBeHidden();
+  await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera))
+    .toMatchObject({ projectionMode: 'orthographic', perspectiveFov: null });
 
   await panel.getByRole('button', { name: '退出鼠标调镜头' }).click();
   await expect(panel).toHaveAttribute('data-camera-control', 'manual');

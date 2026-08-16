@@ -2,7 +2,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { InputRouter } from '../core/InputRouter';
 import { Loop } from '../core/Loop';
-import { createRenderer, resizeRenderer, usesPortraitArenaLayout } from '../core/Renderer';
+import {
+  createRenderer,
+  resizeRenderer,
+  updateCameraProjection,
+  usesPortraitArenaLayout,
+  type CameraProjection,
+  type ResponsiveCamera,
+} from '../core/Renderer';
 import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
 import type { DebugPanel, DebugTuning } from '../systems/DebugPanel';
@@ -24,14 +31,21 @@ import {
 
 const PORTRAIT_CAMERA_ANGLE = 25;
 const DEFAULT_LANDSCAPE_CAMERA_ANGLE = 34;
+const DEFAULT_PERSPECTIVE_FOV = 22;
 const DEFAULT_LANDSCAPE_CAMERA_HEIGHT = 117.5;
 const DEFAULT_LANDSCAPE_CAMERA_DISTANCE = roundCameraValue(DEFAULT_LANDSCAPE_CAMERA_HEIGHT *
   Math.tan(THREE.MathUtils.degToRad(DEFAULT_LANDSCAPE_CAMERA_ANGLE)));
 
 const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
   ...DEFAULT_MOVEMENT_TUNING,
+  cameraProjection: 'orthographic',
+  perspectiveFov: DEFAULT_PERSPECTIVE_FOV,
   landscapeCameraAngle: DEFAULT_LANDSCAPE_CAMERA_ANGLE,
   cameraZoom: 1.08,
+  cameraDistance: roundCameraValue(Math.hypot(
+    DEFAULT_LANDSCAPE_CAMERA_HEIGHT,
+    DEFAULT_LANDSCAPE_CAMERA_DISTANCE,
+  )),
   cameraPositionX: 0,
   cameraPositionY: DEFAULT_LANDSCAPE_CAMERA_HEIGHT,
   cameraPositionZ: DEFAULT_LANDSCAPE_CAMERA_DISTANCE,
@@ -46,8 +60,10 @@ const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.OrthographicCamera(-70, 70, 55, -55, 0.1, 500);
-  private readonly cameraControls: OrbitControls;
+  private readonly orthographicCamera = new THREE.OrthographicCamera(-70, 70, 55, -55, 0.1, 500);
+  private readonly perspectiveCamera = new THREE.PerspectiveCamera(DEFAULT_PERSPECTIVE_FOV, 1, 5, 500);
+  private readonly orthographicControls: OrbitControls;
+  private readonly perspectiveControls: OrbitControls;
   private readonly input = new InputRouter();
   private readonly map: OrchardMap;
   private readonly simulation: GameSimulation;
@@ -56,6 +72,7 @@ export class Game {
   private readonly debugTuning: DebugTuning = { ...DEFAULT_DEBUG_TUNING };
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly cameraDirection = new THREE.Vector3();
+  private readonly projectionDirection = new THREE.Vector3();
   private readonly view: ArenaView;
   private readonly audio = new AudioSystem();
   private readonly hud = new Hud();
@@ -64,11 +81,11 @@ export class Game {
     () => this.render(),
     GAME_CONFIG.maxFrameRate,
   );
-  private readonly handleCameraControlsChange = (): void => {
-    if (!this.cameraPointerMode) return;
-    this.syncCameraTuningFromControls();
-    this.debugPanel?.refreshCamera();
-    this.publishDiagnostics();
+  private readonly handleOrthographicControlsChange = (): void => {
+    this.handleCameraControlsChange(this.orthographicControls);
+  };
+  private readonly handlePerspectiveControlsChange = (): void => {
+    this.handleCameraControlsChange(this.perspectiveControls);
   };
   private readonly handleCanvasContextMenu = (event: MouseEvent): void => {
     if (this.cameraPointerMode) event.preventDefault();
@@ -83,7 +100,20 @@ export class Game {
   private debugPanel: DebugPanel | null = null;
   private debugUiHidden = false;
   private cameraPointerMode = false;
+  private activeProjection: CameraProjection = DEFAULT_DEBUG_TUNING.cameraProjection;
   private disposed = false;
+
+  private get camera(): ResponsiveCamera {
+    return this.activeProjection === 'orthographic'
+      ? this.orthographicCamera
+      : this.perspectiveCamera;
+  }
+
+  private get cameraControls(): OrbitControls {
+    return this.activeProjection === 'orthographic'
+      ? this.orthographicControls
+      : this.perspectiveControls;
+  }
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const activeMap = loadActiveMap();
@@ -92,10 +122,14 @@ export class Game {
     this.simulation = new GameSimulation(this.map);
     this.renderer = createRenderer(canvas);
     this.scene.background = new THREE.Color('#91ad62');
-    this.camera.position.set(0, 117.5, 97.5);
-    this.camera.lookAt(0, 0, 0);
-    this.cameraControls = new OrbitControls(this.camera, canvas);
-    this.configureCameraControls();
+    this.orthographicCamera.position.set(0, 117.5, 97.5);
+    this.orthographicCamera.lookAt(0, 0, 0);
+    this.perspectiveCamera.position.copy(this.orthographicCamera.position);
+    this.perspectiveCamera.lookAt(0, 0, 0);
+    this.orthographicControls = new OrbitControls(this.orthographicCamera, canvas);
+    this.perspectiveControls = new OrbitControls(this.perspectiveCamera, canvas);
+    this.configureCameraControls(this.orthographicControls, this.handleOrthographicControlsChange);
+    this.configureCameraControls(this.perspectiveControls, this.handlePerspectiveControlsChange);
     this.canvas.addEventListener('contextmenu', this.handleCanvasContextMenu);
     this.createLighting();
     this.view = new ArenaView(this.scene, this.map);
@@ -136,8 +170,10 @@ export class Game {
     this.view.dispose();
     this.debugPanel?.dispose();
     this.debugPanel = null;
-    this.cameraControls.removeEventListener('change', this.handleCameraControlsChange);
-    this.cameraControls.dispose();
+    this.orthographicControls.removeEventListener('change', this.handleOrthographicControlsChange);
+    this.perspectiveControls.removeEventListener('change', this.handlePerspectiveControlsChange);
+    this.orthographicControls.dispose();
+    this.perspectiveControls.dispose();
     this.canvas.removeEventListener('contextmenu', this.handleCanvasContextMenu);
     this.canvas.classList.remove('camera-pointer-mode');
     this.renderer.dispose();
@@ -191,12 +227,14 @@ export class Game {
   }
 
   private updateCameraComposition(): void {
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
+    updateCameraProjection(this.camera, width, height);
+    this.perspectiveCamera.fov = this.debugTuning.perspectiveFov;
     if (this.cameraPointerMode) {
       this.camera.updateProjectionMatrix();
       return;
     }
-    const width = Math.max(1, this.canvas.clientWidth);
-    const height = Math.max(1, this.canvas.clientHeight);
     const portraitLayout = usesPortraitArenaLayout(width / height);
     if (portraitLayout) {
       const cameraHeight = 170;
@@ -219,28 +257,45 @@ export class Game {
     this.camera.zoom = this.debugTuning.cameraZoom;
     this.camera.lookAt(this.cameraLookTarget);
     this.camera.updateProjectionMatrix();
+    this.debugTuning.cameraDistance = roundCameraValue(
+      this.camera.position.distanceTo(this.cameraLookTarget),
+    );
   }
 
-  private configureCameraControls(): void {
-    this.cameraControls.enabled = false;
-    this.cameraControls.enableDamping = true;
-    this.cameraControls.dampingFactor = 0.08;
-    this.cameraControls.enablePan = true;
-    this.cameraControls.screenSpacePanning = true;
-    this.cameraControls.zoomToCursor = false;
-    this.cameraControls.minZoom = 0.55;
-    this.cameraControls.maxZoom = 1.8;
-    this.cameraControls.minPolarAngle = THREE.MathUtils.degToRad(15);
-    this.cameraControls.maxPolarAngle = THREE.MathUtils.degToRad(82);
-    this.cameraControls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-    this.cameraControls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
-    this.cameraControls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
-    this.cameraControls.addEventListener('change', this.handleCameraControlsChange);
+  private configureCameraControls(
+    controls: OrbitControls,
+    changeHandler: () => void,
+  ): void {
+    controls.enabled = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.enablePan = true;
+    controls.screenSpacePanning = true;
+    controls.zoomToCursor = false;
+    controls.minZoom = 0.55;
+    controls.maxZoom = 1.8;
+    controls.minDistance = 45;
+    controls.maxDistance = 320;
+    controls.minPolarAngle = THREE.MathUtils.degToRad(15);
+    controls.maxPolarAngle = THREE.MathUtils.degToRad(82);
+    controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+    controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+    controls.addEventListener('change', changeHandler);
+  }
+
+  private handleCameraControlsChange(controls: OrbitControls): void {
+    if (!this.cameraPointerMode || controls !== this.cameraControls) return;
+    this.syncCameraTuningFromControls();
+    this.debugPanel?.refreshCamera();
+    this.publishDiagnostics();
   }
 
   private setCameraPointerMode(enabled: boolean): void {
     if (this.cameraPointerMode === enabled) return;
     this.cameraPointerMode = enabled;
+    this.orthographicControls.enabled = false;
+    this.perspectiveControls.enabled = false;
     this.cameraControls.enabled = enabled;
     this.canvas.classList.toggle('camera-pointer-mode', enabled);
     if (enabled) {
@@ -249,6 +304,62 @@ export class Game {
     }
     this.syncCameraTuningFromControls();
     this.debugPanel?.setCameraPointerMode(enabled);
+    this.publishDiagnostics();
+  }
+
+  private setCameraProjection(projection: CameraProjection): void {
+    if (this.activeProjection === projection) {
+      this.perspectiveCamera.fov = this.debugTuning.perspectiveFov;
+      this.perspectiveCamera.updateProjectionMatrix();
+      this.debugPanel?.setCameraProjection(projection);
+      return;
+    }
+
+    const sourceCamera = this.camera;
+    const sourceControls = this.cameraControls;
+    if (this.cameraPointerMode) sourceControls.update();
+    sourceControls.enabled = false;
+    sourceCamera.getWorldDirection(this.projectionDirection);
+    const sourceDistance = sourceCamera.position.distanceTo(this.cameraLookTarget);
+
+    this.activeProjection = projection;
+    this.debugTuning.cameraProjection = projection;
+    const destinationCamera = this.camera;
+    const destinationControls = this.cameraControls;
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
+    updateCameraProjection(destinationCamera, width, height);
+    destinationCamera.zoom = this.debugTuning.cameraZoom;
+
+    const distance = projection === 'weak-perspective'
+      ? this.perspectiveDistanceForOrthographicFrame(width, height)
+      : sourceDistance;
+    destinationCamera.position.copy(this.cameraLookTarget)
+      .addScaledVector(this.projectionDirection, -distance);
+    destinationCamera.lookAt(this.cameraLookTarget);
+    destinationCamera.updateProjectionMatrix();
+    destinationControls.target.copy(this.cameraLookTarget);
+    destinationControls.enabled = this.cameraPointerMode;
+    destinationControls.update();
+    this.syncCameraTuningFromControls();
+    this.debugPanel?.setCameraProjection(projection);
+    this.debugPanel?.refreshCamera();
+    this.publishDiagnostics();
+  }
+
+  private perspectiveDistanceForOrthographicFrame(width: number, height: number): number {
+    updateCameraProjection(this.orthographicCamera, width, height);
+    this.perspectiveCamera.fov = this.debugTuning.perspectiveFov;
+    this.perspectiveCamera.aspect = width / height;
+    const viewHeight = this.orthographicCamera.top - this.orthographicCamera.bottom;
+    return viewHeight / (
+      2 * Math.tan(THREE.MathUtils.degToRad(this.debugTuning.perspectiveFov / 2))
+    );
+  }
+
+  private updatePerspectiveFov(): void {
+    this.perspectiveCamera.fov = this.debugTuning.perspectiveFov;
+    this.perspectiveCamera.updateProjectionMatrix();
     this.publishDiagnostics();
   }
 
@@ -262,6 +373,9 @@ export class Game {
     this.debugTuning.cameraTargetZ = roundCameraValue(this.cameraLookTarget.z);
     this.debugTuning.landscapeCameraAngle = roundCameraValue(this.cameraAngleFromGroundNormal());
     this.debugTuning.cameraZoom = roundCameraValue(this.camera.zoom);
+    this.debugTuning.cameraDistance = roundCameraValue(
+      this.camera.position.distanceTo(this.cameraLookTarget),
+    );
   }
 
   private updateLandscapeCameraPositionFromAngle(): void {
@@ -316,6 +430,12 @@ export class Game {
       cameraPointerModeChanged: (enabled) => {
         this.setCameraPointerMode(enabled);
       },
+      cameraProjectionChanged: () => {
+        this.setCameraProjection(this.debugTuning.cameraProjection);
+      },
+      perspectiveFovChanged: () => {
+        this.updatePerspectiveFov();
+      },
       cameraAngleChanged: () => {
         this.updateLandscapeCameraPositionFromAngle();
         this.updateCameraComposition();
@@ -341,6 +461,7 @@ export class Game {
       },
       reset: () => {
         Object.assign(this.debugTuning, DEFAULT_DEBUG_TUNING);
+        this.setCameraProjection(this.debugTuning.cameraProjection);
         this.simulation.setMovementTuning(this.debugTuning);
         this.reducedMotion = this.debugTuning.reducedMotion;
         this.hemisphere.intensity = this.debugTuning.hemisphereIntensity;
@@ -351,6 +472,7 @@ export class Game {
         this.debugPanel?.refresh();
       },
     });
+    this.debugPanel.setCameraProjection(this.activeProjection);
     this.debugPanel.setCameraPointerMode(this.cameraPointerMode);
     this.debugPanel.setHidden(this.debugUiHidden);
   }
@@ -412,12 +534,32 @@ export class Game {
     };
   }
 
+  private cameraViewMetrics(): { width: number; height: number; verticalOffset: number } {
+    if (this.camera instanceof THREE.OrthographicCamera) {
+      return {
+        width: this.camera.right - this.camera.left,
+        height: this.camera.top - this.camera.bottom,
+        verticalOffset: (this.camera.top + this.camera.bottom) / 2,
+      };
+    }
+    const distance = this.camera.position.distanceTo(this.cameraLookTarget);
+    const height = 2 * distance * Math.tan(
+      THREE.MathUtils.degToRad(this.camera.fov / 2),
+    ) / this.camera.zoom;
+    return {
+      width: height * this.camera.aspect,
+      height,
+      verticalOffset: 0,
+    };
+  }
+
   private publishDiagnostics(): void {
     const snapshot = this.simulation.getSnapshot();
     const info = this.renderer.info;
     const groundAppleCount = snapshot.apples.filter((apple) => apple.state === 'Ground').length;
     const looseAppleCount = snapshot.apples.filter((apple) => apple.state !== 'Carried').length;
     this.camera.getWorldDirection(this.cameraDirection);
+    const cameraView = this.cameraViewMetrics();
     window.__THREE_GAME_DIAGNOSTICS__ = {
       frame: this.frame,
       frameRate: {
@@ -457,9 +599,14 @@ export class Game {
       },
       camera: {
         controlMode: this.cameraPointerMode ? 'mouse' : 'manual',
-        viewWidth: this.camera.right - this.camera.left,
-        viewHeight: this.camera.top - this.camera.bottom,
-        verticalOffset: (this.camera.top + this.camera.bottom) / 2,
+        projectionMode: this.activeProjection,
+        perspectiveFov: this.activeProjection === 'weak-perspective'
+          ? this.perspectiveCamera.fov
+          : null,
+        distance: this.camera.position.distanceTo(this.cameraLookTarget),
+        viewWidth: cameraView.width,
+        viewHeight: cameraView.height,
+        verticalOffset: cameraView.verticalOffset,
         portraitLayout: usesPortraitArenaLayout(this.canvas.clientWidth / this.canvas.clientHeight),
         positionX: this.camera.position.x,
         positionY: this.camera.position.y,
