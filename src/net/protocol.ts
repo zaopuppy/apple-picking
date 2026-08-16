@@ -6,8 +6,8 @@ import type {
   GameSnapshot,
 } from '../game/types';
 
-export const PROTOCOL_VERSION = 1;
-export const BUILD_VERSION = '0.2.0-online-demo';
+export const PROTOCOL_VERSION = 2;
+export const BUILD_VERSION = '0.3.0-smooth-online-demo';
 export const INPUT_STALE_MS = 250;
 export const RECONNECT_GRACE_MS = 15_000;
 
@@ -53,6 +53,7 @@ export type ServerStateFrame = {
   serverTick: number;
   sentAtMs: number;
   lastProcessedInputSeqByPlayer: Record<string, number>;
+  lastAppliedClientTickByPlayer: Record<string, number>;
   snapshot: GameSnapshot;
   events: NetworkGameEvent[];
 };

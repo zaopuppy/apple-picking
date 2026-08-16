@@ -72,6 +72,73 @@ test.describe('desktop browser multiplayer demo', () => {
     await expectSnapshotsToConverge(page, kidPage);
     await kidPage.close();
   });
+
+  test('remote movement is interpolated and owned input is predicted every render frame', async ({ page, context }, testInfo) => {
+    test.setTimeout(45_000);
+    const { kidPage } = await createTwoPlayerRoom(page, context);
+    await startMatch(page, kidPage);
+    await Promise.all([
+      page.evaluate(() =>
+        window.__THREE_GAME_ONLINE_TEST_HOOKS__?.setSimulatedNetwork(120, 30)),
+      kidPage.evaluate(() =>
+        window.__THREE_GAME_ONLINE_TEST_HOOKS__?.setSimulatedNetwork(120, 30)),
+    ]);
+    await page.waitForTimeout(400);
+
+    const inputResponseMs = await measureOwnedInputResponse(page);
+    await page.waitForTimeout(250);
+    const [remoteSamples, localSamples] = await Promise.all([
+      sampleGuardMotion(kidPage, 650),
+      sampleGuardMotion(page, 650),
+    ]);
+    const diagnostics = await page.evaluate(() =>
+      window.__THREE_GAME_ONLINE_TEST_HOOKS__?.getDriverDiagnostics(),
+    );
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyF', key: 'f', bubbles: true }));
+    });
+
+    const remoteMotion = summarizeMotion(remoteSamples);
+    const localMotion = summarizeMotion(localSamples);
+    const report = {
+      remote: remoteMotion,
+      local: localMotion,
+      inputResponseMs,
+      diagnostics,
+    };
+    await testInfo.attach('network-smoothing-report', {
+      body: JSON.stringify(report, null, 2),
+      contentType: 'application/json',
+    });
+    console.log(`network smoothing: ${JSON.stringify(report)}`);
+
+    expect(remoteSamples.length).toBeGreaterThanOrEqual(12);
+    expect(remoteMotion.stationaryRatio, 'interpolation should eliminate repeated 20 Hz positions')
+      .toBeLessThan(0.15);
+    expect(remoteMotion.p95Speed, 'interpolated movement should preserve stable apparent speed')
+      .toBeLessThan(11);
+    expect(localMotion.stationaryRatio, 'local prediction should update owned actors every frame')
+      .toBeLessThan(0.15);
+    expect(localMotion.p95Speed, 'prediction correction should not create visible speed spikes')
+      .toBeLessThan(12);
+    expect(inputResponseMs, 'owned movement should become visible within the game-feel response budget')
+      .toBeLessThan(100);
+    expect(diagnostics?.predictionReplayTicks ?? 0, 'owned input should be replayed ahead of authority')
+      .toBeGreaterThan(0);
+    expect(diagnostics?.bufferedStateFrames ?? 0).toBeGreaterThanOrEqual(3);
+    expect(diagnostics?.simulatedStateLatencyMs).toBe(120);
+    expect(diagnostics?.simulatedStateJitterMs).toBe(30);
+
+    await Promise.all([
+      page.evaluate(() =>
+        window.__THREE_GAME_ONLINE_TEST_HOOKS__?.setSimulatedNetwork(0, 0)),
+      kidPage.evaluate(() =>
+        window.__THREE_GAME_ONLINE_TEST_HOOKS__?.setSimulatedNetwork(0, 0)),
+    ]);
+    await page.waitForTimeout(500);
+    await expectSnapshotsToConverge(page, kidPage);
+    await kidPage.close();
+  });
 });
 
 async function createTwoPlayerRoom(
@@ -130,4 +197,74 @@ async function expectSnapshotsToConverge(first: Page, second: Page): Promise<voi
   });
   const [firstSnapshot, secondSnapshot] = await Promise.all([snapshotOf(first), snapshotOf(second)]);
   expect(Math.abs(firstSnapshot.tick - secondSnapshot.tick)).toBeLessThanOrEqual(3);
+}
+
+async function sampleGuardMotion(
+  page: Page,
+  durationMs: number,
+): Promise<Array<{ time: number; x: number; z: number }>> {
+  return page.evaluate((duration) => new Promise((resolve) => {
+    const samples: Array<{ time: number; x: number; z: number }> = [];
+    const startedAt = performance.now();
+    const sample = (time: number): void => {
+      const snapshot = window.__THREE_GAME_TEST_HOOKS__?.getSnapshot();
+      if (snapshot) {
+        samples.push({
+          time: time - startedAt,
+          x: snapshot.guards[0].position.x,
+          z: snapshot.guards[0].position.z,
+        });
+      }
+      if (time - startedAt >= duration) resolve(samples);
+      else requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }), durationMs);
+}
+
+function summarizeMotion(samples: Array<{ time: number; x: number; z: number }>): {
+  samples: number;
+  stationaryRatio: number;
+  p95Speed: number;
+  maxSpeed: number;
+} {
+  const segments = samples.slice(1).map((sample, index) => {
+    const previous = samples[index];
+    const distance = Math.hypot(sample.x - previous.x, sample.z - previous.z);
+    const durationSeconds = Math.max(0.001, (sample.time - previous.time) / 1000);
+    return { distance, speed: distance / durationSeconds };
+  });
+  const sortedSpeeds = segments.map((segment) => segment.speed)
+    .sort((first, second) => first - second);
+  return {
+    samples: samples.length,
+    stationaryRatio: segments.filter((segment) => segment.distance < 0.002).length / segments.length,
+    p95Speed: sortedSpeeds[Math.floor(sortedSpeeds.length * 0.95)] ?? 0,
+    maxSpeed: sortedSpeeds.at(-1) ?? 0,
+  };
+}
+
+async function measureOwnedInputResponse(page: Page): Promise<number> {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const initialX = window.__THREE_GAME_TEST_HOOKS__?.getSnapshot().guards[0].position.x;
+    if (initialX === undefined) {
+      reject(new Error('Online snapshot was unavailable before input response measurement.'));
+      return;
+    }
+    const startedAt = performance.now();
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyF', key: 'f', bubbles: true }));
+    const sample = (time: number): void => {
+      const x = window.__THREE_GAME_TEST_HOOKS__?.getSnapshot().guards[0].position.x;
+      if (x !== undefined && x > initialX + 0.01) {
+        resolve(time - startedAt);
+        return;
+      }
+      if (time - startedAt > 500) {
+        reject(new Error('Owned actor did not visibly respond within 500ms.'));
+        return;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }));
 }

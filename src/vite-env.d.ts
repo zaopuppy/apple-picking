@@ -203,6 +203,8 @@ declare global {
   interface ThreeGameOnlineTestHooks {
     getRoomState(): RoomState | null;
     getDriverDiagnostics(): OnlineDriverDiagnostics | null;
+    getAuthoritativeSnapshot(): GameSnapshot | null;
+    setSimulatedNetwork(stateLatencyMs: number, stateJitterMs?: number): void;
     sendUnauthorizedGuardInput(): void;
     disconnectTransport(): void;
   }

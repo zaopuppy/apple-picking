@@ -366,6 +366,10 @@ function installTestHooks(): void {
   window.__THREE_GAME_ONLINE_TEST_HOOKS__ = {
     getRoomState: () => currentRoom,
     getDriverDiagnostics: () => driver?.getDiagnostics() ?? null,
+    getAuthoritativeSnapshot: () => driver?.getAuthoritativeSnapshotForTest() ?? null,
+    setSimulatedNetwork: (stateLatencyMs, stateJitterMs = 0) => {
+      driver?.setSimulatedNetworkForTest(stateLatencyMs, stateJitterMs);
+    },
     sendUnauthorizedGuardInput: () => {
       if (!driver) return;
       const diagnostics = driver.getDiagnostics();

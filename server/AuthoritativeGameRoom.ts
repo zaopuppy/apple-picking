@@ -42,6 +42,9 @@ type RoomPlayer = {
   disconnectDeadlineMs: number | null;
   lastInputAtMs: number;
   lastAcceptedSeq: number;
+  lastAppliedSeq: number;
+  lastAcceptedClientTick: number;
+  lastAppliedClientTick: number;
   latestActors: Partial<Record<ActorId, ActorCommand>>;
   pendingActionActors: Set<ActorId>;
   pendingDropActors: Set<ActorId>;
@@ -118,6 +121,9 @@ export class AuthoritativeGameRoom {
       disconnectDeadlineMs: null,
       lastInputAtMs: Date.now(),
       lastAcceptedSeq: 0,
+      lastAppliedSeq: 0,
+      lastAcceptedClientTick: 0,
+      lastAppliedClientTick: 0,
       latestActors: {},
       pendingActionActors: new Set(),
       pendingDropActors: new Set(),
@@ -159,6 +165,7 @@ export class AuthoritativeGameRoom {
       if (command.dropPressed) player.pendingDropActors.add(actorId);
     }
     player.lastAcceptedSeq = frame.seq;
+    player.lastAcceptedClientTick = frame.clientTick;
     player.lastInputAtMs = Date.now();
     this.lastActivityMs = player.lastInputAtMs;
   }
@@ -284,6 +291,8 @@ export class AuthoritativeGameRoom {
         player.pendingActionActors.delete(actorId);
         player.pendingDropActors.delete(actorId);
       }
+      player.lastAppliedSeq = player.lastAcceptedSeq;
+      player.lastAppliedClientTick = player.lastAcceptedClientTick;
     }
     return commands;
   }
@@ -299,6 +308,9 @@ export class AuthoritativeGameRoom {
     this.previousPumpMs = performance.now();
     for (const player of this.players.values()) {
       player.lastAcceptedSeq = 0;
+      player.lastAppliedSeq = 0;
+      player.lastAcceptedClientTick = 0;
+      player.lastAppliedClientTick = 0;
       player.lastInputAtMs = Date.now();
       player.latestActors = {};
       player.pendingActionActors.clear();
@@ -334,7 +346,10 @@ export class AuthoritativeGameRoom {
       serverTick: snapshot.tick,
       sentAtMs: Date.now(),
       lastProcessedInputSeqByPlayer: Object.fromEntries(
-        [...this.players.values()].map((player) => [player.playerId, player.lastAcceptedSeq]),
+        [...this.players.values()].map((player) => [player.playerId, player.lastAppliedSeq]),
+      ),
+      lastAppliedClientTickByPlayer: Object.fromEntries(
+        [...this.players.values()].map((player) => [player.playerId, player.lastAppliedClientTick]),
       ),
       snapshot,
       events,

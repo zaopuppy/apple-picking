@@ -8,12 +8,10 @@ import {
 import { DEFAULT_ORCHARD_MAP } from './maps/MapGenerator';
 import {
   deliveryZonesForMap,
-  resolveCircleAgainstLandmark,
-  treeColliderRadius,
   type OrchardDeliveryZone,
   type OrchardMap,
-  type OrchardTree,
 } from './maps/OrchardMap';
+import { constrainCircleToMap } from './MovementCollision';
 import {
   createEmptyCommands,
   type ActorCommand,
@@ -575,32 +573,7 @@ export class GameSimulation {
   }
 
   private constrainPosition(position: Vec2, radius: number): void {
-    position.x = clamp(
-      position.x,
-      -GAME_CONFIG.arenaHalfWidth + radius,
-      GAME_CONFIG.arenaHalfWidth - radius,
-    );
-    position.z = clamp(
-      position.z,
-      -GAME_CONFIG.arenaHalfDepth + radius,
-      GAME_CONFIG.arenaHalfDepth - radius,
-    );
-    for (const tree of this.map.trees) {
-      resolveCircleAgainstTree(position, radius, tree);
-    }
-    for (const landmark of this.map.landmarks) {
-      resolveCircleAgainstLandmark(position, radius, landmark);
-    }
-    position.x = clamp(
-      position.x,
-      -GAME_CONFIG.arenaHalfWidth + radius,
-      GAME_CONFIG.arenaHalfWidth - radius,
-    );
-    position.z = clamp(
-      position.z,
-      -GAME_CONFIG.arenaHalfDepth + radius,
-      GAME_CONFIG.arenaHalfDepth - radius,
-    );
+    constrainCircleToMap(this.map, position, radius);
   }
 
   private checkGuardPounceCollision(): void {
@@ -962,23 +935,6 @@ function resolveCirclePair(
   second.x += normalX * overlap * (1 - firstShare);
   second.z += normalZ * overlap * (1 - firstShare);
   return true;
-}
-
-function resolveCircleAgainstTree(position: Vec2, radius: number, tree: OrchardTree): void {
-  const deltaX = position.x - tree.x;
-  const deltaZ = position.z - tree.z;
-  const minimumDistance = radius + treeColliderRadius(tree);
-  const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
-  if (distanceSq >= minimumDistance * minimumDistance) return;
-
-  if (distanceSq > 0.000001) {
-    const distance = Math.sqrt(distanceSq);
-    const push = minimumDistance - distance;
-    position.x += deltaX / distance * push;
-    position.z += deltaZ / distance * push;
-    return;
-  }
-  position.x = tree.x + minimumDistance;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
