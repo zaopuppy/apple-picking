@@ -98,6 +98,9 @@ declare global {
       bridges: number;
       waterfalls: number;
       appleGroups: number;
+      regionPropClusters: number;
+      regionPropInstances: number;
+      regionPropInstancedMeshes: number;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;

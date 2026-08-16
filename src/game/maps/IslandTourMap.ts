@@ -239,7 +239,7 @@ function createWaterBlockLandmarks(): OrchardLandmark[] {
 export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
   version: 4,
   id: SWEET_ORCHARD_ISLAND_ID,
-  name: '甜日果园岛 · P2b',
+  name: '甜日果园岛 · P3a',
   seed: 20260816,
   worldStyle: {
     theme: 'riverside',

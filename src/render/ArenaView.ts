@@ -121,6 +121,9 @@ export type EnvironmentAssetDiagnostics = {
   bridges: number;
   waterfalls: number;
   appleGroups: number;
+  regionPropClusters: number;
+  regionPropInstances: number;
+  regionPropInstancedMeshes: number;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -219,6 +222,9 @@ export class ArenaView {
     bridges: 0,
     waterfalls: 0,
     appleGroups: 0,
+    regionPropClusters: 0,
+    regionPropInstances: 0,
+    regionPropInstancedMeshes: 0,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -484,6 +490,9 @@ export class ArenaView {
         bridges: island.bridges,
         waterfalls: island.waterfalls,
         appleGroups: ISLAND_APPLE_GROUPS.length,
+        regionPropClusters: island.regionPropClusters,
+        regionPropInstances: island.regionPropInstances,
+        regionPropInstancedMeshes: island.regionPropInstancedMeshes,
       };
       this.createForest();
       this.createDeliveryZones();

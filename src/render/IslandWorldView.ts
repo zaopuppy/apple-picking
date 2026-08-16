@@ -9,6 +9,7 @@ import {
 } from '../game/maps/IslandTourMap';
 import type { OrchardMap, OrchardPath } from '../game/maps/OrchardMap';
 import { createIslandMaterials, type IslandMaterials } from './IslandMaterials';
+import { createIslandRegionPropVisual } from './IslandRegionPropKit';
 
 type WaveStrip = {
   mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
@@ -37,6 +38,9 @@ export type IslandWorldVisual = {
   waterCollisionBlocks: number;
   bridges: number;
   waterfalls: number;
+  regionPropClusters: number;
+  regionPropInstances: number;
+  regionPropInstancedMeshes: number;
   update(time: number, reducedMotion: boolean): void;
 };
 
@@ -110,6 +114,10 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   propInstances += routeBlocks.userData.propInstances as number;
   root.add(routeBlocks);
 
+  const regionProps = createIslandRegionPropVisual(materials);
+  propInstances += regionProps.propInstances;
+  root.add(regionProps.root);
+
   root.add(createPlazaDetails(materials));
   const stats = measureWorld(root);
 
@@ -121,6 +129,9 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
     waterCollisionBlocks: ISLAND_WATER_BLOCKS.length,
     bridges: ISLAND_BRIDGES.length,
     waterfalls: WATERFALL_OUTLETS.length,
+    regionPropClusters: regionProps.clusters,
+    regionPropInstances: regionProps.propInstances,
+    regionPropInstancedMeshes: regionProps.instancedMeshes,
     ...stats,
     update(time: number, reducedMotion: boolean): void {
       for (const wave of waves) {

@@ -1001,7 +1001,7 @@ test('character state presentation stays readable across key gameplay moments', 
 test('Sweet Orchard Island keeps its authored composition playable and within budget', async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== 'desktop-chrome',
-    'Island P2 development is desktop-first; mobile QA is deferred.',
+    'Island desktop development is still in progress; mobile QA is deferred.',
   );
   await page.goto('/?world=island');
   await expect
@@ -1021,7 +1021,7 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P2b',
+    mapName: '甜日果园岛 · P3a',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
@@ -1036,10 +1036,13 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     bridges: 2,
     waterfalls: 2,
     appleGroups: 3,
+    regionPropClusters: 5,
+    regionPropInstancedMeshes: 7,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
   expect(diagnostics?.environment.worldPropInstances).toBeGreaterThanOrEqual(70);
+  expect(diagnostics?.environment.regionPropInstances).toBeGreaterThanOrEqual(80);
   expect(diagnostics?.environment.worldMeshes).toBeGreaterThanOrEqual(60);
   expect(diagnostics?.physics.sensors).toBe(4);
   expect(diagnostics?.environment.treeMode).toBe('imported');
