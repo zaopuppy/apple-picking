@@ -105,10 +105,54 @@ body {
   white-space: nowrap;
 }
 
-#camera-control {
+#online-mode-link {
   position: absolute;
   z-index: 3;
   top: max(71px, calc(env(safe-area-inset-top) + 67px));
+  left: max(12px, calc(env(safe-area-inset-left) + 8px));
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 245, 205, 0.58);
+  border-radius: 4px 12px 4px 12px;
+  color: var(--paper);
+  background: rgba(36, 48, 27, 0.72);
+  box-shadow: 0 6px 20px rgba(36, 48, 27, 0.2);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-decoration: none;
+  backdrop-filter: blur(7px);
+  transition: transform 130ms ease, background 130ms ease;
+}
+
+#online-mode-link:hover {
+  background: rgba(36, 48, 27, 0.88);
+  transform: translateY(-1px);
+}
+
+#online-mode-link > span {
+  width: 9px;
+  height: 9px;
+  border: 2px solid rgba(255, 245, 205, 0.72);
+  border-radius: 50%;
+  background: #7bc46d;
+  box-shadow: 0 0 0 3px rgba(123, 196, 109, 0.16);
+}
+
+#online-mode-link b {
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: var(--ink);
+  background: #f3d46d;
+  font: 900 0.48rem/1 ui-monospace, monospace;
+}
+
+#camera-control {
+  position: absolute;
+  z-index: 3;
+  top: max(113px, calc(env(safe-area-inset-top) + 109px));
   left: max(12px, calc(env(safe-area-inset-left) + 8px));
   display: flex;
   align-items: center;
@@ -441,6 +485,18 @@ body {
     top: auto;
     bottom: max(55px, calc(env(safe-area-inset-bottom) + 53px));
     left: max(8px, calc(env(safe-area-inset-left) + 6px));
+  }
+
+  #online-mode-link {
+    top: auto;
+    bottom: max(55px, calc(env(safe-area-inset-bottom) + 53px));
+    min-height: 32px;
+    padding: 5px 8px;
+    font-size: 0.56rem;
+  }
+
+  #online-mode-link + #camera-control {
+    bottom: max(96px, calc(env(safe-area-inset-bottom) + 94px));
   }
 
   #camera-mode-toggle {

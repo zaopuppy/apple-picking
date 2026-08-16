@@ -16,15 +16,15 @@ import type { DebugPanel, DebugTuning } from '../systems/DebugPanel';
 import { Hud } from '../systems/Hud';
 import { loadActiveMap } from '../systems/MapStorage';
 import { DEFAULT_MOVEMENT_TUNING, FIXED_DELTA_SECONDS, GAME_CONFIG } from './config';
+import { type GameDriver, LocalGameDriver } from './GameDriver';
 import { GameSimulation } from './GameSimulation';
 import {
   resolveMedievalWorldMap,
   type MedievalWorldPreset,
 } from './maps/MedievalWorldExperiments';
-import { resolveIslandTourMap } from './maps/IslandTourMap';
+import { isIslandTourMap, resolveIslandTourMap } from './maps/IslandTourMap';
 import { deliveryZonesForMap, type OrchardMap } from './maps/OrchardMap';
 import {
-  commandsWithoutEdges,
   createEmptyCommands,
   type GameCommands,
   type SimulationStep,
@@ -39,6 +39,11 @@ const ISLAND_LANDSCAPE_CAMERA_HEIGHT = 112;
 const ISLAND_CAMERA_ZOOM = 0.96;
 const DEFAULT_LANDSCAPE_CAMERA_DISTANCE = roundCameraValue(DEFAULT_LANDSCAPE_CAMERA_HEIGHT *
   Math.tan(THREE.MathUtils.degToRad(DEFAULT_LANDSCAPE_CAMERA_ANGLE)));
+
+export type GameOptions = {
+  map?: OrchardMap;
+  driver?: GameDriver;
+};
 
 const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
   ...DEFAULT_MOVEMENT_TUNING,
@@ -74,7 +79,7 @@ export class Game {
   private readonly cameraModeLabel = getElement<HTMLElement>('#camera-mode-label');
   private readonly map: OrchardMap;
   private readonly islandWorld: boolean;
-  private readonly simulation: GameSimulation;
+  private readonly driver: GameDriver;
   private readonly hemisphere = new THREE.HemisphereLight('#fff7db', '#55743d', 2.1);
   private readonly sun = new THREE.DirectionalLight('#fff0bd', 3.1);
   private readonly debugTuning: DebugTuning = { ...DEFAULT_DEBUG_TUNING };
@@ -126,14 +131,17 @@ export class Game {
       : this.perspectiveControls;
   }
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(private readonly canvas: HTMLCanvasElement, options: GameOptions = {}) {
+    if (options.driver && !options.map) {
+      throw new Error('An injected game driver requires an authoritative map.');
+    }
     const activeMap = loadActiveMap();
-    const islandMap = resolveIslandTourMap();
-    const medievalWorld = islandMap ? null : resolveMedievalWorldMap(activeMap);
-    this.map = islandMap ?? medievalWorld?.map ?? activeMap;
-    this.islandWorld = islandMap !== null;
+    const islandMap = options.map ? null : resolveIslandTourMap();
+    const medievalWorld = options.map || islandMap ? null : resolveMedievalWorldMap(activeMap);
+    this.map = options.map ?? islandMap ?? medievalWorld?.map ?? activeMap;
+    this.islandWorld = isIslandTourMap(this.map);
     if (this.islandWorld) this.configureIslandCamera();
-    this.simulation = new GameSimulation(this.map);
+    this.driver = options.driver ?? new LocalGameDriver(new GameSimulation(this.map));
     this.renderer = createRenderer(canvas);
     if (this.islandWorld) {
       this.renderer.toneMappingExposure = 1.01;
@@ -167,7 +175,7 @@ export class Game {
     this.syncPresentation();
     this.installTestHooks();
     this.publishDiagnostics();
-    if (import.meta.env.DEV) void this.installDebugPanel();
+    if (import.meta.env.DEV && this.driver.mode === 'local') void this.installDebugPanel();
   }
 
   private configureIslandCamera(): void {
@@ -211,6 +219,7 @@ export class Game {
     this.disposed = true;
     this.loop.stop();
     this.input.dispose();
+    this.driver.dispose();
     this.audio.dispose();
     this.view.dispose();
     this.debugPanel?.dispose();
@@ -245,7 +254,7 @@ export class Game {
     let firstStep = true;
     while (this.accumulator >= FIXED_DELTA_SECONDS) {
       const commands = firstStep ? this.input.consumeCommands() : this.input.readHeldCommands();
-      this.handleStep(this.simulation.step(commands));
+      for (const step of this.driver.tick(commands)) this.handleStep(step);
       this.accumulator -= FIXED_DELTA_SECONDS;
       firstStep = false;
     }
@@ -262,7 +271,7 @@ export class Game {
   }
 
   private syncPresentation(): void {
-    const snapshot = this.simulation.getSnapshot();
+    const snapshot = this.driver.getSnapshot();
     const presentationTime = this.reducedMotion ? snapshot.elapsedSeconds : this.renderTime;
     this.view.sync(snapshot, presentationTime, this.reducedMotion);
     this.hud.update(snapshot, this.fps);
@@ -525,7 +534,7 @@ export class Game {
         this.debugPanel?.refresh();
       },
       movementChanged: () => {
-        this.simulation.setMovementTuning(this.debugTuning);
+        this.driver.setMovementTuning(this.debugTuning);
         this.publishDiagnostics();
       },
       lightingChanged: () => {
@@ -539,7 +548,7 @@ export class Game {
       reset: () => {
         Object.assign(this.debugTuning, DEFAULT_DEBUG_TUNING);
         this.setCameraProjection(this.debugTuning.cameraProjection);
-        this.simulation.setMovementTuning(this.debugTuning);
+        this.driver.setMovementTuning(this.debugTuning);
         this.reducedMotion = this.debugTuning.reducedMotion;
         this.hemisphere.intensity = this.debugTuning.hemisphereIntensity;
         this.sun.intensity = this.debugTuning.sunIntensity;
@@ -557,32 +566,30 @@ export class Game {
   private installTestHooks(): void {
     window.__THREE_GAME_TEST_HOOKS__ = {
       seed: (value: number) => {
-        this.simulation.seed(value);
+        this.driver.seed(value);
       },
       setState: (name: string) => {
-        this.simulation.loadScenario(name === 'complete' ? 'kid-win' : name);
+        this.driver.loadScenario(name === 'complete' ? 'kid-win' : name);
         this.syncPresentation();
         this.publishDiagnostics();
       },
       scenario: (name: string) => {
-        this.simulation.loadScenario(name);
+        this.driver.loadScenario(name);
         this.syncPresentation();
         this.publishDiagnostics();
       },
       step: (partialCommands, ticks = 1) => {
-        let commands = this.mergeTestCommands(partialCommands);
-        let result = this.simulation.getSnapshot();
-        for (let index = 0; index < Math.max(1, ticks); index += 1) {
-          const step = this.simulation.step(commands);
+        const commands = this.mergeTestCommands(partialCommands);
+        let result = this.driver.getSnapshot();
+        for (const step of this.driver.stepForTest(commands, ticks)) {
           this.handleStep(step);
           result = step.snapshot;
-          commands = commandsWithoutEdges(commands);
         }
         this.syncPresentation();
         this.publishDiagnostics();
         return result;
       },
-      getSnapshot: () => this.simulation.getSnapshot(),
+      getSnapshot: () => this.driver.getSnapshot(),
       setPausedForScreenshot: (paused: boolean) => {
         this.pausedForScreenshot = paused;
       },
@@ -631,7 +638,7 @@ export class Game {
   }
 
   private publishDiagnostics(): void {
-    const snapshot = this.simulation.getSnapshot();
+    const snapshot = this.driver.getSnapshot();
     const info = this.renderer.info;
     const groundAppleCount = snapshot.apples.filter((apple) => apple.state === 'Ground').length;
     const looseAppleCount = snapshot.apples.filter((apple) => apple.state !== 'Carried').length;
@@ -664,7 +671,7 @@ export class Game {
         sensors: deliveryZonesForMap(this.map).length,
         ccdBodies: 0,
       },
-      movement: this.simulation.getMovementTuning(),
+      movement: this.driver.getMovementTuning(),
       audio: this.audio.getDiagnostics(),
       environment: this.view.getEnvironmentDiagnostics(),
       characters: this.view.getCharacterDiagnostics(),

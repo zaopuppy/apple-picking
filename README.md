@@ -1,6 +1,6 @@
 # Apple Picking · 果园追逐
 
-一款使用 TypeScript、Three.js 和 Vite 开发的本地多人果园追逐游戏。两名守卫需要协作抓住偷苹果的 kid，kid 则要在速度因负重下降前把六个苹果留在目标圆圈内。
+一款使用 TypeScript、Three.js 和 Vite 开发的果园追逐游戏。它保留同键盘本地多人模式，并提供由 Node.js + Socket.IO 权威服务端驱动的双人桌面网页联机演示。
 
 ## Quick Start
 
@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-浏览器打开 <http://127.0.0.1:5188>。
+浏览器打开 <http://127.0.0.1:5188> 使用同键盘本地模式，或打开 <http://127.0.0.1:5188/online.html> 创建/加入双人联机房间。`npm run dev` 会同时启动 Vite（5188）与无 SSL 的演示房间服务（5190）。
 
 地图编辑器位于 <http://127.0.0.1:5188/editor.html>，也可以从游戏左上角的“当前地图”入口进入。
 
@@ -38,7 +38,7 @@ Three.js 中 `Y` 轴是上下方向，`X` 与 `Z` 轴构成地面；“朝向目
 
 ## 操作方式
 
-当前版本是同键盘本地多人游戏：
+本地模式允许三名角色共用一个键盘：
 
 ![Apple Picking 键盘操作键位图](keyboard-controls-layout-v2.png)
 
@@ -51,6 +51,10 @@ Three.js 中 `Y` 轴是上下方向，`X` 与 `Z` 轴构成地面；“朝向目
 游戏左上角提供“自由镜头”：开启后可用左键拖动旋转、右键拖动平移、滚轮缩放；点击“固定镜头”会保留并锁定当前视角。镜头操作不影响三名角色的键盘输入。
 
 按 `R` 重新开始。当前手机视口已适配画面与 HUD，但正式触控输入仍待实现。
+
+在线模式复用同一套键位，但每个浏览器只提交自己席位拥有的输入：守卫席位同时控制 `guard1` 与 `guard2`，kid 席位只控制 kid。创建者把六位房间码发给另一位玩家，双方选择不同席位并点击“准备”即可开始。短暂断线会暂停房间并在 15 秒内尝试恢复原席位。
+
+在线版是 HTTP + WebSocket 的纯演示，不包含 SSL/TLS、账号、公开匹配、持久化或客户端预测。适合本机双标签或受信任局域网试玩，不应原样暴露到公网。
 
 ## 核心规则
 
@@ -81,9 +85,12 @@ Three.js 同时允许项目把确定性玩法规则与 3D 表现分开：规则�
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm run dev` | 在 `127.0.0.1:5188` 启动 Vite 开发服务器 |
+| `npm run dev` | 同时启动 Vite `127.0.0.1:5188` 与房间服务 `0.0.0.0:5190` |
+| `npm run dev:web` | 只启动 Vite 开发服务器 |
+| `npm run dev:server` | 只启动可热重载的 Socket.IO 房间服务 |
 | `npm run build` | 运行严格 TypeScript 检查并生成 `dist/` |
-| `npm run preview` | 在 `127.0.0.1:4188` 预览生产构建 |
+| `npm run preview` | 同时预览生产构建 `127.0.0.1:4188` 并启动房间服务 |
+| `npm run server` | 只启动房间服务 |
 | `npm test` | 运行完整 Playwright 规则与浏览器测试 |
 | `npm run verify:visual` | 运行 canvas、HUD 和响应式视觉检查 |
 | `npm run inspect:canvas` | 采集 canvas 像素、截图和渲染预算诊断 |
@@ -97,11 +104,14 @@ src/main.ts          应用入口
 src/editor/          独立地图编辑器
 src/core/            输入、循环和渲染器基础设施
 src/game/            确定性规则、地图生成、状态和共享类型
+src/net/             双端协议与浏览器在线驱动
+src/online/          联机大厅与在线入口
 src/render/          Three.js 场景、角色和资产表现
 src/systems/         HUD、音频、碰撞辅助和 VFX
 src/entities/        可复用实体代码
 src/utils/           通用工具
 tests/               Playwright 规则与浏览器测试
+server/              Socket.IO 网关、房间管理与权威模拟
 scripts/             canvas 检查和维护脚本
 docs/                设计方案、实施记录和资产台账
 public/assets/       运行时音频与 3D 资产
@@ -128,6 +138,7 @@ Web 版本的发布入口是 `dist/index.html`。集成 ArkWeb 前需要确认�
 
 ## 设计与实施文档
 
+- [桌面网页联机架构与首期实施记录](docs/2026-08-16_desktop-web-multiplayer-architecture-discussion.md)
 - [语义化乡野地图生成器讨论稿](docs/2026-08-15_semantic-world-generation-discussion.md)
 - [视觉精修与状态表现方案](docs/2026-08-15_apple-picking-visual-polish-plan.md)
 - [免费素材接入与低风险实施计划](docs/2026-08-15_free-asset-integration-plan.md)

@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 import type { AppleSnapshot, GameCommands, GameSnapshot, GuardSnapshot, KidSnapshot, MatchState } from './game/types';
+import type { OnlineDriverDiagnostics } from './net/OnlineGameDriver';
+import type { RoomState } from './net/protocol';
 
 declare global {
   interface ThreeGameDiagnostics {
@@ -198,9 +200,17 @@ declare global {
     hideDebugUi(hidden: boolean): void;
   }
 
+  interface ThreeGameOnlineTestHooks {
+    getRoomState(): RoomState | null;
+    getDriverDiagnostics(): OnlineDriverDiagnostics | null;
+    sendUnauthorizedGuardInput(): void;
+    disconnectTransport(): void;
+  }
+
   interface Window {
     __THREE_GAME_DIAGNOSTICS__?: ThreeGameDiagnostics;
     __THREE_GAME_TEST_HOOKS__?: ThreeGameTestHooks;
+    __THREE_GAME_ONLINE_TEST_HOOKS__?: ThreeGameOnlineTestHooks;
   }
 }
 

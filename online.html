@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#31533a" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='36' r='21' fill='%23d83f2f'/%3E%3Cpath d='M33 16c2-8 8-11 15-10-2 7-7 11-15 10Z' fill='%234f7c3a'/%3E%3Cpath d='M31 18c0-5 1-9 4-13' fill='none' stroke='%236f5435' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <title>Apple Picking · 网页联机演示</title>
+  </head>
+  <body class="online-page">
+    <main id="app">
+      <canvas id="game-canvas" aria-label="网页联机果园追逐游戏画面"></canvas>
+
+      <a id="map-editor-link" href="/">
+        <span>游戏模式</span>
+        <strong id="active-map-name">甜日果园岛</strong>
+        <b>本地同屏 ↩</b>
+      </a>
+
+      <div id="camera-control" data-mode="fixed">
+        <button
+          id="camera-mode-toggle"
+          type="button"
+          aria-pressed="false"
+          aria-describedby="camera-gesture-hint"
+          title="开启自由镜头"
+        >
+          <span class="camera-control-mark" aria-hidden="true"></span>
+          <span id="camera-mode-label">自由镜头</span>
+        </button>
+        <span id="camera-gesture-hint">左键旋转 · 右键平移 · 滚轮缩放</span>
+      </div>
+
+      <aside id="network-status" data-state="connecting" aria-live="polite">
+        <span class="network-dot" aria-hidden="true"></span>
+        <strong id="network-status-label">连接房间服务</strong>
+        <span id="network-room-label">HTTP 演示</span>
+      </aside>
+
+      <section id="score-ribbon" aria-live="polite">
+        <div class="team-score guards-score">
+          <span class="team-name">守卫抓捕</span>
+          <strong><span id="catches-value">0</span>/<span id="catches-total">3</span></strong>
+          <span class="progress-track"><span id="catches-fill"></span></span>
+        </div>
+        <div class="round-clock">
+          <span>用时</span>
+          <strong id="timer-value">00:00</strong>
+          <span class="fps-readout"><b id="fps-value">0</b> FPS</span>
+        </div>
+        <div class="team-score kid-score">
+          <span class="team-name">
+            苹果送达
+            <span class="carried-inline">· 携带 <b id="carried-value">0</b>/<span id="carried-total">3</span></span>
+          </span>
+          <strong><span id="delivered-value">0</span>/<span id="delivered-total">6</span></strong>
+          <span class="progress-track"><span id="delivered-fill"></span></span>
+        </div>
+      </section>
+
+      <div id="match-message" aria-hidden="true">3</div>
+
+      <section id="result-overlay" role="dialog" aria-modal="true">
+        <p>这一轮结束</p>
+        <h1 id="result-title">守卫抓住了小偷！</h1>
+        <span>双方准备后再来一局</span>
+      </section>
+
+      <section id="online-lobby" class="visible" aria-live="polite">
+        <div class="lobby-card">
+          <header class="lobby-heading">
+            <span class="apple-signet" aria-hidden="true"></span>
+            <div>
+              <p>DESKTOP ROOM DEMO</p>
+              <h1>果园联机房</h1>
+            </div>
+            <span class="demo-chip">HTTP · 2 人</span>
+          </header>
+
+          <div id="lobby-entry-view">
+            <p class="lobby-lead">选择阵营，创建房间或输入好友的六位房间码。</p>
+            <div class="seat-picker" role="group" aria-label="选择阵营">
+              <button class="seat-option selected" data-seat="guards" type="button" aria-pressed="true">
+                <span class="seat-mark guards-mark" aria-hidden="true">×2</span>
+                <strong>守卫队</strong>
+                <small>一人控制两名守卫</small>
+              </button>
+              <button class="seat-option" data-seat="kid" type="button" aria-pressed="false">
+                <span class="seat-mark kid-mark" aria-hidden="true">●</span>
+                <strong>偷果小孩</strong>
+                <small>拾取并送达六个苹果</small>
+              </button>
+            </div>
+
+            <button id="create-room-button" class="primary-action" type="button">创建新房间</button>
+
+            <div class="join-row">
+              <label for="join-room-code">加入房间</label>
+              <input
+                id="join-room-code"
+                type="text"
+                inputmode="text"
+                maxlength="6"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="ABC123"
+                aria-label="六位房间码"
+              />
+              <button id="join-room-button" type="button">加入</button>
+            </div>
+          </div>
+
+          <div id="lobby-room-view" hidden>
+            <div class="room-code-block">
+              <span>邀请房间码</span>
+              <strong id="room-code-value">------</strong>
+              <button id="copy-room-code" type="button">复制</button>
+            </div>
+
+            <div class="room-seats">
+              <div class="room-seat" id="room-seat-guards" data-state="empty">
+                <span class="seat-mark guards-mark" aria-hidden="true">×2</span>
+                <div><strong>守卫队</strong><small>等待加入</small></div>
+              </div>
+              <div class="room-seat" id="room-seat-kid" data-state="empty">
+                <span class="seat-mark kid-mark" aria-hidden="true">●</span>
+                <div><strong>偷果小孩</strong><small>等待加入</small></div>
+              </div>
+            </div>
+
+            <p id="room-phase-message" class="room-phase-message">等待另一位玩家加入。</p>
+            <div class="room-actions">
+              <button id="leave-room-button" type="button">退出房间</button>
+              <button id="ready-button" class="primary-action" type="button">准备</button>
+            </div>
+          </div>
+
+          <div id="lobby-reconnect-view" hidden>
+            <div class="reconnect-glyph" aria-hidden="true"></div>
+            <h2>正在找回房间</h2>
+            <p id="reconnect-message">连接暂时中断，服务端已暂停比赛并保留座位。</p>
+          </div>
+
+          <p id="lobby-error" role="alert"></p>
+          <footer>
+            <span id="online-build-label">协议加载中</span>
+            <a href="/">返回本地同屏</a>
+          </footer>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/online/main.ts"></script>
+  </body>
+</html>
