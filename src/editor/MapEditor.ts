@@ -5,8 +5,12 @@ import {
   type MapPreset,
 } from '../game/maps/MapGenerator';
 import {
+  alignToQuarterTurn,
   cloneOrchardMap,
   insideArena,
+  KAYKIT_BUILDING_ASSETS,
+  KAYKIT_TILE_SHAPES,
+  KAYKIT_WORLD_THEMES,
   landmarkBlocksPoint,
   landmarkInsideArena,
   MAX_MAP_APPLES,
@@ -15,6 +19,9 @@ import {
   MAX_MAP_TREES,
   parseOrchardMap,
   TREE_VARIANTS,
+  type KayKitBuildingAsset,
+  type KayKitTileShape,
+  type KayKitWorldTheme,
   type LandmarkKind,
   type OrchardLandmark,
   type OrchardMap,
@@ -31,6 +38,7 @@ import {
   saveMapToLibrary,
   setActiveMap,
 } from '../systems/MapStorage';
+import { MapPreview3D } from './MapPreview3D';
 
 type EditorTool =
   | 'tree'
@@ -39,6 +47,7 @@ type EditorTool =
   | 'pond'
   | 'orchard'
   | 'meadow'
+  | 'path'
   | 'apple'
   | 'kid'
   | 'guard1'
@@ -58,6 +67,7 @@ const TOOL_KEYS: Record<string, EditorTool> = {
   Digit4: 'pond',
   Digit5: 'orchard',
   Digit6: 'meadow',
+  KeyE: 'path',
   Digit7: 'apple',
   Digit8: 'kid',
   Digit9: 'guard1',
@@ -65,8 +75,24 @@ const TOOL_KEYS: Record<string, EditorTool> = {
   KeyW: 'delivery',
 };
 
+const BUILDING_LABELS: Record<KayKitBuildingAsset, string> = {
+  house: '住宅',
+  market: '集市',
+  farmPlot: '农田',
+  lumbermill: '伐木场',
+  mill: '风车',
+  watermill: '水车',
+  well: '水井',
+  archeryRange: '靶场',
+  barracks: '兵营',
+  watchtower: '瞭望塔',
+  castle: '城堡',
+  mine: '矿山',
+};
+
 export class MapEditor {
   private readonly context: CanvasRenderingContext2D;
+  private readonly preview: MapPreview3D;
   private readonly listeners = new AbortController();
   private readonly resizeObserver: ResizeObserver;
   private readonly nameInput = getElement<HTMLInputElement>('#map-name');
@@ -78,6 +104,10 @@ export class MapEditor {
   private readonly brushInput = getElement<HTMLInputElement>('#brush-size');
   private readonly brushValue = getElement<HTMLOutputElement>('#brush-size-value');
   private readonly treeVariantInput = getElement<HTMLSelectElement>('#tree-variant');
+  private readonly worldThemeInput = getElement<HTMLSelectElement>('#world-theme');
+  private readonly tileShapeInput = getElement<HTMLSelectElement>('#tile-shape');
+  private readonly buildingAssetInput = getElement<HTMLSelectElement>('#building-asset');
+  private readonly buildingRotationInput = getElement<HTMLSelectElement>('#building-rotation');
   private readonly presetInput = getElement<HTMLSelectElement>('#preset-select');
   private readonly seedInput = getElement<HTMLInputElement>('#seed-input');
   private readonly opennessInput = getElement<HTMLInputElement>('#openness-input');
@@ -88,6 +118,8 @@ export class MapEditor {
   private readonly savedMapList = getElement<HTMLElement>('#saved-map-list');
   private readonly importInput = getElement<HTMLInputElement>('#import-input');
   private readonly toast = getElement<HTMLElement>('#editor-toast');
+  private readonly mapLegend = getElement<HTMLElement>('#map-legend');
+  private readonly previewHelp = getElement<HTMLElement>('#preview-help');
 
   private map = loadActiveMap();
   private candidates: OrchardMap[] = [];
@@ -97,21 +129,29 @@ export class MapEditor {
   private pointerWorld: Vec2 | null = null;
   private drawing = false;
   private lastStamp: Vec2 | null = null;
+  private activePathId: string | null = null;
   private serial = 0;
   private toastTimer: number | null = null;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    previewCanvas: HTMLCanvasElement,
+    previewStatus: HTMLElement,
+  ) {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('2D canvas is unavailable.');
     this.context = context;
+    this.preview = new MapPreview3D(previewCanvas, previewStatus);
     this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
   }
 
   start(): void {
     this.nameInput.value = this.map.name;
+    this.syncWorldStyleControls();
     this.bindControls();
     this.resizeObserver.observe(this.canvas.parentElement ?? this.canvas);
     this.resizeCanvas();
+    this.preview.setMap(this.map);
     this.generateCandidates();
     this.renderSavedMaps();
     this.refresh();
@@ -120,6 +160,7 @@ export class MapEditor {
   dispose(): void {
     this.listeners.abort();
     this.resizeObserver.disconnect();
+    this.preview.dispose();
     if (this.toastTimer !== null) window.clearTimeout(this.toastTimer);
   }
 
@@ -135,9 +176,31 @@ export class MapEditor {
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
       button.addEventListener('click', () => this.selectTool(button.dataset.tool as EditorTool), { signal });
     }
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-editor-view]')) {
+      button.addEventListener('click', () => {
+        this.selectView(button.dataset.editorView === '3d' ? '3d' : '2d');
+      }, { signal });
+    }
     this.brushInput.addEventListener('input', () => {
       this.brushValue.value = this.brushSize.toFixed(1);
       this.draw();
+    }, { signal });
+    this.worldThemeInput.addEventListener('change', () => {
+      const theme = this.readWorldTheme();
+      if (theme === this.map.worldStyle.theme) return;
+      this.pushHistory();
+      this.map.worldStyle.theme = theme;
+      this.assignThemeBuildings();
+      this.refresh();
+      this.showToast(`已切换为${worldThemeLabel(theme)}；现有建筑按主题重新分配。`);
+    }, { signal });
+    this.tileShapeInput.addEventListener('change', () => {
+      const tileShape = this.readTileShape();
+      if (tileShape === this.map.worldStyle.tileShape) return;
+      this.pushHistory();
+      this.map.worldStyle.tileShape = tileShape;
+      this.refresh();
+      this.showToast(tileShape === 'square' ? '已切换为方形地块。' : '已切换为六边形地块。');
     }, { signal });
     this.opennessInput.addEventListener('input', () => {
       this.opennessValue.value = `${this.opennessInput.value}%`;
@@ -184,6 +247,11 @@ export class MapEditor {
     if (!this.drawing) return;
     event.preventDefault();
     this.drawing = false;
+    if (this.activePathId) {
+      const path = this.map.paths.find((candidate) => candidate.id === this.activePathId);
+      if (path && path.points.length < 2) this.map.paths = this.map.paths.filter((candidate) => candidate !== path);
+      this.activePathId = null;
+    }
     this.lastStamp = null;
     this.refresh();
   };
@@ -235,6 +303,9 @@ export class MapEditor {
       case 'meadow':
         if (!initial) return;
         this.placeTerrainZone(point, this.tool);
+        break;
+      case 'path':
+        this.placePathPoint(point, initial);
         break;
       case 'apple':
         if (!initial || this.map.appleSpawns.length >= MAX_MAP_APPLES) return;
@@ -305,7 +376,34 @@ export class MapEditor {
     this.map.terrainZones = this.map.terrainZones.filter((zone) =>
       distance(zone, point) > Math.max(radius * 0.45, Math.min(zone.radiusX, zone.radiusZ) * 0.55),
     );
+    this.map.paths = this.map.paths.filter((path) =>
+      distanceToEditorPath(point, path.points) > Math.max(1.2, radius * 0.58),
+    );
     this.lastStamp = { ...point };
+  }
+
+  private placePathPoint(point: Vec2, initial: boolean): void {
+    if (initial) {
+      const id = `path-custom-${Date.now()}-${this.serial}`;
+      this.map.paths.push({
+        id,
+        width: Math.max(3.8, this.brushSize * 1.12),
+        points: [{ ...point }],
+      });
+      this.activePathId = id;
+      this.serial += 1;
+      this.eraseTrees(point, this.brushSize * 0.72 + 0.8);
+      return;
+    }
+    const path = this.map.paths.find((candidate) => candidate.id === this.activePathId);
+    const previous = path?.points[path.points.length - 1];
+    if (!path || !previous || distance(previous, point) < 1.45) return;
+    const next = this.map.worldStyle.tileShape === 'square'
+      ? snapSquareRoadPoint(previous, point)
+      : { ...point };
+    if (distance(previous, next) < 0.8) return;
+    path.points.push(next);
+    this.eraseTrees(next, path.width / 2 + 0.75);
   }
 
   private eraseTrees(point: Vec2, radius: number): void {
@@ -314,11 +412,14 @@ export class MapEditor {
 
   private placeLandmark(point: Vec2, kind: LandmarkKind): void {
     if (this.map.landmarks.length >= MAX_MAP_LANDMARKS) return;
+    const buildingAsset = this.readBuildingAsset();
+    const buildingRotation = Number(this.buildingRotationInput.value) * Math.PI / 2;
     const landmark: OrchardLandmark = {
       id: `landmark-custom-${Date.now()}-${this.serial}`,
       kind,
       ...point,
-      rotationY: (this.serial % 4) * Math.PI / 2,
+      ...(kind === 'homestead' ? { asset: buildingAsset } : {}),
+      rotationY: kind === 'homestead' ? alignToQuarterTurn(buildingRotation) : 0,
       radiusX: kind === 'homestead' ? Math.max(4.5, this.brushSize * 1.15) : Math.max(3.4, this.brushSize),
       radiusZ: kind === 'homestead' ? Math.max(3.5, this.brushSize * 0.88) : Math.max(2.6, this.brushSize * 0.72),
     };
@@ -401,6 +502,7 @@ export class MapEditor {
   private setMap(map: OrchardMap): void {
     this.map = cloneOrchardMap(map);
     this.nameInput.value = this.map.name;
+    this.syncWorldStyleControls();
     this.refresh();
   }
 
@@ -414,6 +516,13 @@ export class MapEditor {
       preset,
       openness: Number(this.opennessInput.value) / 100,
       landmarkDensity: Number(this.landmarkDensityInput.value) / 100,
+    }).map((candidate) => {
+      candidate.worldStyle = {
+        theme: this.readWorldTheme(),
+        tileShape: this.readTileShape(),
+      };
+      assignBuildingsForTheme(candidate, candidate.worldStyle.theme);
+      return candidate;
     });
     this.renderCandidates();
     this.showToast('已生成 4 个可重复的候选地图。点击缩略图选择。');
@@ -464,7 +573,7 @@ export class MapEditor {
       this.showToast('无法把地图设为当前地图。');
       return;
     }
-    window.location.href = '/';
+    window.location.href = '/?world=custom';
   }
 
   private exportMap(): void {
@@ -511,7 +620,7 @@ export class MapEditor {
       const name = document.createElement('strong');
       name.textContent = map.name;
       const meta = document.createElement('small');
-      meta.textContent = `${map.landmarks.length} 地标 · ${treeMixLabel(map)} · ${map.appleSpawns.length} 果实 · seed ${map.seed}`;
+      meta.textContent = `${worldThemeLabel(map.worldStyle.theme)} · ${map.worldStyle.tileShape === 'square' ? '方格' : '六边形'} · ${map.landmarks.length} 地标 · ${treeMixLabel(map)} · ${map.appleSpawns.length} 果实`;
       const actions = document.createElement('div');
       const load = document.createElement('button');
       load.type = 'button';
@@ -539,7 +648,7 @@ export class MapEditor {
     const validation = validateOrchardMap(this.map);
     this.status.dataset.state = validation.valid ? 'valid' : 'invalid';
     this.status.textContent = validation.valid
-      ? `可游玩 · ${this.map.landmarks.length} 地标 · ${this.map.trees.length} 木本点缀（${largeTreeCount(this.map)} 大树） · ${this.map.appleSpawns.length} 果实`
+      ? `可游玩 · ${this.map.worldStyle.tileShape === 'square' ? '方格' : '六边形'} · ${this.map.landmarks.length} 地标 · ${this.map.trees.length} 木本点缀（${largeTreeCount(this.map)} 大树） · ${this.map.appleSpawns.length} 果实`
       : `${validation.errors.length} 个问题需要处理`;
     this.playButton.disabled = !validation.valid;
     this.undoButton.disabled = this.history.length === 0;
@@ -554,7 +663,23 @@ export class MapEditor {
       chip.classList.toggle('error', validation.errors.includes(message));
       this.validationList.append(chip);
     }
+    this.preview.setMap(this.map);
     this.draw();
+  }
+
+  private selectView(view: '2d' | '3d'): void {
+    const previewVisible = view === '3d';
+    this.canvas.hidden = previewVisible;
+    this.mapLegend.hidden = previewVisible;
+    this.previewHelp.hidden = !previewVisible;
+    this.preview.setVisible(previewVisible);
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-editor-view]')) {
+      const active = button.dataset.editorView === view;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+    if (previewVisible) this.preview.setMap(this.map);
+    else this.resizeCanvas();
   }
 
   private resizeCanvas(): void {
@@ -593,6 +718,42 @@ export class MapEditor {
     };
   }
 
+  private syncWorldStyleControls(): void {
+    this.worldThemeInput.value = this.map.worldStyle.theme;
+    this.tileShapeInput.value = this.map.worldStyle.tileShape;
+    const firstBuilding = this.map.landmarks.find((landmark) =>
+      landmark.kind === 'homestead' && landmark.asset);
+    if (firstBuilding?.asset) {
+      this.buildingAssetInput.value = firstBuilding.asset;
+      const quarterTurns = Math.round(alignToQuarterTurn(firstBuilding.rotationY) / (Math.PI / 2));
+      this.buildingRotationInput.value = String((quarterTurns % 4 + 4) % 4);
+    }
+  }
+
+  private readWorldTheme(): KayKitWorldTheme {
+    return KAYKIT_WORLD_THEMES.includes(this.worldThemeInput.value as KayKitWorldTheme)
+      ? this.worldThemeInput.value as KayKitWorldTheme
+      : 'village';
+  }
+
+  private readTileShape(): KayKitTileShape {
+    return KAYKIT_TILE_SHAPES.includes(this.tileShapeInput.value as KayKitTileShape)
+      ? this.tileShapeInput.value as KayKitTileShape
+      : 'square';
+  }
+
+  private readBuildingAsset(): KayKitBuildingAsset {
+    return KAYKIT_BUILDING_ASSETS.includes(this.buildingAssetInput.value as KayKitBuildingAsset)
+      ? this.buildingAssetInput.value as KayKitBuildingAsset
+      : 'house';
+  }
+
+  private assignThemeBuildings(): void {
+    assignBuildingsForTheme(this.map, this.map.worldStyle.theme);
+    const firstBuilding = this.map.landmarks.find((landmark) => landmark.kind === 'homestead');
+    if (firstBuilding?.asset) this.buildingAssetInput.value = firstBuilding.asset;
+  }
+
   private showToast(message: string): void {
     this.toast.textContent = message;
     this.toast.classList.add('visible');
@@ -605,6 +766,28 @@ export class MapEditor {
   }
 }
 
+function assignBuildingsForTheme(map: OrchardMap, theme: KayKitWorldTheme): void {
+  const assets: Record<KayKitWorldTheme, readonly KayKitBuildingAsset[]> = {
+    village: ['house', 'market', 'farmPlot', 'lumbermill', 'well', 'archeryRange'],
+    riverside: ['watermill', 'market', 'mill', 'house', 'well', 'lumbermill'],
+    fortified: ['barracks', 'watchtower', 'castle', 'mine', 'house', 'market'],
+  };
+  let buildingIndex = 0;
+  for (const landmark of map.landmarks) {
+    if (landmark.kind !== 'homestead') continue;
+    const themeAssets = assets[theme];
+    landmark.asset = themeAssets[buildingIndex % themeAssets.length];
+    landmark.rotationY = alignToQuarterTurn(landmark.rotationY);
+    buildingIndex += 1;
+  }
+}
+
+function worldThemeLabel(theme: KayKitWorldTheme): string {
+  if (theme === 'riverside') return '河畔集市';
+  if (theme === 'fortified') return '城堡果园';
+  return '林间村落';
+}
+
 function drawMap(
   context: CanvasRenderingContext2D,
   map: OrchardMap,
@@ -615,7 +798,7 @@ function drawMap(
   detailed: boolean,
 ): void {
   context.clearRect(0, 0, width, height);
-  context.fillStyle = '#718e4c';
+  context.fillStyle = worldBorderColor(map.worldStyle.theme);
   context.fillRect(0, 0, width, height);
   const transform = viewportTransform(width, height);
   const toScreen = (point: Vec2) => ({
@@ -634,7 +817,7 @@ function drawMap(
   );
   context.clip();
 
-  context.fillStyle = '#91ad62';
+  context.fillStyle = worldGroundColor(map.worldStyle.theme);
   context.fillRect(
     topLeft.x,
     topLeft.y,
@@ -642,26 +825,7 @@ function drawMap(
     GAME_CONFIG.arenaHalfDepth * 2 * transform.scale,
   );
 
-  if (detailed) {
-    context.strokeStyle = 'rgba(47, 74, 40, 0.12)';
-    context.lineWidth = 1;
-    for (let x = -GAME_CONFIG.arenaHalfWidth; x <= GAME_CONFIG.arenaHalfWidth; x += 5) {
-      const start = toScreen({ x, z: -GAME_CONFIG.arenaHalfDepth });
-      const end = toScreen({ x, z: GAME_CONFIG.arenaHalfDepth });
-      context.beginPath();
-      context.moveTo(start.x, start.y);
-      context.lineTo(end.x, end.y);
-      context.stroke();
-    }
-    for (let z = -GAME_CONFIG.arenaHalfDepth; z <= GAME_CONFIG.arenaHalfDepth; z += 5) {
-      const start = toScreen({ x: -GAME_CONFIG.arenaHalfWidth, z });
-      const end = toScreen({ x: GAME_CONFIG.arenaHalfWidth, z });
-      context.beginPath();
-      context.moveTo(start.x, start.y);
-      context.lineTo(end.x, end.y);
-      context.stroke();
-    }
-  }
+  if (detailed) drawEditorTileGrid(context, map.worldStyle.tileShape, transform, toScreen);
 
   for (const zone of map.terrainZones) {
     const screen = toScreen(zone);
@@ -765,6 +929,70 @@ function drawMap(
   );
 }
 
+function drawEditorTileGrid(
+  context: CanvasRenderingContext2D,
+  tileShape: KayKitTileShape,
+  transform: ViewportTransform,
+  toScreen: (point: Vec2) => { x: number; y: number },
+): void {
+  context.strokeStyle = 'rgba(35, 65, 45, 0.16)';
+  context.lineWidth = 1;
+  if (tileShape === 'square') {
+    const tileSize = 4;
+    for (let x = -GAME_CONFIG.arenaHalfWidth; x <= GAME_CONFIG.arenaHalfWidth; x += tileSize) {
+      const start = toScreen({ x, z: -GAME_CONFIG.arenaHalfDepth });
+      const end = toScreen({ x, z: GAME_CONFIG.arenaHalfDepth });
+      context.beginPath();
+      context.moveTo(start.x, start.y);
+      context.lineTo(end.x, end.y);
+      context.stroke();
+    }
+    for (let z = -GAME_CONFIG.arenaHalfDepth; z <= GAME_CONFIG.arenaHalfDepth; z += tileSize) {
+      const start = toScreen({ x: -GAME_CONFIG.arenaHalfWidth, z });
+      const end = toScreen({ x: GAME_CONFIG.arenaHalfWidth, z });
+      context.beginPath();
+      context.moveTo(start.x, start.y);
+      context.lineTo(end.x, end.y);
+      context.stroke();
+    }
+    return;
+  }
+
+  const tileWidth = 4.1;
+  const tileDepth = tileWidth * 2 / Math.sqrt(3);
+  const rowSpacing = tileDepth * 0.75;
+  let row = 0;
+  for (let z = -GAME_CONFIG.arenaHalfDepth - tileDepth; z <= GAME_CONFIG.arenaHalfDepth + tileDepth; z += rowSpacing) {
+    const offsetX = row % 2 === 0 ? 0 : tileWidth / 2;
+    for (let x = -GAME_CONFIG.arenaHalfWidth - tileWidth; x <= GAME_CONFIG.arenaHalfWidth + tileWidth; x += tileWidth) {
+      const center = toScreen({ x: x + offsetX, z });
+      context.beginPath();
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        const angle = -Math.PI / 2 + vertex * Math.PI / 3;
+        const pointX = center.x + Math.cos(angle) * tileDepth * 0.5 * transform.scale;
+        const pointY = center.y + Math.sin(angle) * tileDepth * 0.5 * transform.scale;
+        if (vertex === 0) context.moveTo(pointX, pointY);
+        else context.lineTo(pointX, pointY);
+      }
+      context.closePath();
+      context.stroke();
+    }
+    row += 1;
+  }
+}
+
+function worldGroundColor(theme: KayKitWorldTheme): string {
+  if (theme === 'riverside') return '#78bfa9';
+  if (theme === 'fortified') return '#bd8a5d';
+  return '#83c49a';
+}
+
+function worldBorderColor(theme: KayKitWorldTheme): string {
+  if (theme === 'riverside') return '#4f887c';
+  if (theme === 'fortified') return '#806344';
+  return '#597e5c';
+}
+
 function drawLandmark(
   context: CanvasRenderingContext2D,
   landmark: OrchardLandmark,
@@ -829,6 +1057,11 @@ function drawLandmark(
   if (detailed) {
     context.fillStyle = '#4d3425';
     context.fillRect(-houseWidth * 0.1, -depth * 0.22 + houseDepth * 0.08, houseWidth * 0.2, houseDepth * 0.42);
+    context.fillStyle = '#2f2a20';
+    context.font = `800 ${Math.max(9, Math.min(13, scale * 0.82))}px "Microsoft YaHei", sans-serif`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(BUILDING_LABELS[landmark.asset ?? 'house'], 0, depth * 0.33);
   }
   context.restore();
 }
@@ -934,6 +1167,40 @@ function getElement<T extends Element>(selector: string): T {
 
 function distance(first: Vec2, second: Vec2): number {
   return Math.hypot(first.x - second.x, first.z - second.z);
+}
+
+function snapSquareRoadPoint(previous: Vec2, point: Vec2): Vec2 {
+  const deltaX = point.x - previous.x;
+  const deltaZ = point.z - previous.z;
+  return Math.abs(deltaX) >= Math.abs(deltaZ)
+    ? { x: point.x, z: previous.z }
+    : { x: previous.x, z: point.z };
+}
+
+function distanceToEditorPath(point: Vec2, points: readonly Vec2[]): number {
+  if (points.length === 0) return Number.POSITIVE_INFINITY;
+  if (points.length === 1) return distance(point, points[0]);
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < points.length; index += 1) {
+    minimum = Math.min(minimum, distanceToEditorSegment(point, points[index - 1], points[index]));
+  }
+  return minimum;
+}
+
+function distanceToEditorSegment(point: Vec2, start: Vec2, end: Vec2): number {
+  const deltaX = end.x - start.x;
+  const deltaZ = end.z - start.z;
+  const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+  if (lengthSquared <= 0.000001) return distance(point, start);
+  const projection = clamp(
+    ((point.x - start.x) * deltaX + (point.z - start.z) * deltaZ) / lengthSquared,
+    0,
+    1,
+  );
+  return Math.hypot(
+    point.x - (start.x + deltaX * projection),
+    point.z - (start.z + deltaZ * projection),
+  );
 }
 
 function safeFilename(value: string): string {

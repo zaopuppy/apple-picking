@@ -22,7 +22,7 @@
 | 已替换 | Forest Nature Pack 1.0 FREE：`Tree_1_A_Color1`、`Tree_2_B_Color1`、`Tree_3_C_Color1` | [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 保留旧运行时文件作为历史资产；游戏不再加载 | `public/assets/models/kaykit-forest/` | 历史果园树木视觉 |
 | 使用中 | Adventurers Character Pack 2.0 FREE：`Knight`、`Rogue`、`Rig_Medium` 动画 | [KayKit Adventurers](https://kaylousberg.itch.io/kaykit-adventurers)，Kay Lousberg | CC0 1.0 | 2026-08-15 | 分别整理为 `Knight_Guard.glb` 与 `Rogue_Kid.glb`；只合入使用中的 5/4 个动画；两张图集由 1024 × 1024 降采样至 256 × 256；保留 Knight 原生头盔和面罩 | `public/assets/models/kaykit-adventurers/` | guard1、guard2 与 kid 的视觉和动作；碰撞、负重、苹果堆和状态逻辑保持独立 |
 | 使用中 | FREE DOWNLOAD Low poly nature pack：`Cut_0`、`Full_Grow001_2`、`Full_Grow003_7`、`MidGrow005_13`、`APPLE__20` | [Gostbento / Sketchfab](https://sketchfab.com/3d-models/free-download-low-poly-nature-pack-cb45d4926fcb4807bc93126b59325cf8) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 2026-08-15 | 运行时从单个 GLB 提取树桩、阔叶树、松树、樱花树和苹果；树桩缩放到 `0.46` 高，苹果为可读性保留 `0.78` 的风格化高度；障碍按品种实例化 | `public/assets/models/animal-crossing/free_download_low_poly_nature_pack.glb` | 开放果园的树桩与少量大树、可拾取苹果；圆形碰撞代理由地图数据独立维护 |
-| 使用中 | Medieval Builder Pack 1.0：`house.gltf.glb` | [KayKit Medieval Builder Pack](https://kaylousberg.itch.io/kaykit-medieval-builder-pack)，Kay Lousberg | CC0 1.0 | 2026-08-16 | 只整理自由摆放版本的小屋并重命名为 `house.glb`；运行时按房屋小院宽度统一缩放、落地和居中，不引入六边形/方形地台 | `public/assets/models/kaykit-medieval/` | 游戏与地图编辑器生成地图中的“房屋小院”视觉；院落围栏和矩形碰撞代理仍由项目代码维护 |
+| 使用中 | Medieval Builder Pack 1.0：小屋、建筑/城墙道具与精选六边形地块 | [KayKit Medieval Builder Pack](https://kaylousberg.itch.io/kaykit-medieval-builder-pack)，Kay Lousberg | CC0 1.0 | 2026-08-16 | 保留独立 `house.glb`，另从对象与六边形地块中精选 24 个候选资源；运行时实例化地块并按语义地标缩放、落地和居中，不提交完整源包 | `public/assets/models/kaykit-medieval/` | 默认地图的房屋，以及三套可玩世界试验场；碰撞代理仍由地图数据独立维护 |
 
 原始许可证副本保存在：
 
@@ -61,6 +61,16 @@
 - 导入成功后只隐藏程序化小屋本体，继续保留项目原有院落地面、外圈围栏和灌木；房屋和院落仍共用地图中的矩形阻挡区，模型网格不参与确定性碰撞；
 - 模型请求或解析失败时继续显示程序化小屋，诊断字段会记录失败；`?landmarks=procedural` 可强制检查回退；
 - 编辑器的“房屋小院”工具、随机生成器和地图 JSON 结构没有新增资产专用字段，所以旧地图会自动获得新小屋视觉，并保持可导入导出。
+
+## KayKit 世界试验场
+
+- 完整发布源包的 226 个 GLB：objects 30、hex 128、square 68，总计 3,965,144 bytes；`public/assets/models/kaykit-medieval/catalog.json` 是运行时和后续编辑器共用的文件目录；
+- 默认 `/` 进入林间村落，另外两套候选通过 `?world=medieval&layout=riverside|fortified` 进入；`?world=classic` 运行本地编辑器保存的 v4 地图；
+- 单张地图按语义使用目录中的相关模型，不把全部变体同时加载。完整资源库用于主题生成、自动铺地和后续编辑器资产面板；
+- 六边形地面按模型原始尖顶朝向无缝实例化；道路先使用宽沙土地块表达活动带，正式自动拼路延后到语义编辑器阶段；
+- KayKit 建筑只放进 `homestead` 的不可进入矩形，水面只覆盖 `pond` 的不可进入椭圆，城墙位于竞技场夹紧边界；模型网格不直接进入确定性模拟；
+- 世界资源加载失败时完整保留程序化地面、路径、围栏和地标；诊断字段记录世界模式、候选、实例数、资产请求与失败原因；
+- 迁移设计、迭代状态和多投递区 v5 预留记录在 `docs/2026-08-16_kaykit-world-migration.md`。
 
 ## 阶段 2 资产结果
 

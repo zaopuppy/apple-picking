@@ -32,15 +32,57 @@
           <div id="tool-list" class="tool-list">
             <button class="tool active" data-tool="tree" type="button"><b>♣</b><span>种树<small>1</small></span></button>
             <button class="tool" data-tool="erase" type="button"><b>⌫</b><span>擦除<small>2</small></span></button>
-            <button class="tool" data-tool="homestead" type="button"><b>⌂</b><span>房屋小院<small>3</small></span></button>
+            <button class="tool" data-tool="homestead" type="button"><b>⌂</b><span>KayKit 建筑<small>3</small></span></button>
             <button class="tool" data-tool="pond" type="button"><b>◉</b><span>池塘<small>4</small></span></button>
             <button class="tool" data-tool="orchard" type="button"><b>▥</b><span>果园地块<small>5</small></span></button>
             <button class="tool" data-tool="meadow" type="button"><b>◯</b><span>草地空场<small>6</small></span></button>
+            <button class="tool" data-tool="path" type="button"><b>≋</b><span>铺设宽路<small>E</small></span></button>
             <button class="tool" data-tool="apple" type="button"><b>●</b><span>果实<small>7</small></span></button>
             <button class="tool" data-tool="kid" type="button"><b>◆</b><span>小偷起点<small>8</small></span></button>
             <button class="tool" data-tool="guard1" type="button"><b>▲</b><span>守卫一<small>9</small></span></button>
             <button class="tool" data-tool="guard2" type="button"><b>▲</b><span>守卫二<small>Q</small></span></button>
             <button class="tool" data-tool="delivery" type="button"><b>◎</b><span>投递区<small>W</small></span></button>
+          </div>
+
+          <div class="world-style-grid" aria-label="KayKit 世界样式">
+            <label for="world-theme">世界主题
+              <select id="world-theme">
+                <option value="village">林间村落</option>
+                <option value="riverside">河畔集市</option>
+                <option value="fortified">城堡果园</option>
+              </select>
+            </label>
+            <label for="tile-shape">地块形状
+              <select id="tile-shape">
+                <option value="square">方形地块（推荐）</option>
+                <option value="hex">六边形地块</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="control-block building-controls">
+            <label for="building-asset">建筑模型</label>
+            <select id="building-asset">
+              <option value="house">住宅</option>
+              <option value="market">集市</option>
+              <option value="farmPlot">农田</option>
+              <option value="lumbermill">伐木场</option>
+              <option value="mill">风车磨坊</option>
+              <option value="watermill">水车磨坊</option>
+              <option value="well">水井</option>
+              <option value="archeryRange">靶场</option>
+              <option value="barracks">兵营</option>
+              <option value="watchtower">瞭望塔</option>
+              <option value="castle">城堡</option>
+              <option value="mine">矿山入口</option>
+            </select>
+            <label for="building-rotation">建筑朝向</label>
+            <select id="building-rotation">
+              <option value="0">正向 0°</option>
+              <option value="1">右转 90°</option>
+              <option value="2">背向 180°</option>
+              <option value="3">左转 270°</option>
+            </select>
           </div>
 
           <div class="control-block">
@@ -56,7 +98,7 @@
             <label for="brush-size">画笔半径 <output id="brush-size-value">4.5</output></label>
             <input id="brush-size" type="range" min="1.5" max="11" step="0.5" value="4.5" />
           </div>
-          <p class="tool-hint">开放地形是主体。房屋小院与池塘不可进入；树桩和大树只用于边界点缀。</p>
+          <p class="tool-hint">先在 2D 中画宽路和放建筑，再切到 3D 检查比例。方格道路会自动选择直路、弯道、T 字口与十字口。</p>
         </aside>
 
         <section class="map-board">
@@ -65,11 +107,20 @@
               <span>地图名称</span>
               <input id="map-name" maxlength="40" value="我的果园" />
             </label>
-            <div id="map-status" class="map-status" data-state="checking">正在检查路径…</div>
+            <div class="map-meta-actions">
+              <div class="view-switch" role="group" aria-label="地图视图">
+                <button class="active" type="button" data-editor-view="2d" aria-pressed="true">2D 编辑</button>
+                <button type="button" data-editor-view="3d" aria-pressed="false">3D 预览</button>
+              </div>
+              <div id="map-status" class="map-status" data-state="checking">正在检查路径…</div>
+            </div>
           </div>
           <div id="canvas-shell" class="canvas-shell">
             <canvas id="map-editor-canvas" aria-label="果园地图编辑画布"></canvas>
-            <div class="map-legend" aria-hidden="true">
+            <canvas id="map-preview-canvas" aria-label="KayKit 地图三维预览" hidden></canvas>
+            <div id="preview-status" class="preview-status" hidden>正在准备 3D 预览…</div>
+            <div id="preview-help" class="preview-help" hidden>拖拽旋转 · 滚轮缩放 · 右键平移</div>
+            <div id="map-legend" class="map-legend" aria-hidden="true">
               <span><i class="legend-kid"></i>小偷</span>
               <span><i class="legend-guard"></i>守卫</span>
               <span><i class="legend-apple"></i>果实</span>

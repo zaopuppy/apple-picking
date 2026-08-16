@@ -11,9 +11,12 @@ test('map editor renders a valid open orchard without viewport overflow', async 
   await page.goto('/editor.html');
   await expect(page.getByRole('heading', { name: '果园地图工坊' })).toBeVisible();
   await expect(page.getByLabel('果园地图编辑画布')).toBeVisible();
-  await expect(page.getByText('可游玩 · 2 地标 · 93 木本点缀（7 大树） · 6 果实')).toBeVisible();
+  await expect(page.getByText('可游玩 · 方格 · 2 地标 · 57 木本点缀（4 大树） · 6 果实')).toBeVisible();
   await expect(page.getByText('全部 9 个关键目标可达。')).toBeVisible();
   await expect(page.getByRole('button', { name: '使用并游玩' })).toBeEnabled();
+  await expect(page.getByLabel('世界主题')).toHaveValue('village');
+  await expect(page.getByLabel('地块形状')).toHaveValue('square');
+  await expect(page.getByLabel('建筑模型')).toHaveValue(/.+/);
 
   const overflow = await page.evaluate(() => ({
     body: document.documentElement.scrollWidth - window.innerWidth,
@@ -43,8 +46,85 @@ test('map editor renders a valid open orchard without viewport overflow', async 
   expect(overflow.main).toBeGreaterThan(0);
   expect(canvasMetrics?.cssHeight).toBeLessThanOrEqual((canvasMetrics?.viewportHeight ?? 0) + 1);
   expect(canvasMetrics?.colorBuckets).toBeGreaterThan(8);
+  await page.getByRole('button', { name: '3D 预览' }).click();
+  const preview = page.getByLabel('KayKit 地图三维预览');
+  await expect(preview).toBeVisible();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(page.locator('#preview-status')).toContainText('3D 已同步');
+  await page.getByRole('button', { name: '2D 编辑' }).click();
+  await expect(page.getByLabel('果园地图编辑画布')).toBeVisible();
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test('manual KayKit building and square world settings persist into the playable map', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Manual KayKit authoring only needs one installed Chrome run.');
+  await page.goto('/editor.html');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  const editableMap = await page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0];
+    return {
+      ...map,
+      id: 'manual-kaykit-test',
+      name: '手工 KayKit 验收',
+      trees: [],
+      landmarks: [],
+      paths: [],
+    };
+  });
+  await page.locator('#import-input').setInputFiles({
+    name: 'manual-kaykit.orchard.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(editableMap)),
+  });
+
+  await page.getByLabel('世界主题').selectOption('fortified');
+  await page.getByLabel('地块形状').selectOption('square');
+  await page.getByLabel('建筑模型').selectOption('castle');
+  await page.getByLabel('建筑朝向').selectOption('1');
+  const canvas = page.getByLabel('果园地图编辑画布');
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  await page.getByRole('button', { name: /铺设宽路 E/ }).click();
+  if (box) {
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.48);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.68, box.y + box.height * 0.48, { steps: 6 });
+    await page.mouse.up();
+  }
+  await page.getByRole('button', { name: /KayKit 建筑 3/ }).click();
+  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+  await expect(page.getByText(/可游玩 · 方格 · 1 地标/)).toBeVisible();
+  await page.getByRole('button', { name: '3D 预览' }).click();
+  const preview = page.getByLabel('KayKit 地图三维预览');
+  await expect(preview).toBeVisible();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0]);
+  expect(saved.worldStyle).toEqual({ theme: 'fortified', tileShape: 'square' });
+  expect(saved.landmarks).toHaveLength(1);
+  expect(saved.paths).toHaveLength(1);
+  expect(saved.paths[0].points.length).toBeGreaterThan(1);
+  expect(saved.landmarks[0]).toMatchObject({
+    kind: 'homestead',
+    asset: 'castle',
+    rotationY: Math.PI / 2,
+  });
+
+  await Promise.all([
+    page.waitForURL((url) => url.searchParams.get('world') === 'custom'),
+    page.getByRole('button', { name: '使用并游玩' }).click(),
+  ]);
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
+    .toMatchObject({
+      mapName: '手工 KayKit 验收',
+      worldMode: 'medieval',
+      worldPreset: 'fortified',
+      worldTileShape: 'square',
+    });
 });
 
 test('map editor candidates, drawing, undo, save and play flow work together', async ({ page }, testInfo) => {
@@ -61,12 +141,12 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   await candidateButtons.first().click();
   await expect(page.getByRole('button', { name: '撤销' })).toBeEnabled();
   await page.getByRole('button', { name: '撤销' }).click();
-  await expect(page.getByText('可游玩 · 2 地标 · 93 木本点缀（7 大树） · 6 果实')).toBeVisible();
+  await expect(page.getByText('可游玩 · 方格 · 2 地标 · 57 木本点缀（4 大树） · 6 果实')).toBeVisible();
 
   await page.locator('#landmark-density-input').fill('20');
   await page.getByRole('button', { name: '从十二张中筛选四张' }).click();
   await candidateButtons.first().click();
-  await expect(page.getByText(/可游玩 · \d+ 地标 · \d+ 木本点缀（\d+ 大树） · 6 果实/)).toBeVisible();
+  await expect(page.getByText(/可游玩 · 方格 · \d+ 地标 · \d+ 木本点缀（\d+ 大树） · 6 果实/)).toBeVisible();
   await expect(page.getByRole('button', { name: '使用并游玩' })).toBeEnabled();
   await page.getByRole('button', { name: '撤销' }).click();
 
@@ -80,6 +160,11 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   await expect(page.getByRole('button', { name: '撤销' })).toBeEnabled();
   await page.getByRole('button', { name: '撤销' }).click();
   await page.getByRole('button', { name: '重做' }).click();
+  await page.getByLabel('地块形状').selectOption('hex');
+  await expect(page.getByText(/可游玩 · 六边形/)).toBeVisible();
+  await page.getByLabel('地块形状').selectOption('square');
+  await page.getByLabel('世界主题').selectOption('fortified');
+  await expect(page.getByText(/可游玩 · 方格/)).toBeVisible();
 
   await page.getByRole('textbox', { name: '地图名称' }).fill('自动验收果园');
   await page.getByRole('button', { name: '保存地图' }).click();
@@ -88,10 +173,16 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
     JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0],
   );
   expect(semanticMap.version).toBe(4);
+  expect(semanticMap.worldStyle).toEqual({ theme: 'fortified', tileShape: 'square' });
   expect(semanticMap.landmarks.map((landmark: { kind: string }) => landmark.kind)).toEqual(
     expect.arrayContaining(['homestead', 'pond']),
   );
   expect(semanticMap.terrainZones.some((zone: { kind: string }) => zone.kind === 'meadow')).toBe(true);
+  expect(semanticMap.paths.length).toBeGreaterThanOrEqual(2);
+  for (const landmark of semanticMap.landmarks.filter((entry: { kind: string }) => entry.kind === 'homestead')) {
+    expect(landmark.asset).toBeTruthy();
+    expect(landmark.rotationY / (Math.PI / 2)).toBeCloseTo(Math.round(landmark.rotationY / (Math.PI / 2)));
+  }
 
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: '导出' }).click();
@@ -110,13 +201,20 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   await expect(page.getByRole('textbox', { name: '地图名称' })).toHaveValue('导入验收果园');
 
   await Promise.all([
-    page.waitForURL((url) => url.pathname === '/'),
+    page.waitForURL((url) => url.pathname === '/' && url.searchParams.get('world') === 'custom'),
     page.getByRole('button', { name: '使用并游玩' }).click(),
   ]);
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.mapName))
     .toBe('导入验收果园');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
+    .toMatchObject({
+      worldMode: 'medieval',
+      worldPreset: 'fortified',
+      worldTileShape: 'square',
+    });
 });
 
 test('legacy editor maps keep their layout and gain dense stump fill', async ({ page }, testInfo) => {
@@ -164,7 +262,7 @@ test('legacy editor maps keep their layout and gain dense stump fill', async ({ 
 
   await page.reload();
   await expect(page.getByRole('textbox', { name: '地图名称' })).toHaveValue('旧版迁移测试 · 扩展版');
-  await expect(page.getByText(/可游玩 · 0 地标 · [3-9]\d{2} 木本点缀（5 大树） · 6 果实/)).toBeVisible();
+  await expect(page.getByText(/可游玩 · 方格 · 0 地标 · [3-9]\d{2} 木本点缀（3 大树） · 6 果实/)).toBeVisible();
   await expect(page.getByText('全部 9 个关键目标可达。')).toBeVisible();
   const migrated = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('apple-picking.active-map.v4') ?? 'null'),
@@ -218,7 +316,7 @@ test('five-times maps compact to the three-times arena without drifting key poin
 
   await page.reload();
   await expect(page.getByRole('textbox', { name: '地图名称' })).toHaveValue('五倍迁移测试 · 三倍版');
-  await expect(page.getByText(/可游玩 · 0 地标 · [3-9]\d{2} 木本点缀（7 大树） · 6 果实/)).toBeVisible();
+  await expect(page.getByText(/可游玩 · 方格 · 0 地标 · [3-9]\d{2} 木本点缀（4 大树） · 6 果实/)).toBeVisible();
   await expect(page.getByText('全部 9 个关键目标可达。')).toBeVisible();
   const migrated = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('apple-picking.active-map.v4') ?? 'null'),

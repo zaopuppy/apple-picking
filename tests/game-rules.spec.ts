@@ -6,7 +6,7 @@ const distance = (first: { x: number; z: number }, second: { x: number; z: numbe
 test.describe('deterministic apple-picking rules', () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', 'Rules run once in the desktop simulation.');
-    await page.goto('/');
+    await page.goto('/?world=classic');
     await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
     await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
   });

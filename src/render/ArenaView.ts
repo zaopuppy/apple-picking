@@ -4,8 +4,18 @@ import {
   loadNaturePackTreeVisuals,
 } from '../assets/NaturePackAssets';
 import { createMedievalHouseVisual } from '../assets/MedievalBuilderAssets';
+import { createMedievalWorldVisual } from '../assets/MedievalWorldAssets';
 import { GAME_CONFIG } from '../game/config';
-import type { OrchardMap, OrchardTree, TreeVariant } from '../game/maps/OrchardMap';
+import {
+  resolveMedievalWorldMap,
+  type MedievalWorldPreset,
+} from '../game/maps/MedievalWorldExperiments';
+import type {
+  KayKitTileShape,
+  OrchardMap,
+  OrchardTree,
+  TreeVariant,
+} from '../game/maps/OrchardMap';
 import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../game/types';
 import { VfxSystem } from '../systems/VfxSystem';
 import { disposeObject3D } from '../utils/dispose';
@@ -82,6 +92,18 @@ export type EnvironmentAssetDiagnostics = {
     depth: number;
   } | null;
   landmarkLastFailure: string | null;
+  worldMode: 'procedural' | 'loading' | 'medieval';
+  worldPreset: MedievalWorldPreset | null;
+  worldTileInstances: number;
+  worldPropInstances: number;
+  worldMeshes: number;
+  worldTriangles: number;
+  worldMaterials: number;
+  worldTextures: number;
+  worldAssetRequests: number;
+  worldCatalogAssets: number;
+  worldTileShape: KayKitTileShape | null;
+  worldLastFailure: string | null;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -123,8 +145,10 @@ export class ArenaView {
   private readonly vfx: VfxSystem;
   private readonly matrixDummy = new THREE.Object3D();
   private readonly appleTarget = new THREE.Vector3();
+  private readonly proceduralWorldVisuals = new THREE.Group();
   private readonly proceduralTreeVisuals = new THREE.Group();
   private readonly importedGuardViews = new Map<ImportedGuardId, ImportedGuardView>();
+  private readonly worldPreset: MedievalWorldPreset | null;
   private importedKidView: ImportedKidView | null = null;
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
@@ -154,6 +178,18 @@ export class ArenaView {
     landmarkAssetTextures: 0,
     landmarkHouseBounds: null,
     landmarkLastFailure: null,
+    worldMode: 'procedural',
+    worldPreset: null,
+    worldTileInstances: 0,
+    worldPropInstances: 0,
+    worldMeshes: 0,
+    worldTriangles: 0,
+    worldMaterials: 0,
+    worldTextures: 0,
+    worldAssetRequests: 0,
+    worldCatalogAssets: 0,
+    worldTileShape: null,
+    worldLastFailure: null,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -178,6 +214,7 @@ export class ArenaView {
     lastFailures: { guard1: null, guard2: null, kid: null },
   };
   constructor(scene: THREE.Scene, private readonly map: OrchardMap) {
+    this.worldPreset = resolveMedievalWorldMap(map)?.preset ?? null;
     this.environmentDiagnostics = {
       ...this.environmentDiagnostics,
       treeInstances: map.trees.length,
@@ -190,6 +227,7 @@ export class ArenaView {
       clearings: map.clearings.length,
       landmarks: map.landmarks.length,
       terrainZones: map.terrainZones.length,
+      worldPreset: this.worldPreset,
     };
     this.createWorld();
     void this.installImportedGuard('guard1');
@@ -389,6 +427,8 @@ export class ArenaView {
   }
 
   private createWorld(): void {
+    this.proceduralWorldVisuals.name = 'procedural-world-fallback';
+    this.root.add(this.proceduralWorldVisuals);
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(FIELD_GROUND_SIZE, FIELD_GROUND_SIZE),
       this.materials.grass,
@@ -396,7 +436,7 @@ export class ArenaView {
     floor.name = 'full-viewport-field-ground';
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
-    this.root.add(floor);
+    this.proceduralWorldVisuals.add(floor);
 
     this.createTerrainZones();
     this.createGroundPaths();
@@ -404,6 +444,49 @@ export class ArenaView {
     this.createLandmarks();
     this.createForest();
     this.createDeliveryZone();
+    if (this.worldPreset) {
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        externalRequested: true,
+        worldMode: 'loading',
+      };
+      void this.installMedievalWorld(this.worldPreset);
+    }
+  }
+
+  private async installMedievalWorld(preset: MedievalWorldPreset): Promise<void> {
+    try {
+      const imported = await createMedievalWorldVisual(preset, this.map);
+      if (this.disposed) {
+        disposeObject3D(imported.root);
+        return;
+      }
+      this.proceduralWorldVisuals.visible = false;
+      this.root.add(imported.root);
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        worldMode: 'medieval',
+        worldPreset: preset,
+        worldTileInstances: imported.tileInstances,
+        worldPropInstances: imported.propInstances,
+        worldMeshes: imported.meshes,
+        worldTriangles: imported.triangles,
+        worldMaterials: imported.materials,
+        worldTextures: imported.textures,
+        worldAssetRequests: imported.assetRequests,
+        worldCatalogAssets: imported.catalogAssets,
+        worldTileShape: imported.tileShape,
+        worldLastFailure: null,
+      };
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : String(error);
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        worldMode: 'procedural',
+        worldLastFailure: failure,
+        lastFailure: failure,
+      };
+    }
   }
 
   private createTerrainZones(): void {
@@ -433,7 +516,7 @@ export class ArenaView {
         );
       });
       zoneMeshes.instanceMatrix.needsUpdate = true;
-      this.root.add(zoneMeshes);
+      this.proceduralWorldVisuals.add(zoneMeshes);
     }
 
     const orchardZones = this.map.terrainZones.filter((zone) => zone.kind === 'orchard');
@@ -468,7 +551,7 @@ export class ArenaView {
       );
     });
     furrows.instanceMatrix.needsUpdate = true;
-    this.root.add(furrows);
+    this.proceduralWorldVisuals.add(furrows);
   }
 
   private createLandmarks(): void {
@@ -478,9 +561,10 @@ export class ArenaView {
       landmarkMeshes: visuals.meshes,
       landmarkTriangles: visuals.triangles,
     };
-    this.root.add(visuals.root);
+    this.proceduralWorldVisuals.add(visuals.root);
     if (
       visuals.homesteads.length === 0 ||
+      this.worldPreset !== null ||
       new URLSearchParams(window.location.search).get('landmarks') === 'procedural'
     ) return;
     this.environmentDiagnostics = {
@@ -578,7 +662,7 @@ export class ArenaView {
       fence.setMatrixAt(index, this.matrixDummy.matrix);
     });
     fence.instanceMatrix.needsUpdate = true;
-    this.root.add(fence);
+    this.proceduralWorldVisuals.add(fence);
   }
 
   private createGroundPaths(): void {
@@ -635,7 +719,7 @@ export class ArenaView {
       );
     });
     clearings.instanceMatrix.needsUpdate = true;
-    this.root.add(segments, clearings);
+    this.proceduralWorldVisuals.add(segments, clearings);
   }
 
   private createForest(): void {

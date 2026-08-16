@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test.describe('keyboard controls', () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', 'Keyboard controls run once on desktop.');
-    await page.goto('/');
+    await page.goto('/?world=classic');
     await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   });
 

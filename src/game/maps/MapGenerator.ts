@@ -2,6 +2,7 @@ import { createSeededRandom } from '../../utils/random';
 import { ARENA_SCALE, GAME_CONFIG } from '../config';
 import type { Vec2 } from '../types';
 import {
+  alignToQuarterTurn,
   cloneOrchardMap,
   insideArena,
   landmarkBlocksPoint,
@@ -9,9 +10,11 @@ import {
   MAX_MAP_TREES,
   ORCHARD_MAP_VERSION,
   treeColliderRadius,
+  type KayKitBuildingAsset,
   type LandmarkKind,
   type OrchardLandmark,
   type OrchardMap,
+  type OrchardPath,
   type OrchardTerrainZone,
   type OrchardTree,
   type TerrainZoneKind,
@@ -99,20 +102,27 @@ export function generateOrchardMap(options: MapGenerationOptions): OrchardMap {
     importantPoints,
     random,
   );
-  const trees = plantOpenLandscape(
+  const paths = createGeneratedPaths(options.preset, landmarks);
+  const plantedTrees = plantOpenLandscape(
     terrainZones,
     landmarks,
     importantPoints,
     openness,
     random,
   );
+  const trees = plantedTrees.filter((tree) => paths.every((path) =>
+    distanceToGeneratedPath(tree, path) > path.width / 2 + 0.7));
   const map: OrchardMap = {
     version: ORCHARD_MAP_VERSION,
     id: `orchard-${seed}-${options.preset}`,
     name: options.name?.trim() || `${presetName(options.preset)} · ${seed}`,
     seed,
+    worldStyle: {
+      theme: themeForPreset(options.preset),
+      tileShape: 'square',
+    },
     trees,
-    paths: [],
+    paths,
     clearings: [],
     landmarks,
     terrainZones,
@@ -122,6 +132,122 @@ export function generateOrchardMap(options: MapGenerationOptions): OrchardMap {
     deliveryZone: { ...DELIVERY_ZONE },
   };
   return cloneOrchardMap(map);
+}
+
+function createGeneratedPaths(
+  preset: MapPreset,
+  landmarks: readonly OrchardLandmark[],
+): OrchardPath[] {
+  const templates: Record<MapPreset, OrchardPath[]> = {
+    village: [
+      {
+        id: 'generated-main-road',
+        width: 5.2,
+        points: [
+          { x: -34, z: 4 },
+          { x: 34, z: 4 },
+        ],
+      },
+      {
+        id: 'generated-cross-road',
+        width: 4.6,
+        points: [
+          { x: 2, z: -26 },
+          { x: 2, z: 26 },
+        ],
+      },
+    ],
+    'pond-garden': [
+      {
+        id: 'generated-main-road',
+        width: 5.2,
+        points: [
+          { x: -34, z: 8 },
+          { x: -10, z: 8 },
+          { x: -10, z: 14 },
+          { x: 34, z: 14 },
+        ],
+      },
+      {
+        id: 'generated-cross-road',
+        width: 4.5,
+        points: [
+          { x: -20, z: -26 },
+          { x: -20, z: 8 },
+          { x: -10, z: 8 },
+        ],
+      },
+    ],
+    'open-orchard': [
+      {
+        id: 'generated-main-road',
+        width: 5.6,
+        points: [
+          { x: -34, z: 3 },
+          { x: 34, z: 3 },
+        ],
+      },
+      {
+        id: 'generated-cross-road',
+        width: 4.8,
+        points: [
+          { x: 0, z: -26 },
+          { x: 0, z: 26 },
+        ],
+      },
+    ],
+  };
+  const paths = templates[preset].map((path) => ({
+    ...path,
+    points: path.points.map((point) => ({ ...point })),
+  }));
+  landmarks.filter((landmark) => landmark.kind === 'homestead').forEach((landmark, index) => {
+    const nearest = paths
+      .flatMap((path) => closestPointsOnPath(path, landmark))
+      .reduce((best, point) => distance(point, landmark) < distance(best, landmark) ? point : best);
+    const deltaX = landmark.x - nearest.x;
+    const deltaZ = landmark.z - nearest.z;
+    const length = Math.max(0.001, Math.hypot(deltaX, deltaZ));
+    const stopDistance = Math.max(landmark.radiusX, landmark.radiusZ) + 1.6;
+    const approach = {
+      x: landmark.x - deltaX / length * stopDistance,
+      z: landmark.z - deltaZ / length * stopDistance,
+    };
+    const elbow = Math.abs(deltaX) >= Math.abs(deltaZ)
+      ? { x: approach.x, z: nearest.z }
+      : { x: nearest.x, z: approach.z };
+    const points = [{ ...nearest }, elbow, approach].filter((point, pointIndex, entries) =>
+      pointIndex === 0 || distance(point, entries[pointIndex - 1]) > 0.1);
+    paths.push({
+      id: `generated-building-road-${index}`,
+      width: 4.2,
+      points,
+    });
+  });
+  return paths;
+}
+
+function closestPointsOnPath(path: OrchardPath, point: Vec2): Vec2[] {
+  const closestPoints: Vec2[] = [];
+  for (let index = 1; index < path.points.length; index += 1) {
+    const start = path.points[index - 1];
+    const end = path.points[index];
+    const deltaX = end.x - start.x;
+    const deltaZ = end.z - start.z;
+    const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+    const progress = lengthSquared <= 0.001
+      ? 0
+      : clamp(
+        ((point.x - start.x) * deltaX + (point.z - start.z) * deltaZ) / lengthSquared,
+        0,
+        1,
+      );
+    closestPoints.push({
+      x: start.x + deltaX * progress,
+      z: start.z + deltaZ * progress,
+    });
+  }
+  return closestPoints.length > 0 ? closestPoints : path.points.map((entry) => ({ ...entry }));
 }
 
 export function presetName(preset: MapPreset): string {
@@ -219,14 +345,20 @@ function createLandmarks(
     const kind = landmarkKind(preset, landmarks.length, random());
     const radiusX = kind === 'homestead' ? lerp(4.5, 5.7, random()) : lerp(3.4, 5, random());
     const radiusZ = kind === 'homestead' ? lerp(3.5, 4.5, random()) : lerp(2.6, 4, random());
+    const x = jitter(random, GAME_CONFIG.arenaHalfWidth - radiusX - 2);
+    const z = kind === 'homestead'
+      ? lerp(-GAME_CONFIG.arenaHalfDepth + radiusZ + 2, -5.5, random())
+      : jitter(random, GAME_CONFIG.arenaHalfDepth - radiusZ - 2);
+    const legacyRotation = Math.round(random() * 3) * Math.PI / 2 + jitter(random, 0.08);
     const candidate: OrchardLandmark = {
       id: `landmark-${landmarks.length}`,
       kind,
-      x: jitter(random, GAME_CONFIG.arenaHalfWidth - radiusX - 2),
-      z: kind === 'homestead'
-        ? lerp(-GAME_CONFIG.arenaHalfDepth + radiusZ + 2, -5.5, random())
-        : jitter(random, GAME_CONFIG.arenaHalfDepth - radiusZ - 2),
-      rotationY: Math.round(random() * 3) * Math.PI / 2 + jitter(random, 0.08),
+      x,
+      z,
+      ...(kind === 'homestead' ? { asset: buildingForPreset(preset, landmarks.length) } : {}),
+      rotationY: kind === 'homestead'
+        ? alignToQuarterTurn(legacyRotation)
+        : legacyRotation,
       radiusX,
       radiusZ,
     };
@@ -242,6 +374,22 @@ function createLandmarks(
     usedBudget += cost;
   }
   return landmarks;
+}
+
+function themeForPreset(preset: MapPreset): OrchardMap['worldStyle']['theme'] {
+  if (preset === 'pond-garden') return 'riverside';
+  if (preset === 'open-orchard') return 'fortified';
+  return 'village';
+}
+
+function buildingForPreset(preset: MapPreset, index: number): KayKitBuildingAsset {
+  const assets: Record<MapPreset, readonly KayKitBuildingAsset[]> = {
+    village: ['house', 'market', 'farmPlot', 'lumbermill', 'well'],
+    'pond-garden': ['watermill', 'market', 'mill', 'house', 'well'],
+    'open-orchard': ['barracks', 'watchtower', 'castle', 'mine', 'house'],
+  };
+  const themeAssets = assets[preset];
+  return themeAssets[index % themeAssets.length];
 }
 
 function landmarkKind(preset: MapPreset, index: number, roll: number): LandmarkKind {
@@ -261,7 +409,7 @@ function plantOpenLandscape(
   const arenaArea = GAME_CONFIG.arenaHalfWidth * 2 * GAME_CONFIG.arenaHalfDepth * 2;
   const targetCount = Math.min(
     MAX_MAP_TREES,
-    Math.round(arenaArea * (0.014 + (1 - openness) * 0.055)),
+    Math.round(arenaArea * (0.01 + (1 - openness) * 0.045)),
   );
   const trees: OrchardTree[] = [];
 
@@ -411,6 +559,33 @@ function candidateSignature(map: OrchardMap): string {
 
 function scalePoint(point: Vec2, scale: number): Vec2 {
   return { x: point.x * scale, z: point.z * scale };
+}
+
+function distanceToGeneratedPath(point: Vec2, path: OrchardPath): number {
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < path.points.length; index += 1) {
+    minimum = Math.min(
+      minimum,
+      distanceToGeneratedSegment(point, path.points[index - 1], path.points[index]),
+    );
+  }
+  return minimum;
+}
+
+function distanceToGeneratedSegment(point: Vec2, start: Vec2, end: Vec2): number {
+  const deltaX = end.x - start.x;
+  const deltaZ = end.z - start.z;
+  const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+  if (lengthSquared <= 0.000001) return distance(point, start);
+  const projection = clamp(
+    ((point.x - start.x) * deltaX + (point.z - start.z) * deltaZ) / lengthSquared,
+    0,
+    1,
+  );
+  return Math.hypot(
+    point.x - (start.x + deltaX * projection),
+    point.z - (start.z + deltaZ * projection),
+  );
 }
 
 function distance(first: Vec2, second: Vec2): number {

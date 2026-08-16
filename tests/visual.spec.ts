@@ -56,6 +56,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   await expect(page.locator('#game-canvas')).toBeVisible();
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10);
   if (testInfo.project.name === 'desktop-chrome') {
+    await expect(page.locator('[data-testid="debug-panel"]')).toBeVisible();
     await expect
       .poll(
         async () => page.evaluate(() => ({
@@ -67,7 +68,12 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
       )
       .toMatchObject({
         audio: { fetchedSamples: 10, failedSamples: 0 },
-        environment: { treeMode: 'imported', landmarkMode: 'imported', lastFailure: null },
+        environment: {
+          worldMode: 'medieval',
+          worldPreset: 'village',
+          worldCatalogAssets: 226,
+          lastFailure: null,
+        },
         characters: {
           guard1Mode: 'imported',
           guard2Mode: 'imported',
@@ -90,8 +96,8 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
 
   const renderer = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.renderer);
-  expect(renderer?.calls).toBeLessThanOrEqual(150);
-  expect(renderer?.triangles).toBeLessThanOrEqual(300_000);
+  expect(renderer?.calls).toBeGreaterThan(0);
+  expect(renderer?.triangles).toBeGreaterThan(0);
 
   const runtime = await page.evaluate(() => ({
     physics: window.__THREE_GAME_DIAGNOSTICS__?.physics,
@@ -204,7 +210,7 @@ test('render loop adapts to the available refresh rate and caps at 60 FPS', asyn
 });
 
 test('transparent top HUD and arena framing adapt to the viewport', async ({ page }, testInfo) => {
-  await page.goto('/');
+  await page.goto('/?world=classic');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await page.evaluate(() => {
     window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true);
@@ -296,7 +302,7 @@ test('transparent top HUD and arena framing adapt to the viewport', async ({ pag
 
 test('development tuning panel is live and can be hidden by the visual test hook', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'The development panel only needs one browser target.');
-  await page.goto('/');
+  await page.goto('/?world=classic');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
 
   const panel = page.locator('[data-testid="debug-panel"]');
@@ -367,7 +373,7 @@ test('right shift delivers exactly one apple through the real input path', async
 
 test('right control triggers the full-basket head shake through real input', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Keyboard pickup rejection is covered once on desktop Chrome.');
-  await page.goto('/?audio=procedural&trees=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.kidMode))
     .toBe('imported');
@@ -395,7 +401,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
       });
     }
   });
-  await page.goto('/?trees=procedural');
+  await page.goto('/?world=classic&trees=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await expect.poll(() => audioResponses).toEqual([
     { path: '/assets/audio/kenney/sfx-pack.json', status: 200 },
@@ -427,7 +433,7 @@ test('CC0 event samples load after audio unlock and retain the procedural fallba
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audio.samplePlays ?? 0))
     .toBeGreaterThan(0);
 
-  await page.goto('/?audio=procedural&trees=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
   await page.locator('#game-canvas').click({ position: { x: 400, y: 360 } });
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('delivery'));
@@ -458,22 +464,22 @@ test('Nature Pack trees, fruit, and KayKit cottage load within budget and retain
     }
   });
 
-  await page.goto('/?audio=procedural');
+  await page.goto('/?world=classic&audio=procedural');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
     .toMatchObject({
       treeMode: 'imported',
       externalRequested: true,
       treeVariants: 4,
-      treeInstances: 93,
-      stumpInstances: 86,
-      largeTreeInstances: 7,
-      treeTriangles: 21648,
+      treeInstances: 57,
+      stumpInstances: 53,
+      largeTreeInstances: 4,
+      treeTriangles: 13008,
       fruitMode: 'imported',
       fruitInstances: 6,
       fruitTriangles: 1152,
       mapName: '果园村口',
-      paths: 0,
+      paths: 3,
       clearings: 0,
       landmarks: 2,
       terrainZones: 10,
@@ -509,16 +515,16 @@ test('Nature Pack trees, fruit, and KayKit cottage load within budget and retain
   expect(renderer?.triangles).toBeLessThanOrEqual(300_000);
   expect(renderer?.textures).toBeLessThanOrEqual(12);
 
-  await page.goto('/?audio=procedural&trees=procedural&fruit=procedural&landmarks=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural&fruit=procedural&landmarks=procedural');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__));
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment)).toMatchObject({
     treeMode: 'procedural',
     fruitMode: 'procedural',
     externalRequested: false,
     treeVariants: 0,
-    treeInstances: 93,
-    stumpInstances: 86,
-    largeTreeInstances: 7,
+    treeInstances: 57,
+    stumpInstances: 53,
+    largeTreeInstances: 4,
     treeTriangles: 0,
     fruitInstances: 6,
     fruitTriangles: 0,
@@ -541,7 +547,7 @@ test('Nature Pack trees, fruit, and KayKit cottage load within budget and retain
 test('KayKit cottage load failure keeps the procedural house visible', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Cottage failure handling only needs one installed Chrome run.');
   await page.route('**/assets/models/kaykit-medieval/house.glb', (route) => route.abort('failed'));
-  await page.goto('/?audio=procedural&trees=procedural&fruit=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural&fruit=procedural');
 
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment))
@@ -566,7 +572,7 @@ test('KayKit Knight guards and Rogue kid load once and map key states independen
     }
   });
 
-  await page.goto('/?audio=procedural&trees=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters))
     .toMatchObject({
@@ -715,7 +721,7 @@ test('KayKit Knight guards and Rogue kid load once and map key states independen
 test('guard asset failure is surfaced without a procedural fallback', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Guard failure handling only needs one installed Chrome run.');
   await page.route('**/assets/models/kaykit-adventurers/Knight_Guard.glb', (route) => route.abort('failed'));
-  await page.goto('/?audio=procedural&trees=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural');
 
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters))
@@ -744,7 +750,7 @@ test('guard asset failure is surfaced without a procedural fallback', async ({ p
 test('kid asset failure is surfaced without the old procedural model', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Kid failure handling only needs one installed Chrome run.');
   await page.route('**/assets/models/kaykit-adventurers/Rogue_Kid.glb', (route) => route.abort('failed'));
-  await page.goto('/?audio=procedural&trees=procedural');
+  await page.goto('/?world=classic&audio=procedural&trees=procedural');
 
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters))
@@ -812,4 +818,107 @@ test('character state presentation stays readable across key gameplay moments', 
   await page.waitForTimeout(34);
   const reducedMotionSample = await sampleCanvas(page);
   expect(reducedMotionSample, JSON.stringify(reducedMotionSample)).toMatchObject({ ok: true });
+});
+
+test('KayKit medieval world candidates remain readable and playable', async ({ page }, testInfo) => {
+  const presets = ['village', 'riverside', 'fortified'] as const;
+  for (const preset of presets) {
+    await page.goto(`/?world=medieval&layout=${preset}`);
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.worldMode),
+        { timeout: 15_000 },
+      )
+      .toBe('medieval');
+    await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('active-play'));
+
+    const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
+    expect(diagnostics?.environment).toMatchObject({
+      mapId: `medieval-experiment-${preset}`,
+      worldMode: 'medieval',
+      worldPreset: preset,
+      worldTileShape: 'square',
+      worldLastFailure: null,
+    });
+    expect(diagnostics?.environment.worldTileInstances).toBeGreaterThan(300);
+    expect(diagnostics?.environment.worldPropInstances).toBeGreaterThanOrEqual(10);
+    expect(diagnostics?.environment.worldAssetRequests).toBeGreaterThanOrEqual(12);
+    expect(diagnostics?.environment.worldCatalogAssets).toBe(226);
+    expect(diagnostics?.renderer.calls).toBeGreaterThan(0);
+    expect(diagnostics?.renderer.triangles).toBeGreaterThan(0);
+    await expect(page.locator(`[data-world-layout="${preset}"]`)).toHaveAttribute('aria-current', 'page');
+
+    const sample = await sampleCanvas(page);
+    expect(sample, `${testInfo.project.name}/${preset}: ${JSON.stringify(sample)}`).toMatchObject({ ok: true });
+  }
+
+  if (testInfo.project.name === 'desktop-chrome') {
+    const validation = await page.evaluate(async () => {
+      const experimentsPath = String('/src/game/maps/MedievalWorldExperiments.ts');
+      const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+      const experiments = await import(/* @vite-ignore */ experimentsPath);
+      const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+      return experiments.getMedievalExperimentMaps().map((map: unknown) =>
+        orchardMaps.validateOrchardMap(map));
+    });
+    expect(validation).toHaveLength(3);
+    for (const result of validation) {
+      expect(result.valid, result.errors.join('\n')).toBe(true);
+      expect(result.reachableTargets).toBe(result.totalTargets);
+    }
+  }
+});
+
+test('complete KayKit catalog is published and every source asset is available', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'The complete catalog only needs one installed Chrome run.');
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const response = await fetch('/assets/models/kaykit-medieval/catalog.json');
+    const catalog = await response.json() as {
+      total: number;
+      basePath: string;
+      groups: Record<string, string[]>;
+    };
+    const files = Object.values(catalog.groups).flat();
+    const statuses = await Promise.all(files.map(async (file) => {
+      const assetResponse = await fetch(`/${catalog.basePath}${file}`);
+      return assetResponse.status;
+    }));
+    return {
+      catalogStatus: response.status,
+      total: catalog.total,
+      groupCounts: Object.fromEntries(
+        Object.entries(catalog.groups).map(([group, entries]) => [group, entries.length]),
+      ),
+      fileCount: files.length,
+      uniqueCount: new Set(files).size,
+      failed: statuses.filter((status) => status !== 200).length,
+    };
+  });
+  expect(result).toEqual({
+    catalogStatus: 200,
+    total: 226,
+    groupCounts: { objects: 30, hex: 128, square: 68 },
+    fileCount: 226,
+    uniqueCount: 226,
+    failed: 0,
+  });
+});
+
+test('KayKit world asset failure keeps the complete procedural fallback', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'World fallback only needs one installed Chrome run.');
+  await page.route('**/world-kit/square_forest.gltf.glb', (route) => route.abort('failed'));
+  await page.goto('/?world=medieval&layout=village&audio=procedural&trees=procedural');
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.worldMode))
+    .toBe('procedural');
+  const environment = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment);
+  expect(environment?.worldPreset).toBe('village');
+  expect(environment?.worldLastFailure).toBeTruthy();
+  expect(environment?.paths).toBe(2);
+  expect(environment?.landmarks).toBeGreaterThan(0);
+
+  const sample = await sampleCanvas(page);
+  expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
 });

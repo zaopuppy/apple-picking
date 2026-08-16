@@ -77,6 +77,18 @@ declare global {
         depth: number;
       } | null;
       landmarkLastFailure: string | null;
+      worldMode: 'procedural' | 'loading' | 'medieval';
+      worldPreset: 'village' | 'riverside' | 'fortified' | null;
+      worldTileInstances: number;
+      worldPropInstances: number;
+      worldMeshes: number;
+      worldTriangles: number;
+      worldMaterials: number;
+      worldTextures: number;
+      worldAssetRequests: number;
+      worldCatalogAssets: number;
+      worldTileShape: 'square' | 'hex' | null;
+      worldLastFailure: string | null;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;

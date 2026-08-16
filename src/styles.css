@@ -97,6 +97,53 @@ body {
   white-space: nowrap;
 }
 
+#world-lab {
+  position: absolute;
+  z-index: 3;
+  top: max(12px, calc(env(safe-area-inset-top) + 8px));
+  right: max(12px, calc(env(safe-area-inset-right) + 8px));
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid rgba(255, 245, 205, 0.5);
+  border-radius: 16px 4px 16px 4px;
+  background: rgba(36, 48, 27, 0.72);
+  box-shadow: 0 6px 20px rgba(36, 48, 27, 0.2);
+  backdrop-filter: blur(7px);
+}
+
+#world-lab span {
+  padding: 0 6px;
+  color: rgba(255, 245, 205, 0.68);
+  font-size: 0.5rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+#world-lab a {
+  padding: 5px 7px;
+  border-radius: 10px 3px 10px 3px;
+  color: rgba(255, 245, 205, 0.82);
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: color 130ms ease, background 130ms ease, transform 130ms ease;
+}
+
+#world-lab a:hover {
+  color: var(--paper);
+  background: rgba(255, 245, 205, 0.12);
+  transform: translateY(-1px);
+}
+
+#world-lab a.active {
+  color: var(--ink);
+  background: #f3d46d;
+  box-shadow: 0 2px 0 rgba(91, 54, 25, 0.28);
+}
+
 #score-ribbon {
   position: absolute;
   z-index: 2;
@@ -300,6 +347,23 @@ body {
   #map-editor-link strong {
     max-width: 82px;
     font-size: 0.62rem;
+  }
+
+  #world-lab {
+    top: auto;
+    right: max(8px, calc(env(safe-area-inset-right) + 6px));
+    bottom: max(8px, calc(env(safe-area-inset-bottom) + 6px));
+    gap: 2px;
+    padding: 4px;
+  }
+
+  #world-lab span {
+    display: none;
+  }
+
+  #world-lab a {
+    padding: 5px;
+    font-size: 0.5rem;
   }
 
   #score-ribbon {

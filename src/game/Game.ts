@@ -9,6 +9,10 @@ import { Hud } from '../systems/Hud';
 import { loadActiveMap } from '../systems/MapStorage';
 import { DEFAULT_MOVEMENT_TUNING, FIXED_DELTA_SECONDS, GAME_CONFIG } from './config';
 import { GameSimulation } from './GameSimulation';
+import {
+  resolveMedievalWorldMap,
+  type MedievalWorldPreset,
+} from './maps/MedievalWorldExperiments';
 import type { OrchardMap } from './maps/OrchardMap';
 import {
   commandsWithoutEdges,
@@ -58,7 +62,9 @@ export class Game {
   private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
-    this.map = loadActiveMap();
+    const activeMap = loadActiveMap();
+    const medievalWorld = resolveMedievalWorldMap(activeMap);
+    this.map = medievalWorld?.map ?? activeMap;
     this.simulation = new GameSimulation(this.map);
     this.renderer = createRenderer(canvas);
     this.scene.background = new THREE.Color('#91ad62');
@@ -68,12 +74,27 @@ export class Game {
     this.view = new ArenaView(this.scene, this.map);
     const mapName = document.querySelector<HTMLElement>('#active-map-name');
     if (mapName) mapName.textContent = this.map.name;
+    this.configureWorldNavigation(medievalWorld?.preset ?? null);
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
     this.updateCameraComposition();
     this.syncPresentation();
     this.installTestHooks();
     this.publishDiagnostics();
     if (import.meta.env.DEV) void this.installDebugPanel();
+  }
+
+  private configureWorldNavigation(preset: MedievalWorldPreset | null): void {
+    const customWorld = new URLSearchParams(window.location.search).get('world') === 'custom';
+    for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-world-layout]')) {
+      const active = customWorld
+        ? link.dataset.worldLayout === 'custom'
+        : preset === null
+          ? link.dataset.worldLayout === 'base'
+          : link.dataset.worldLayout === preset;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    }
   }
 
   start(): void {

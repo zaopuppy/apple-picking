@@ -13,10 +13,34 @@ export const TREE_COLLIDER_RADIUS = 0.31;
 export const TREE_VARIANTS = ['stump', 'broadleaf', 'pine', 'cherry'] as const;
 export const LANDMARK_KINDS = ['homestead', 'pond'] as const;
 export const TERRAIN_ZONE_KINDS = ['meadow', 'orchard', 'wildflowers'] as const;
+export const KAYKIT_WORLD_THEMES = ['village', 'riverside', 'fortified'] as const;
+export const KAYKIT_TILE_SHAPES = ['square', 'hex'] as const;
+export const KAYKIT_BUILDING_ASSETS = [
+  'house',
+  'market',
+  'farmPlot',
+  'lumbermill',
+  'mill',
+  'watermill',
+  'well',
+  'archeryRange',
+  'barracks',
+  'watchtower',
+  'castle',
+  'mine',
+] as const;
 
 export type TreeVariant = typeof TREE_VARIANTS[number];
 export type LandmarkKind = typeof LANDMARK_KINDS[number];
 export type TerrainZoneKind = typeof TERRAIN_ZONE_KINDS[number];
+export type KayKitWorldTheme = typeof KAYKIT_WORLD_THEMES[number];
+export type KayKitTileShape = typeof KAYKIT_TILE_SHAPES[number];
+export type KayKitBuildingAsset = typeof KAYKIT_BUILDING_ASSETS[number];
+
+export type OrchardWorldStyle = {
+  theme: KayKitWorldTheme;
+  tileShape: KayKitTileShape;
+};
 
 export type OrchardTree = Vec2 & {
   id: string;
@@ -39,6 +63,7 @@ export type OrchardClearing = Vec2 & {
 export type OrchardLandmark = Vec2 & {
   id: string;
   kind: LandmarkKind;
+  asset?: KayKitBuildingAsset;
   rotationY: number;
   radiusX: number;
   radiusZ: number;
@@ -57,6 +82,7 @@ export type OrchardMap = {
   id: string;
   name: string;
   seed: number;
+  worldStyle: OrchardWorldStyle;
   trees: OrchardTree[];
   paths: OrchardPath[];
   clearings: OrchardClearing[];
@@ -94,6 +120,7 @@ const MAX_TREE_COLLIDER_RADIUS = Math.max(...Object.values(TREE_COLLIDER_RADII))
 export function cloneOrchardMap(map: OrchardMap): OrchardMap {
   return {
     ...map,
+    worldStyle: { ...map.worldStyle },
     trees: map.trees.map((tree) => ({ ...tree })),
     paths: map.paths.map((path) => ({
       ...path,
@@ -137,6 +164,7 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
     id: text(value.id, `map-${Date.now()}`),
     name: text(value.name, '未命名果园'),
     seed: finiteNumber(value.seed, 1),
+    worldStyle: parseWorldStyle(value.worldStyle),
     trees: trees.slice(0, MAX_MAP_TREES),
     paths,
     clearings,
@@ -475,13 +503,31 @@ function parseLandmark(value: unknown, index: number): OrchardLandmark | null {
   const kind = LANDMARK_KINDS.includes(value.kind as LandmarkKind)
     ? value.kind as LandmarkKind
     : LANDMARK_KINDS[index % LANDMARK_KINDS.length];
+  const asset = KAYKIT_BUILDING_ASSETS.includes(value.asset as KayKitBuildingAsset)
+    ? value.asset as KayKitBuildingAsset
+    : undefined;
   return {
     ...point,
     id: text(value.id, `landmark-${index}`),
     kind,
-    rotationY: finiteNumber(value.rotationY, 0),
+    ...(kind === 'homestead' && asset ? { asset } : {}),
+    rotationY: kind === 'homestead'
+      ? alignToQuarterTurn(finiteNumber(value.rotationY, 0))
+      : finiteNumber(value.rotationY, 0),
     radiusX: clamp(finiteNumber(value.radiusX, kind === 'homestead' ? 5 : 4), 2.4, 9),
     radiusZ: clamp(finiteNumber(value.radiusZ, kind === 'homestead' ? 4 : 3.2), 2, 7),
+  };
+}
+
+function parseWorldStyle(value: unknown): OrchardWorldStyle {
+  if (!isRecord(value)) return { theme: 'village', tileShape: 'square' };
+  return {
+    theme: KAYKIT_WORLD_THEMES.includes(value.theme as KayKitWorldTheme)
+      ? value.theme as KayKitWorldTheme
+      : 'village',
+    tileShape: KAYKIT_TILE_SHAPES.includes(value.tileShape as KayKitTileShape)
+      ? value.tileShape as KayKitTileShape
+      : 'square',
   };
 }
 
@@ -721,4 +767,9 @@ function distance(first: Vec2, second: Vec2): number {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+export function alignToQuarterTurn(rotationY: number): number {
+  const quarterTurn = Math.PI / 2;
+  return Math.round(rotationY / quarterTurn) * quarterTurn;
 }
