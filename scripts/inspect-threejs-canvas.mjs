@@ -245,6 +245,7 @@ async function main() {
 
   await page.goto(args.url, { waitUntil: 'networkidle' });
   await page.waitForSelector('canvas', { state: 'visible', timeout: 10_000 });
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi?.(true));
 
   if (args.state || args.seed !== undefined) {
     const applied = await page.evaluate(({ seed, state }) => {

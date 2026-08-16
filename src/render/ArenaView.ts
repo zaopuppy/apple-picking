@@ -10,6 +10,7 @@ import {
   resolveMedievalWorldMap,
   type MedievalWorldPreset,
 } from '../game/maps/MedievalWorldExperiments';
+import { isIslandTourMap } from '../game/maps/IslandTourMap';
 import type {
   KayKitTileShape,
   OrchardMap,
@@ -24,6 +25,7 @@ import {
   createOrchardMaterials,
   ORCHARD_COLORS,
 } from './OrchardMaterials';
+import { createIslandWorldVisual, type IslandWorldVisual } from './IslandWorldView';
 import {
   disposeImportedGuardView,
   loadImportedGuardView,
@@ -92,7 +94,7 @@ export type EnvironmentAssetDiagnostics = {
     depth: number;
   } | null;
   landmarkLastFailure: string | null;
-  worldMode: 'procedural' | 'loading' | 'medieval';
+  worldMode: 'procedural' | 'loading' | 'medieval' | 'island';
   worldPreset: MedievalWorldPreset | null;
   worldTileInstances: number;
   worldPropInstances: number;
@@ -148,7 +150,9 @@ export class ArenaView {
   private readonly proceduralWorldVisuals = new THREE.Group();
   private readonly proceduralTreeVisuals = new THREE.Group();
   private readonly importedGuardViews = new Map<ImportedGuardId, ImportedGuardView>();
+  private readonly islandWorld: boolean;
   private readonly worldPreset: MedievalWorldPreset | null;
+  private islandWorldVisual: IslandWorldVisual | null = null;
   private importedKidView: ImportedKidView | null = null;
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
@@ -214,7 +218,8 @@ export class ArenaView {
     lastFailures: { guard1: null, guard2: null, kid: null },
   };
   constructor(scene: THREE.Scene, private readonly map: OrchardMap) {
-    this.worldPreset = resolveMedievalWorldMap(map)?.preset ?? null;
+    this.islandWorld = isIslandTourMap(map);
+    this.worldPreset = this.islandWorld ? null : resolveMedievalWorldMap(map)?.preset ?? null;
     this.environmentDiagnostics = {
       ...this.environmentDiagnostics,
       treeInstances: map.trees.length,
@@ -381,6 +386,7 @@ export class ArenaView {
       };
     }
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);
+    this.islandWorldVisual?.update(renderTime, reducedMotion);
 
     this.pickingRing.visible = snapshot.kid.state === 'Picking';
     if (this.pickingRing.visible) {
@@ -427,6 +433,29 @@ export class ArenaView {
   }
 
   private createWorld(): void {
+    if (this.islandWorld) {
+      const island = createIslandWorldVisual(this.map);
+      this.islandWorldVisual = island;
+      this.root.add(island.root);
+      this.environmentDiagnostics = {
+        ...this.environmentDiagnostics,
+        worldMode: 'island',
+        worldPreset: null,
+        worldTileInstances: island.tileInstances,
+        worldPropInstances: island.propInstances,
+        worldMeshes: island.meshes,
+        worldTriangles: island.triangles,
+        worldMaterials: island.materials,
+        worldTextures: island.textures,
+        worldAssetRequests: 0,
+        worldCatalogAssets: 0,
+        worldTileShape: null,
+        worldLastFailure: null,
+      };
+      this.createForest();
+      this.createDeliveryZone();
+      return;
+    }
     this.proceduralWorldVisuals.name = 'procedural-world-fallback';
     this.root.add(this.proceduralWorldVisuals);
     const floor = new THREE.Mesh(
@@ -780,7 +809,10 @@ export class ArenaView {
     this.proceduralTreeVisuals.add(stumpMeshes, trunks, crowns);
     this.root.add(this.proceduralTreeVisuals);
 
-    if (new URLSearchParams(window.location.search).get('trees') === 'procedural') return;
+    const proceduralTreesRequested =
+      new URLSearchParams(window.location.search).get('trees') === 'procedural' ||
+      (this.islandWorld && window.matchMedia('(max-width: 600px)').matches);
+    if (proceduralTreesRequested) return;
     this.environmentDiagnostics = {
       ...this.environmentDiagnostics,
       treeMode: 'loading',

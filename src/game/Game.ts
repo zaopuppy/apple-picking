@@ -21,6 +21,7 @@ import {
   resolveMedievalWorldMap,
   type MedievalWorldPreset,
 } from './maps/MedievalWorldExperiments';
+import { resolveIslandTourMap } from './maps/IslandTourMap';
 import type { OrchardMap } from './maps/OrchardMap';
 import {
   commandsWithoutEdges,
@@ -33,6 +34,9 @@ const PORTRAIT_CAMERA_ANGLE = 25;
 const DEFAULT_LANDSCAPE_CAMERA_ANGLE = 34;
 const DEFAULT_PERSPECTIVE_FOV = 22;
 const DEFAULT_LANDSCAPE_CAMERA_HEIGHT = 117.5;
+const ISLAND_LANDSCAPE_CAMERA_ANGLE = 40;
+const ISLAND_LANDSCAPE_CAMERA_HEIGHT = 112;
+const ISLAND_CAMERA_ZOOM = 0.96;
 const DEFAULT_LANDSCAPE_CAMERA_DISTANCE = roundCameraValue(DEFAULT_LANDSCAPE_CAMERA_HEIGHT *
   Math.tan(THREE.MathUtils.degToRad(DEFAULT_LANDSCAPE_CAMERA_ANGLE)));
 
@@ -66,6 +70,7 @@ export class Game {
   private readonly perspectiveControls: OrbitControls;
   private readonly input = new InputRouter();
   private readonly map: OrchardMap;
+  private readonly islandWorld: boolean;
   private readonly simulation: GameSimulation;
   private readonly hemisphere = new THREE.HemisphereLight('#fff7db', '#55743d', 2.1);
   private readonly sun = new THREE.DirectionalLight('#fff0bd', 3.1);
@@ -117,12 +122,22 @@ export class Game {
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const activeMap = loadActiveMap();
-    const medievalWorld = resolveMedievalWorldMap(activeMap);
-    this.map = medievalWorld?.map ?? activeMap;
+    const islandMap = resolveIslandTourMap();
+    const medievalWorld = islandMap ? null : resolveMedievalWorldMap(activeMap);
+    this.map = islandMap ?? medievalWorld?.map ?? activeMap;
+    this.islandWorld = islandMap !== null;
+    if (this.islandWorld) this.configureIslandCamera();
     this.simulation = new GameSimulation(this.map);
     this.renderer = createRenderer(canvas);
-    this.scene.background = new THREE.Color('#91ad62');
-    this.orthographicCamera.position.set(0, 117.5, 97.5);
+    if (this.islandWorld && window.matchMedia('(max-width: 600px)').matches) {
+      this.renderer.shadowMap.enabled = false;
+    }
+    this.scene.background = new THREE.Color(this.islandWorld ? '#54bfd0' : '#91ad62');
+    this.orthographicCamera.position.set(
+      this.debugTuning.cameraPositionX,
+      this.debugTuning.cameraPositionY,
+      this.debugTuning.cameraPositionZ,
+    );
     this.orthographicCamera.lookAt(0, 0, 0);
     this.perspectiveCamera.position.copy(this.orthographicCamera.position);
     this.perspectiveCamera.lookAt(0, 0, 0);
@@ -135,7 +150,7 @@ export class Game {
     this.view = new ArenaView(this.scene, this.map);
     const mapName = document.querySelector<HTMLElement>('#active-map-name');
     if (mapName) mapName.textContent = this.map.name;
-    this.configureWorldNavigation(medievalWorld?.preset ?? null);
+    this.configureWorldNavigation(medievalWorld?.preset ?? null, this.islandWorld);
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
     this.updateCameraComposition();
     this.syncPresentation();
@@ -144,14 +159,33 @@ export class Game {
     if (import.meta.env.DEV) void this.installDebugPanel();
   }
 
-  private configureWorldNavigation(preset: MedievalWorldPreset | null): void {
+  private configureIslandCamera(): void {
+    const horizontalDistance = ISLAND_LANDSCAPE_CAMERA_HEIGHT * Math.tan(
+      THREE.MathUtils.degToRad(ISLAND_LANDSCAPE_CAMERA_ANGLE),
+    );
+    this.debugTuning.landscapeCameraAngle = ISLAND_LANDSCAPE_CAMERA_ANGLE;
+    this.debugTuning.cameraZoom = ISLAND_CAMERA_ZOOM;
+    this.debugTuning.cameraPositionY = ISLAND_LANDSCAPE_CAMERA_HEIGHT;
+    this.debugTuning.cameraPositionZ = roundCameraValue(horizontalDistance);
+    this.debugTuning.cameraDistance = roundCameraValue(Math.hypot(
+      ISLAND_LANDSCAPE_CAMERA_HEIGHT,
+      horizontalDistance,
+    ));
+  }
+
+  private configureWorldNavigation(
+    preset: MedievalWorldPreset | null,
+    islandWorld: boolean,
+  ): void {
     const customWorld = new URLSearchParams(window.location.search).get('world') === 'custom';
     for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-world-layout]')) {
-      const active = customWorld
-        ? link.dataset.worldLayout === 'custom'
-        : preset === null
-          ? link.dataset.worldLayout === 'base'
-          : link.dataset.worldLayout === preset;
+      const active = islandWorld
+        ? link.dataset.worldLayout === 'island'
+        : customWorld
+          ? link.dataset.worldLayout === 'custom'
+          : preset === null
+            ? link.dataset.worldLayout === 'base'
+            : link.dataset.worldLayout === preset;
       link.classList.toggle('active', active);
       if (active) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
@@ -237,8 +271,9 @@ export class Game {
     }
     const portraitLayout = usesPortraitArenaLayout(width / height);
     if (portraitLayout) {
-      const cameraHeight = 170;
-      const horizontalDistance = cameraHeight * Math.tan(THREE.MathUtils.degToRad(PORTRAIT_CAMERA_ANGLE));
+      const cameraHeight = this.islandWorld ? 156 : 170;
+      const portraitAngle = this.islandWorld ? 30 : PORTRAIT_CAMERA_ANGLE;
+      const horizontalDistance = cameraHeight * Math.tan(THREE.MathUtils.degToRad(portraitAngle));
       this.camera.position.set(horizontalDistance, cameraHeight, 0);
       this.cameraLookTarget.set(0, 0, 0);
     } else {

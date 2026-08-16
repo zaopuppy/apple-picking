@@ -998,6 +998,61 @@ test('character state presentation stays readable across key gameplay moments', 
   expect(reducedMotionSample, JSON.stringify(reducedMotionSample)).toMatchObject({ ok: true });
 });
 
+test('Sweet Orchard Island keeps its authored composition playable and within budget', async ({ page }, testInfo) => {
+  await page.goto('/?world=island');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.worldMode))
+    .toBe('island');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.fruitMode))
+    .toBe('imported');
+  await expect
+    .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.importedCharacters))
+    .toBe(3);
+  await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.setState('active-play');
+    window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true);
+  });
+
+  const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
+  expect(diagnostics?.environment).toMatchObject({
+    mapId: 'sweet-orchard-island-p1',
+    mapName: '甜日果园岛 · P1',
+    worldMode: 'island',
+    worldPreset: null,
+    worldTileInstances: 3,
+    worldAssetRequests: 0,
+    worldLastFailure: null,
+  });
+  expect(diagnostics?.environment.worldPropInstances).toBeGreaterThanOrEqual(100);
+  expect(diagnostics?.environment.worldMeshes).toBeGreaterThan(80);
+  expect(diagnostics?.environment.treeMode).toBe(
+    testInfo.project.name === 'narrow-chrome' ? 'procedural' : 'imported',
+  );
+  expect(diagnostics?.renderer.calls).toBeLessThanOrEqual(
+    testInfo.project.name === 'narrow-chrome' ? 150 : 300,
+  );
+  expect(diagnostics?.renderer.triangles).toBeLessThanOrEqual(
+    testInfo.project.name === 'narrow-chrome' ? 300_000 : 750_000,
+  );
+  await expect(page.locator('[data-world-layout="island"]')).toHaveAttribute('aria-current', 'page');
+
+  const sample = await sampleCanvas(page);
+  expect(sample, `${testInfo.project.name}: ${JSON.stringify(sample)}`).toMatchObject({ ok: true });
+
+  if (testInfo.project.name === 'desktop-chrome') {
+    const validation = await page.evaluate(async () => {
+      const islandPath = String('/src/game/maps/IslandTourMap.ts');
+      const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+      const island = await import(/* @vite-ignore */ islandPath);
+      const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+      return orchardMaps.validateOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+    });
+    expect(validation.valid, validation.errors.join('\n')).toBe(true);
+    expect(validation.reachableTargets).toBe(validation.totalTargets);
+  }
+});
+
 test('KayKit medieval world candidates remain readable and playable', async ({ page }, testInfo) => {
   const presets = ['village', 'riverside', 'fortified'] as const;
   for (const preset of presets) {

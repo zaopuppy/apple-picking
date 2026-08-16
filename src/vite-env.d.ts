@@ -77,7 +77,7 @@ declare global {
         depth: number;
       } | null;
       landmarkLastFailure: string | null;
-      worldMode: 'procedural' | 'loading' | 'medieval';
+      worldMode: 'procedural' | 'loading' | 'medieval' | 'island';
       worldPreset: 'village' | 'riverside' | 'fortified' | null;
       worldTileInstances: number;
       worldPropInstances: number;
