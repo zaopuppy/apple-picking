@@ -11,7 +11,7 @@ test('map editor renders a valid open orchard without viewport overflow', async 
   await page.goto('/editor.html');
   await expect(page.getByRole('heading', { name: '果园地图工坊' })).toBeVisible();
   await expect(page.getByLabel('果园地图编辑画布')).toBeVisible();
-  await expect(page.getByText('可游玩 · 方格 · 2 地标 · 57 木本点缀（4 大树） · 6 果实')).toBeVisible();
+  await expect(page.getByText('可游玩 · 方格 · 2 地标 · 55 木本点缀（4 大树） · 6 果实')).toBeVisible();
   await expect(page.getByText('全部 9 个关键目标可达。')).toBeVisible();
   await expect(page.getByRole('button', { name: '使用并游玩' })).toBeEnabled();
   await expect(page.getByLabel('世界主题')).toHaveValue('village');
@@ -95,7 +95,7 @@ test('manual KayKit building and square world settings persist into the playable
   await page.getByLabel('地块形状').selectOption('square');
   await page.getByRole('button', { name: /KayKit 建筑 3/ }).click();
   await page.getByLabel('建筑模型').selectOption('castle');
-  await page.getByLabel('建筑朝向').selectOption('1');
+  await expect(page.getByText('建筑统一使用 0° 朝向，以保持岛屿风格一致。')).toBeVisible();
   const canvas = page.getByLabel('果园地图编辑画布');
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
@@ -124,7 +124,7 @@ test('manual KayKit building and square world settings persist into the playable
   expect(saved.landmarks[0]).toMatchObject({
     kind: 'homestead',
     asset: 'castle',
-    rotationY: Math.PI / 2,
+    rotationY: 0,
   });
 
   await Promise.all([
@@ -155,7 +155,7 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   await candidateButtons.first().click();
   await expect(page.getByRole('button', { name: '撤销' })).toBeEnabled();
   await page.getByRole('button', { name: '撤销' }).click();
-  await expect(page.getByText('可游玩 · 方格 · 2 地标 · 57 木本点缀（4 大树） · 6 果实')).toBeVisible();
+  await expect(page.getByText('可游玩 · 方格 · 2 地标 · 55 木本点缀（4 大树） · 6 果实')).toBeVisible();
 
   await page.locator('#landmark-density-input').fill('20');
   await page.getByRole('button', { name: '从十二张中筛选四张' }).click();
@@ -195,7 +195,7 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   expect(semanticMap.paths.length).toBeGreaterThanOrEqual(2);
   for (const landmark of semanticMap.landmarks.filter((entry: { kind: string }) => entry.kind === 'homestead')) {
     expect(landmark.asset).toBeTruthy();
-    expect(landmark.rotationY / (Math.PI / 2)).toBeCloseTo(Math.round(landmark.rotationY / (Math.PI / 2)));
+    expect(landmark.rotationY).toBe(0);
   }
 
   const downloadPromise = page.waitForEvent('download');
@@ -415,9 +415,16 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
     const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
     const island = await import(/* @vite-ignore */ islandPath);
     const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
-    const parsed = orchardMaps.parseOrchardMap(
-      JSON.parse(JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP)),
+    const serialized = JSON.parse(JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP));
+    const serializedBuilding = serialized.landmarks.find(
+      (landmark: { asset?: string }) => Boolean(landmark.asset),
     );
+    serializedBuilding.rotationY = Math.PI / 2;
+    const serializedCoastProxy = serialized.landmarks.find(
+      (landmark: { asset?: string; rotationY: number }) => !landmark.asset && landmark.rotationY !== 0,
+    );
+    const coastProxyBeforeParse = serializedCoastProxy.rotationY;
+    const parsed = orchardMaps.parseOrchardMap(serialized);
     if (!parsed?.islandLayout) throw new Error('Island layout did not survive parsing.');
     const clone = orchardMaps.cloneOrchardMap(parsed);
     if (!clone.islandLayout) throw new Error('Island layout did not survive cloning.');
@@ -459,6 +466,10 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
         bridgeX: parsed.islandLayout.bridges[0].x,
       },
       malformedRejected: orchardMaps.parseOrchardMap(malformed) === null,
+      buildingRotation: parsed.landmarks.find((landmark: { asset?: string }) => Boolean(landmark.asset))?.rotationY,
+      coastProxyRotationPreserved: parsed.landmarks.find(
+        (landmark: { id: string }) => landmark.id === serializedCoastProxy.id,
+      )?.rotationY === coastProxyBeforeParse,
       desynchronizedRejected: !desynchronizedValidation.valid &&
         desynchronizedValidation.errors.includes('岛屿通路或水域碰撞代理与语义结构不同步。'),
     };
@@ -476,6 +487,8 @@ test('island v5 semantics roundtrip and clone without shared nested state', asyn
   });
   expect(result.parsedAfterCloneMutation).toEqual(result.original);
   expect(result.malformedRejected).toBe(true);
+  expect(result.buildingRotation).toBe(0);
+  expect(result.coastProxyRotationPreserved).toBe(true);
   expect(result.desynchronizedRejected).toBe(true);
 });
 

@@ -2,7 +2,6 @@ import { createSeededRandom } from '../../utils/random';
 import { ARENA_SCALE, GAME_CONFIG } from '../config';
 import type { Vec2 } from '../types';
 import {
-  alignToQuarterTurn,
   cloneOrchardMap,
   insideArena,
   landmarkBlocksPoint,
@@ -349,16 +348,14 @@ function createLandmarks(
     const z = kind === 'homestead'
       ? lerp(-GAME_CONFIG.arenaHalfDepth + radiusZ + 2, -5.5, random())
       : jitter(random, GAME_CONFIG.arenaHalfDepth - radiusZ - 2);
-    const legacyRotation = Math.round(random() * 3) * Math.PI / 2 + jitter(random, 0.08);
+    const decorativeRotation = Math.round(random() * 3) * Math.PI / 2 + jitter(random, 0.08);
     const candidate: OrchardLandmark = {
       id: `landmark-${landmarks.length}`,
       kind,
       x,
       z,
       ...(kind === 'homestead' ? { asset: buildingForPreset(preset, landmarks.length) } : {}),
-      rotationY: kind === 'homestead'
-        ? alignToQuarterTurn(legacyRotation)
-        : legacyRotation,
+      rotationY: kind === 'homestead' ? 0 : decorativeRotation,
       radiusX,
       radiusZ,
     };

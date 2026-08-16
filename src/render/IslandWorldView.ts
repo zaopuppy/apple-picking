@@ -721,7 +721,7 @@ function createCottage(
     landmark.id === 'island-main-house' ? 0.62 : 0.06,
     landmark.z,
   );
-  house.rotation.y = landmark.rotationY - Math.PI;
+  house.rotation.y = landmark.rotationY;
   house.scale.set(
     landmark.radiusX / 5.2,
     Math.min(landmark.radiusX / 5.2, landmark.radiusZ / 3.7),

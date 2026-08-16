@@ -5,7 +5,6 @@ import {
   type MapPreset,
 } from '../game/maps/MapGenerator';
 import {
-  alignToQuarterTurn,
   cloneOrchardMap,
   deliveryZonesForMap,
   insideArena,
@@ -155,7 +154,6 @@ export class MapEditor {
   private readonly worldThemeInput = getElement<HTMLSelectElement>('#world-theme');
   private readonly tileShapeInput = getElement<HTMLSelectElement>('#tile-shape');
   private readonly buildingAssetInput = getElement<HTMLSelectElement>('#building-asset');
-  private readonly buildingRotationInput = getElement<HTMLSelectElement>('#building-rotation');
   private readonly presetInput = getElement<HTMLSelectElement>('#preset-select');
   private readonly seedInput = getElement<HTMLInputElement>('#seed-input');
   private readonly opennessInput = getElement<HTMLInputElement>('#openness-input');
@@ -1018,13 +1016,12 @@ export class MapEditor {
   private placeLandmark(point: Vec2, kind: LandmarkKind): void {
     if (this.map.landmarks.length >= MAX_MAP_LANDMARKS) return;
     const buildingAsset = this.readBuildingAsset();
-    const buildingRotation = Number(this.buildingRotationInput.value) * Math.PI / 2;
     const landmark: OrchardLandmark = {
       id: `landmark-custom-${Date.now()}-${this.serial}`,
       kind,
       ...point,
       ...(kind === 'homestead' ? { asset: buildingAsset } : {}),
-      rotationY: kind === 'homestead' ? alignToQuarterTurn(buildingRotation) : 0,
+      rotationY: 0,
       radiusX: kind === 'homestead' ? Math.max(4.5, this.brushSize * 1.15) : Math.max(3.4, this.brushSize),
       radiusZ: kind === 'homestead' ? Math.max(3.5, this.brushSize * 0.88) : Math.max(2.6, this.brushSize * 0.72),
     };
@@ -1358,8 +1355,6 @@ export class MapEditor {
       landmark.kind === 'homestead' && landmark.asset);
     if (firstBuilding?.asset) {
       this.buildingAssetInput.value = firstBuilding.asset;
-      const quarterTurns = Math.round(alignToQuarterTurn(firstBuilding.rotationY) / (Math.PI / 2));
-      this.buildingRotationInput.value = String((quarterTurns % 4 + 4) % 4);
     }
   }
 
@@ -1410,7 +1405,7 @@ function assignBuildingsForTheme(map: OrchardMap, theme: KayKitWorldTheme): void
     if (landmark.kind !== 'homestead') continue;
     const themeAssets = assets[theme];
     landmark.asset = themeAssets[buildingIndex % themeAssets.length];
-    landmark.rotationY = alignToQuarterTurn(landmark.rotationY);
+    landmark.rotationY = 0;
     buildingIndex += 1;
   }
 }

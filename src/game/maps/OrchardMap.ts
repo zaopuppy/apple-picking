@@ -799,8 +799,8 @@ function parseLandmark(value: unknown, index: number): OrchardLandmark | null {
     id: text(value.id, `landmark-${index}`),
     kind,
     ...(kind === 'homestead' && asset ? { asset } : {}),
-    rotationY: kind === 'homestead'
-      ? alignToQuarterTurn(finiteNumber(value.rotationY, 0))
+    rotationY: kind === 'homestead' && asset
+      ? 0
       : finiteNumber(value.rotationY, 0),
     radiusX: clamp(finiteNumber(value.radiusX, kind === 'homestead' ? 5 : 4), 0.25, 40),
     radiusZ: clamp(finiteNumber(value.radiusZ, kind === 'homestead' ? 4 : 3.2), 0.25, 30),

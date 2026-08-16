@@ -432,7 +432,7 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
       asset: 'house',
       x: 21.5,
       z: -17.4,
-      rotationY: Math.PI,
+      rotationY: 0,
       radiusX: 5.2,
       radiusZ: 3.7,
     },
