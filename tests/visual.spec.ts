@@ -487,6 +487,16 @@ test('mouse camera mode zooms, orbits, pans, and focuses the debug panel', async
   )).toBeGreaterThan(1);
 
   await page.waitForTimeout(700);
+  await expect.poll(async () => page.evaluate(async () => {
+    const before = window.__THREE_GAME_DIAGNOSTICS__!.camera;
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    const after = window.__THREE_GAME_DIAGNOSTICS__!.camera;
+    return Math.hypot(
+      after.targetX - before.targetX,
+      after.targetY - before.targetY,
+      after.targetZ - before.targetZ,
+    );
+  }), { timeout: 3_000 }).toBeLessThan(0.01);
   const beforeProjectionSwitch = await page.evaluate(
     () => window.__THREE_GAME_DIAGNOSTICS__!.camera,
   );
