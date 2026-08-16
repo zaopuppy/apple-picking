@@ -6,6 +6,7 @@ import {
   type OrchardTree,
   type TreeVariant,
 } from './OrchardMap';
+import type { Vec2 } from '../types';
 
 export const SWEET_ORCHARD_ISLAND_ID = 'sweet-orchard-island-p1';
 
@@ -84,6 +85,12 @@ export type IslandBridge = {
   z: number;
   width: number;
   depth: number;
+};
+
+export type IslandAppleGroup = {
+  id: string;
+  label: string;
+  spawns: readonly [Vec2, Vec2];
 };
 
 export const ISLAND_ROUTE_BLOCKS: readonly IslandRouteBlock[] = [
@@ -171,6 +178,24 @@ export const ISLAND_DELIVERY_ZONES: readonly OrchardDeliveryZone[] = [
   { id: 'island-delivery-garden', x: 15, z: 15 },
 ];
 
+export const ISLAND_APPLE_GROUPS: readonly IslandAppleGroup[] = [
+  {
+    id: 'island-apples-orchard',
+    label: '北岸果园',
+    spawns: [{ x: -27, z: -12.5 }, { x: -15, z: -12.5 }],
+  },
+  {
+    id: 'island-apples-garden',
+    label: '东南花园',
+    spawns: [{ x: 10, z: 13 }, { x: 28, z: 13 }],
+  },
+  {
+    id: 'island-apples-beach',
+    label: '西南海滩',
+    spawns: [{ x: -26, z: 15 }, { x: -18, z: 18 }],
+  },
+];
+
 function createTrees(): OrchardTree[] {
   return TREE_SEEDS.map(([x, z, variant, scale = 1], index) => ({
     id: `island-tree-${index + 1}`,
@@ -180,6 +205,11 @@ function createTrees(): OrchardTree[] {
     rotationY: (index * 2.399963229728653) % (Math.PI * 2),
     scale,
   }));
+}
+
+function createAppleSpawns(): Vec2[] {
+  return ISLAND_APPLE_GROUPS.flatMap((group) =>
+    group.spawns.map((spawn) => ({ ...spawn })));
 }
 
 function createRouteBlockLandmarks(): OrchardLandmark[] {
@@ -209,7 +239,7 @@ function createWaterBlockLandmarks(): OrchardLandmark[] {
 export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
   version: 4,
   id: SWEET_ORCHARD_ISLAND_ID,
-  name: '甜日果园岛 · P2a',
+  name: '甜日果园岛 · P2b',
   seed: 20260816,
   worldStyle: {
     theme: 'riverside',
@@ -392,14 +422,7 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
       radiusZ: 7.4,
     },
   ],
-  appleSpawns: [
-    { x: -27, z: -12.5 },
-    { x: -15, z: -12.5 },
-    { x: 10, z: 13 },
-    { x: 28, z: 13 },
-    { x: -26, z: 15 },
-    { x: -18, z: 18 },
-  ],
+  appleSpawns: createAppleSpawns(),
   kidStart: { x: 0, z: 14 },
   guardStarts: [
     { x: -8, z: 1 },

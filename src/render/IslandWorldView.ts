@@ -36,6 +36,7 @@ export type IslandWorldVisual = {
   waterSegments: number;
   waterCollisionBlocks: number;
   bridges: number;
+  waterfalls: number;
   update(time: number, reducedMotion: boolean): void;
 };
 
@@ -65,6 +66,11 @@ const ISLAND_OUTLINE: ReadonlyArray<readonly [number, number]> = [
   [-34, -17],
 ];
 
+const WATERFALL_OUTLETS = [
+  { id: 'west', side: -1, x: -34.95, z: -5.8 },
+  { id: 'east', side: 1, x: 34.95, z: -7.2 },
+] as const;
+
 export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   const root = new THREE.Group();
   const materials = createIslandMaterials();
@@ -78,7 +84,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   root.add(createHouseTerrace(materials));
   root.add(createTerrainPatches(map, materials));
   root.add(createPaths(map.paths, materials));
-  const waterway = createWaterway(materials);
+  const waterway = createWaterway(materials, waves);
   propInstances += waterway.userData.propInstances as number;
   root.add(waterway);
   root.add(createPond(materials));
@@ -114,6 +120,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
     waterSegments: ISLAND_WATER_SEGMENTS.length,
     waterCollisionBlocks: ISLAND_WATER_BLOCKS.length,
     bridges: ISLAND_BRIDGES.length,
+    waterfalls: WATERFALL_OUTLETS.length,
     ...stats,
     update(time: number, reducedMotion: boolean): void {
       for (const wave of waves) {
@@ -154,7 +161,7 @@ function createOcean(materials: IslandMaterials, waves: WaveStrip[]): THREE.Grou
   return group;
 }
 
-function createWaterway(materials: IslandMaterials): THREE.Group {
+function createWaterway(materials: IslandMaterials, waves: WaveStrip[]): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-stepped-waterway-and-bridges';
   const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
@@ -211,9 +218,91 @@ function createWaterway(materials: IslandMaterials): THREE.Group {
   group.add(bankMesh, waterMesh, foamMesh);
 
   const bridges = createWaterwayBridges(materials, blockGeometry, matrix);
-  group.add(bridges);
+  const waterfalls = createWaterfallOutlets(materials, blockGeometry, matrix, waves);
+  group.add(bridges, waterfalls);
   group.userData.propInstances =
-    ISLAND_WATER_SEGMENTS.length * 4 + bridges.userData.propInstances as number;
+    ISLAND_WATER_SEGMENTS.length * 4 +
+    (bridges.userData.propInstances as number) +
+    (waterfalls.userData.propInstances as number);
+  return group;
+}
+
+function createWaterfallOutlets(
+  materials: IslandMaterials,
+  blockGeometry: THREE.BoxGeometry,
+  matrix: THREE.Object3D,
+  waves: WaveStrip[],
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'island-waterway-coastal-waterfalls';
+  const curtains = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.water,
+    WATERFALL_OUTLETS.length,
+  );
+  const waterfallFoamMaterial = materials.waterLight.clone();
+  waterfallFoamMaterial.opacity = 0.62;
+  const flowLines = new THREE.InstancedMesh(
+    blockGeometry,
+    waterfallFoamMaterial,
+    WATERFALL_OUTLETS.length * 3,
+  );
+  const lips = new THREE.InstancedMesh(
+    blockGeometry,
+    waterfallFoamMaterial,
+    WATERFALL_OUTLETS.length,
+  );
+  const splashGeometry = new THREE.RingGeometry(0.58, 1.28, 28);
+
+  WATERFALL_OUTLETS.forEach((outlet, outletIndex) => {
+    const rotationZ = -outlet.side * 0.75;
+    const cascadeX = outlet.x + outlet.side * 0.9;
+    setInstanceTransform(
+      curtains,
+      outletIndex,
+      matrix,
+      [cascadeX, -1.25, outlet.z],
+      [3.45, 0.16, 3.08],
+      [0, 0, rotationZ],
+    );
+    setInstanceTransform(
+      lips,
+      outletIndex,
+      matrix,
+      [outlet.side * 34.62, 0.17, outlet.z],
+      [0.68, 0.08, 3.28],
+    );
+    for (let lineIndex = 0; lineIndex < 3; lineIndex += 1) {
+      setInstanceTransform(
+        flowLines,
+        outletIndex * 3 + lineIndex,
+        matrix,
+        [cascadeX, -1.14, outlet.z + (lineIndex - 1) * 0.88],
+        [3.04 - Math.abs(lineIndex - 1) * 0.18, 0.035, 0.34],
+        [0, 0, rotationZ],
+      );
+    }
+
+    const splashMaterial = waterfallFoamMaterial.clone();
+    splashMaterial.opacity = 0.3;
+    const splash = new THREE.Mesh(splashGeometry, splashMaterial);
+    splash.name = `island-waterfall-${outlet.id}-splash`;
+    splash.rotation.x = -Math.PI / 2;
+    splash.position.set(outlet.side * 37, -2.38, outlet.z);
+    waves.push({ mesh: splash, baseScale: 1, phase: outletIndex * Math.PI + 0.7 });
+    group.add(splash);
+  });
+
+  curtains.name = 'island-waterfall-sloped-cascade-sheets';
+  flowLines.name = 'island-waterfall-flow-lines';
+  lips.name = 'island-waterfall-foam-lips';
+  curtains.receiveShadow = true;
+  curtains.instanceMatrix.needsUpdate = true;
+  flowLines.instanceMatrix.needsUpdate = true;
+  lips.instanceMatrix.needsUpdate = true;
+  group.add(curtains, flowLines, lips);
+  group.userData.propInstances =
+    curtains.count + flowLines.count + lips.count + WATERFALL_OUTLETS.length;
   return group;
 }
 

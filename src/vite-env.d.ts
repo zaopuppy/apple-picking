@@ -96,6 +96,8 @@ declare global {
       waterSegments: number;
       waterCollisionBlocks: number;
       bridges: number;
+      waterfalls: number;
+      appleGroups: number;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;

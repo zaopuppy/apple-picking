@@ -1021,7 +1021,7 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P2a',
+    mapName: '甜日果园岛 · P2b',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
@@ -1034,6 +1034,8 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     waterSegments: 3,
     waterCollisionBlocks: 5,
     bridges: 2,
+    waterfalls: 2,
+    appleGroups: 3,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
@@ -1058,6 +1060,57 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   expect(validation.valid, validation.errors.join('\n')).toBe(true);
   expect(validation.reachableTargets).toBe(validation.totalTargets);
   expect(validation.totalTargets).toBe(12);
+
+  const regionalTopology = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const bridgeFallbacks = island.ISLAND_BRIDGES.map((bridge: {
+      id: string;
+      x: number;
+      z: number;
+      width: number;
+      depth: number;
+    }) => {
+      const map = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+      map.landmarks.push({
+        id: `test-blocked-${bridge.id}`,
+        kind: 'homestead',
+        x: bridge.x,
+        z: bridge.z,
+        rotationY: 0,
+        radiusX: bridge.width / 2,
+        radiusZ: bridge.depth / 2,
+      });
+      const result = orchardMaps.validateOrchardMap(map);
+      return {
+        blockedBridgeId: bridge.id,
+        reachableTargets: result.reachableTargets,
+        totalTargets: result.totalTargets,
+      };
+    });
+    return {
+      groups: island.ISLAND_APPLE_GROUPS,
+      groupedSpawns: island.ISLAND_APPLE_GROUPS.flatMap(
+        (group: { spawns: Array<{ x: number; z: number }> }) => group.spawns,
+      ),
+      mapSpawns: island.SWEET_ORCHARD_ISLAND_MAP.appleSpawns,
+      bridgeFallbacks,
+    };
+  });
+  expect(regionalTopology.groups).toHaveLength(3);
+  expect(regionalTopology.groups.map((group: { spawns: unknown[] }) => group.spawns.length))
+    .toEqual([2, 2, 2]);
+  expect(regionalTopology.groupedSpawns).toEqual(regionalTopology.mapSpawns);
+  regionalTopology.bridgeFallbacks.forEach((fallback: {
+    blockedBridgeId: string;
+    reachableTargets: number;
+    totalTargets: number;
+  }) => {
+    expect(fallback.totalTargets).toBe(12);
+    expect(fallback.reachableTargets, fallback.blockedBridgeId).toBe(fallback.totalTargets);
+  });
 
   const collisionAndBridgeRoutes = await page.evaluate(async () => {
     const islandPath = String('/src/game/maps/IslandTourMap.ts');

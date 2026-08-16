@@ -10,7 +10,7 @@ import {
   resolveMedievalWorldMap,
   type MedievalWorldPreset,
 } from '../game/maps/MedievalWorldExperiments';
-import { isIslandTourMap } from '../game/maps/IslandTourMap';
+import { ISLAND_APPLE_GROUPS, isIslandTourMap } from '../game/maps/IslandTourMap';
 import type {
   KayKitTileShape,
   OrchardMap,
@@ -119,6 +119,8 @@ export type EnvironmentAssetDiagnostics = {
   waterSegments: number;
   waterCollisionBlocks: number;
   bridges: number;
+  waterfalls: number;
+  appleGroups: number;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -215,6 +217,8 @@ export class ArenaView {
     waterSegments: 0,
     waterCollisionBlocks: 0,
     bridges: 0,
+    waterfalls: 0,
+    appleGroups: 0,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -478,6 +482,8 @@ export class ArenaView {
         waterSegments: island.waterSegments,
         waterCollisionBlocks: island.waterCollisionBlocks,
         bridges: island.bridges,
+        waterfalls: island.waterfalls,
+        appleGroups: ISLAND_APPLE_GROUPS.length,
       };
       this.createForest();
       this.createDeliveryZones();
