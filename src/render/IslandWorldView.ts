@@ -3,7 +3,9 @@ import {
   treeColliderRadius,
   type OrchardIslandBridge,
   type OrchardIslandLayout,
+  type OrchardIslandRegion,
   type OrchardIslandRouteBlock,
+  type OrchardLandmark,
   type OrchardMap,
   type OrchardPath,
 } from '../game/maps/OrchardMap';
@@ -99,6 +101,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   root.name = 'sweet-orchard-island-world';
   root.add(createOcean(materials, waves));
   root.add(createIslandBody(layout, materials));
+  root.add(createIslandRegionPatches(layout.regions, materials));
   root.add(createNorthTerrace(materials));
   root.add(createHouseTerrace(materials));
   root.add(createTerrainPatches(map, materials));
@@ -109,8 +112,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   const waterway = createWaterway(layout, materials, waves);
   propInstances += waterway.userData.propInstances as number;
   root.add(waterway);
-  root.add(createPond(materials));
-  root.add(createCottage(materials));
+  root.add(createIslandEditableLandmarks(map.landmarks, materials));
 
   const orchard = createOrchardDetails(materials);
   propInstances += orchard.userData.propInstances as number;
@@ -132,7 +134,7 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   propInstances += routeBlocks.userData.propInstances as number;
   root.add(routeBlocks);
 
-  const regionProps = createIslandRegionPropVisual(materials);
+  const regionProps = createIslandRegionPropVisual(materials, layout.regions);
   propInstances += regionProps.propInstances;
   root.add(regionProps.root);
 
@@ -518,6 +520,38 @@ function createHouseTerrace(materials: IslandMaterials): THREE.Mesh {
   return terrace;
 }
 
+function createIslandRegionPatches(
+  regions: readonly OrchardIslandRegion[],
+  materials: IslandMaterials,
+): THREE.Group {
+  const group = new THREE.Group();
+  const geometry = new THREE.CircleGeometry(1, 48);
+  group.name = 'island-v5-semantic-region-patches';
+  for (const [index, region] of regions.entries()) {
+    const material = region.kind === 'plaza'
+      ? materials.sandLight
+      : region.kind === 'beach'
+        ? materials.sand
+        : region.kind === 'orchard'
+          ? materials.grassDark
+          : region.kind === 'garden'
+            ? materials.grassPatch
+            : materials.grassLight;
+    const patch = new THREE.Mesh(geometry, material);
+    patch.name = `island-region-patch-${region.id}`;
+    patch.rotation.x = -Math.PI / 2;
+    patch.rotation.z = -region.rotationY;
+    patch.position.set(region.x, 0.008 + index * 0.0002, region.z);
+    patch.scale.set(region.radiusX, region.radiusZ, 1);
+    patch.receiveShadow = true;
+    patch.userData.regionId = region.id;
+    patch.userData.regionKind = region.kind;
+    group.add(patch);
+  }
+  group.userData.regionIds = regions.map((region) => region.id);
+  return group;
+}
+
 function createTerrainPatches(map: OrchardMap, materials: IslandMaterials): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-authored-ground-patches';
@@ -602,20 +636,49 @@ function createPaths(paths: readonly OrchardPath[], materials: IslandMaterials):
   return group;
 }
 
-function createPond(materials: IslandMaterials): THREE.Group {
+function createIslandEditableLandmarks(
+  landmarks: readonly OrchardLandmark[],
+  materials: IslandMaterials,
+): THREE.Group {
   const group = new THREE.Group();
-  group.name = 'island-garden-pond';
-  group.position.set(20, 0, 10.5);
-  group.rotation.y = -0.18;
+  const renderedIds: string[] = [];
+  group.name = 'island-editable-landmark-visuals';
+  for (const landmark of landmarks) {
+    if (landmark.kind === 'pond') {
+      group.add(createPond(materials, landmark));
+      renderedIds.push(landmark.id);
+    } else if (landmark.asset) {
+      group.add(createCottage(materials, landmark));
+      renderedIds.push(landmark.id);
+    }
+  }
+  group.userData.landmarkIds = renderedIds;
+  return group;
+}
+
+function createPond(
+  materials: IslandMaterials,
+  landmark: OrchardLandmark,
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `island-pond-${landmark.id}`;
+  group.position.set(landmark.x, 0, landmark.z);
+  group.rotation.y = landmark.rotationY;
+  group.userData.landmarkId = landmark.id;
+  group.userData.landmarkKind = landmark.kind;
 
   const bank = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.16, 40), materials.stone);
-  bank.scale.set(5.1, 1, 4.1);
+  bank.scale.set(landmark.radiusX + 0.5, 1, landmark.radiusZ + 0.5);
   bank.position.y = 0.06;
   bank.receiveShadow = true;
 
   const water = new THREE.Mesh(new THREE.CircleGeometry(1, 48), materials.water);
   water.rotation.x = -Math.PI / 2;
-  water.scale.set(4.55, 3.55, 1);
+  water.scale.set(
+    Math.max(0.5, landmark.radiusX - 0.05),
+    Math.max(0.5, landmark.radiusZ - 0.05),
+    1,
+  );
   water.position.y = 0.15;
 
   const highlight = new THREE.Mesh(
@@ -623,7 +686,11 @@ function createPond(materials: IslandMaterials): THREE.Group {
     materials.waterLight,
   );
   highlight.rotation.x = -Math.PI / 2;
-  highlight.scale.set(4.2, 3.1, 1);
+  highlight.scale.set(
+    Math.max(0.4, landmark.radiusX - 0.4),
+    Math.max(0.4, landmark.radiusZ - 0.5),
+    1,
+  );
   highlight.position.y = 0.17;
   group.add(bank, water, highlight, createFootbridge(materials));
   return group;
@@ -643,10 +710,26 @@ function createFootbridge(materials: IslandMaterials): THREE.Group {
   return bridge;
 }
 
-function createCottage(materials: IslandMaterials): THREE.Group {
+function createCottage(
+  materials: IslandMaterials,
+  landmark: OrchardLandmark,
+): THREE.Group {
   const house = new THREE.Group();
-  house.name = 'island-hero-cottage';
-  house.position.set(21.5, 0.62, -17.4);
+  house.name = `island-cottage-${landmark.id}`;
+  house.position.set(
+    landmark.x,
+    landmark.id === 'island-main-house' ? 0.62 : 0.06,
+    landmark.z,
+  );
+  house.rotation.y = landmark.rotationY - Math.PI;
+  house.scale.set(
+    landmark.radiusX / 5.2,
+    Math.min(landmark.radiusX / 5.2, landmark.radiusZ / 3.7),
+    landmark.radiusZ / 3.7,
+  );
+  house.userData.landmarkId = landmark.id;
+  house.userData.landmarkKind = landmark.kind;
+  house.userData.asset = landmark.asset;
 
   const foundation = meshBox([9.2, 0.45, 6.1], materials.stone, [0, 0.22, 0]);
   const walls = meshBox([8.4, 3.8, 5.4], materials.plaster, [0, 2.2, 0]);

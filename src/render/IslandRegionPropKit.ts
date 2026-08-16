@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { OrchardIslandRegion } from '../game/maps/OrchardMap';
 import type { IslandMaterials } from './IslandMaterials';
 
 const MATERIAL_KEYS = [
@@ -38,8 +39,9 @@ export type IslandRegionPropVisual = {
 
 export function createIslandRegionPropVisual(
   materials: IslandMaterials,
+  regions: readonly OrchardIslandRegion[],
 ): IslandRegionPropVisual {
-  const clusters = createRegionPropClusters();
+  const clusters = createRegionPropClusters(regions);
   const parts = clusters.flatMap((cluster) => cluster.parts);
   const root = new THREE.Group();
   const geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -80,15 +82,47 @@ export function createIslandRegionPropVisual(
   };
 }
 
-function createRegionPropClusters(): RegionPropCluster[] {
-  return [
-    createOrchardTerraceMarket(),
-    createHouseServiceCluster(),
-    createGardenPlanterCluster(),
-    createBeachPicnicCluster(),
-    createPlazaOfferingCluster(),
-  ];
+function createRegionPropClusters(regions: readonly OrchardIslandRegion[]): RegionPropCluster[] {
+  const templates = new Map<OrchardIslandRegion['kind'], RegionPropCluster>([
+    ['orchard', createOrchardTerraceMarket()],
+    ['homestead', createHouseServiceCluster()],
+    ['garden', createGardenPlanterCluster()],
+    ['beach', createBeachPicnicCluster()],
+    ['plaza', createPlazaOfferingCluster()],
+  ]);
+  return regions.flatMap((region) => {
+    const template = templates.get(region.kind);
+    if (!template) return [];
+    const anchor = REGION_TEMPLATE_ANCHORS[region.kind];
+    const rotation = region.rotationY - anchor.rotationY;
+    const cosine = Math.cos(rotation);
+    const sine = Math.sin(rotation);
+    return [{
+      id: `${region.id}-story-props`,
+      parts: template.parts.map((part) => {
+        const localX = part.x - anchor.x;
+        const localZ = part.z - anchor.z;
+        return {
+          ...part,
+          x: region.x + localX * cosine - localZ * sine,
+          z: region.z + localX * sine + localZ * cosine,
+          rotationY: (part.rotationY ?? 0) + rotation,
+        };
+      }),
+    }];
+  });
 }
+
+const REGION_TEMPLATE_ANCHORS: Record<
+  OrchardIslandRegion['kind'],
+  { x: number; z: number; rotationY: number }
+> = {
+  orchard: { x: -21, z: -13, rotationY: 0 },
+  homestead: { x: 21.5, z: -17.4, rotationY: 0 },
+  plaza: { x: 0, z: 3, rotationY: 0 },
+  garden: { x: 17, z: 13, rotationY: -0.12 },
+  beach: { x: -23, z: 17, rotationY: 0 },
+};
 
 function createOrchardTerraceMarket(): RegionPropCluster {
   const parts: BoxPart[] = [

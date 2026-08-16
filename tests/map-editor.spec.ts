@@ -17,6 +17,19 @@ test('map editor renders a valid open orchard without viewport overflow', async 
   await expect(page.getByLabel('世界主题')).toHaveValue('village');
   await expect(page.getByLabel('地块形状')).toHaveValue('square');
   await expect(page.getByLabel('建筑模型')).toHaveValue(/.+/);
+  await expect(page.locator('#world-style-controls')).toBeVisible();
+  await expect(page.locator('#tree-controls')).toBeVisible();
+  await expect(page.locator('#brush-controls')).toBeVisible();
+  await expect(page.locator('#building-controls')).toBeHidden();
+  await page.getByRole('button', { name: /KayKit 建筑/ }).click();
+  await expect(page.locator('#building-controls')).toBeVisible();
+  await expect(page.locator('#tree-controls')).toBeHidden();
+  await page.getByRole('button', { name: /岛屿结构/ }).click();
+  await expect(page.locator('#world-style-controls')).toBeHidden();
+  await expect(page.locator('#building-controls')).toBeHidden();
+  await expect(page.locator('#tree-controls')).toBeHidden();
+  await expect(page.locator('#brush-controls')).toBeHidden();
+  await page.getByRole('button', { name: /种树/ }).click();
 
   const overflow = await page.evaluate(() => ({
     body: document.documentElement.scrollWidth - window.innerWidth,
@@ -80,6 +93,7 @@ test('manual KayKit building and square world settings persist into the playable
 
   await page.getByLabel('世界主题').selectOption('fortified');
   await page.getByLabel('地块形状').selectOption('square');
+  await page.getByRole('button', { name: /KayKit 建筑 3/ }).click();
   await page.getByLabel('建筑模型').selectOption('castle');
   await page.getByLabel('建筑朝向').selectOption('1');
   const canvas = page.getByLabel('果园地图编辑画布');
@@ -477,9 +491,18 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   await page.evaluate(async () => {
     const islandPath = String('/src/game/maps/IslandTourMap.ts');
     const island = await import(/* @vite-ignore */ islandPath);
+    const map = structuredClone(island.SWEET_ORCHARD_ISLAND_MAP);
+    const house = map.landmarks.find((landmark: { id: string }) =>
+      landmark.id === 'island-main-house');
+    const pond = map.landmarks.find((landmark: { id: string }) => landmark.id === 'island-pond');
+    if (!house || !pond) throw new Error('Island editable landmarks are missing.');
+    house.x = 21;
+    house.z = -17;
+    pond.x = 19.5;
+    pond.z = 11;
     localStorage.setItem(
       'apple-picking.active-map.v5',
-      JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP),
+      JSON.stringify(map),
     );
   });
   await page.goto('/editor.html');
@@ -515,6 +538,10 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-world-mode', 'island-v5');
   await expect(preview).toHaveAttribute('data-island-regions', '5');
+  await expect(preview).toHaveAttribute(
+    'data-island-landmark-signature',
+    /island-main-house:21\.00:-17\.00\|island-pond:19\.50:11\.00/,
+  );
   await expect(page.locator('#preview-status')).toContainText('岛屿 v5 已同步 · 5 区域');
   await page.screenshot({
     path: testInfo.outputPath('island-v5-editor-3d.png'),
@@ -638,6 +665,20 @@ test('island geometry editor keeps route and bridge collision proxies synchroniz
     kind: 'homestead',
     rotationY: 0,
   })));
+  await page.getByRole('button', { name: '3D 预览' }).click();
+  const preview = page.getByLabel('KayKit 地图三维预览');
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-island-region-prop-clusters', '5');
+  await expect(preview).toHaveAttribute(
+    'data-island-region-patch-signature',
+    /island-region-orchard:-20\.50:-12\.50:11\.00:6\.00/,
+  );
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: testInfo.outputPath('island-semantic-regions-3d.png'),
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: '2D 编辑' }).click();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: testInfo.outputPath('island-v5-geometry-editor.png'),
@@ -837,8 +878,23 @@ test('coast editor safely moves, inserts and removes outline nodes with collisio
   await page.getByRole('button', { name: '删除海岸节点' }).click();
   await expect(page.locator('#island-selection')).toContainText('海岸节点 2/16');
 
-  const selectedNode = await worldToScreen(-18, -25);
-  const draggedNode = await worldToScreen(-17.4, -24.4);
+  await canvas.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  const dragBox = await canvas.boundingBox();
+  if (!dragBox) throw new Error('Island editor canvas is not visible.');
+  const dragPadding = Math.min(
+    24,
+    Math.max(10, Math.min(dragBox.width, dragBox.height) * 0.04),
+  );
+  const dragScale = Math.min(
+    (dragBox.width - dragPadding * 2) / 72,
+    (dragBox.height - dragPadding * 2) / 54,
+  );
+  const dragScreen = (x: number, z: number) => ({
+    x: dragBox.x + dragBox.width / 2 + x * dragScale,
+    y: dragBox.y + dragBox.height / 2 + z * dragScale,
+  });
+  const selectedNode = dragScreen(-18, -25);
+  const draggedNode = dragScreen(-17.4, -24.4);
   await page.mouse.move(selectedNode.x, selectedNode.y);
   await page.mouse.down();
   await page.mouse.move(draggedNode.x, draggedNode.y, { steps: 5 });
@@ -971,6 +1027,7 @@ test('island object builder completes region, obstacle, water and bridge CRUD', 
   await clickWorld(0, 19);
   await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-bridge-custom-1');
   await expect(canvas).toHaveAttribute('data-island-bridges', '3');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: testInfo.outputPath('island-object-builder-2d.png'),
     fullPage: true,
@@ -981,6 +1038,8 @@ test('island object builder completes region, obstacle, water and bridge CRUD', 
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-island-water-segments', '4');
   await expect(preview).toHaveAttribute('data-island-bridges', '3');
+  await expect(preview).toHaveAttribute('data-island-region-prop-clusters', '5');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: testInfo.outputPath('island-object-builder-3d.png'),
     fullPage: true,

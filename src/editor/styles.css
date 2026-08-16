@@ -200,6 +200,11 @@ button:disabled { cursor: not-allowed; opacity: 0.42; }
   gap: 7px;
 }
 
+.world-style-grid[hidden],
+.control-block[hidden] {
+  display: none;
+}
+
 .building-controls label + select { margin-bottom: 4px; }
 
 select,
@@ -370,7 +375,8 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 
 .map-board {
   display: grid;
-  grid-template-rows: auto minmax(430px, 1fr) auto;
+  grid-template-rows: auto auto auto;
+  align-self: start;
   overflow: hidden;
   border-radius: 4px 24px 4px 24px;
   background: var(--paper-deep);
@@ -420,8 +426,11 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 
 .canvas-shell {
   position: relative;
-  height: clamp(430px, calc(100vh - 220px), 760px);
-  min-height: 0;
+  width: 100%;
+  height: auto;
+  min-height: 430px;
+  max-height: 760px;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
   background: #91ad62;
 }

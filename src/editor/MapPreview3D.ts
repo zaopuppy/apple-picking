@@ -71,7 +71,7 @@ export class MapPreview3D {
     this.scene.add(hemisphere, sun);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
-    this.resizeObserver.observe(canvas.parentElement ?? canvas);
+    this.resizeObserver.observe(canvas);
     this.animate();
   }
 
@@ -143,6 +143,9 @@ export class MapPreview3D {
       this.canvas.dataset.islandRouteBlocks = String(map.islandLayout?.routeBlocks.length ?? 0);
       this.canvas.dataset.islandWaterSegments = String(map.islandLayout?.waterSegments.length ?? 0);
       this.canvas.dataset.islandBridges = String(map.islandLayout?.bridges.length ?? 0);
+      this.canvas.dataset.islandRegionPropClusters = String(islandVisual?.regionPropClusters ?? 0);
+      this.canvas.dataset.islandRegionPatchSignature = regionPatchSignature(islandVisual?.root ?? null);
+      this.canvas.dataset.islandLandmarkSignature = islandLandmarkSignature(islandVisual?.root ?? null);
       this.renderer.setClearColor(islandMode ? ISLAND_PREVIEW_BACKGROUND : PREVIEW_BACKGROUND);
       this.status.dataset.state = 'ready';
       this.status.textContent = islandMode
@@ -186,6 +189,28 @@ export class MapPreview3D {
     this.markerRoot.removeFromParent();
     this.markerRoot = null;
   }
+}
+
+function regionPatchSignature(root: THREE.Group | null): string {
+  const patches = root?.getObjectByName('island-v5-semantic-region-patches');
+  if (!patches) return '';
+  return patches.children.map((patch) => [
+    String(patch.userData.regionId),
+    patch.position.x.toFixed(2),
+    patch.position.z.toFixed(2),
+    patch.scale.x.toFixed(2),
+    patch.scale.y.toFixed(2),
+  ].join(':')).join('|');
+}
+
+function islandLandmarkSignature(root: THREE.Group | null): string {
+  const landmarks = root?.getObjectByName('island-editable-landmark-visuals');
+  if (!landmarks) return '';
+  return landmarks.children.map((landmark) => [
+    String(landmark.userData.landmarkId),
+    landmark.position.x.toFixed(2),
+    landmark.position.z.toFixed(2),
+  ].join(':')).join('|');
 }
 
 function createPreviewMarkers(map: OrchardMap): THREE.Group {

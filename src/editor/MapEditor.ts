@@ -148,6 +148,10 @@ export class MapEditor {
   private readonly brushInput = getElement<HTMLInputElement>('#brush-size');
   private readonly brushValue = getElement<HTMLOutputElement>('#brush-size-value');
   private readonly treeVariantInput = getElement<HTMLSelectElement>('#tree-variant');
+  private readonly worldStyleControls = getElement<HTMLElement>('#world-style-controls');
+  private readonly buildingControls = getElement<HTMLElement>('#building-controls');
+  private readonly treeControls = getElement<HTMLElement>('#tree-controls');
+  private readonly brushControls = getElement<HTMLElement>('#brush-controls');
   private readonly worldThemeInput = getElement<HTMLSelectElement>('#world-theme');
   private readonly tileShapeInput = getElement<HTMLSelectElement>('#tile-shape');
   private readonly buildingAssetInput = getElement<HTMLSelectElement>('#building-asset');
@@ -233,8 +237,9 @@ export class MapEditor {
   start(): void {
     this.nameInput.value = this.map.name;
     this.syncWorldStyleControls();
+    this.updateToolSpecificControls();
     this.bindControls();
-    this.resizeObserver.observe(this.canvas.parentElement ?? this.canvas);
+    this.resizeObserver.observe(this.canvas);
     this.resizeCanvas();
     this.preview.setMap(this.map);
     this.generateCandidates();
@@ -447,9 +452,26 @@ export class MapEditor {
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
       button.classList.toggle('active', button.dataset.tool === tool);
     }
+    this.updateToolSpecificControls();
     this.updateIslandGeometryPanel();
     this.updateDeliveryZonePanel();
     this.draw();
+  }
+
+  private updateToolSpecificControls(): void {
+    const structureTool = this.tool === 'island-select' || this.tool === 'delivery';
+    this.worldStyleControls.hidden = structureTool;
+    this.buildingControls.hidden = this.tool !== 'homestead';
+    this.treeControls.hidden = this.tool !== 'tree';
+    this.brushControls.hidden = ![
+      'tree',
+      'erase',
+      'homestead',
+      'pond',
+      'orchard',
+      'meadow',
+      'path',
+    ].includes(this.tool);
   }
 
   private selectIslandAt(point: Vec2): void {

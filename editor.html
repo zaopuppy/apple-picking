@@ -45,7 +45,7 @@
             <button class="tool" data-tool="delivery" type="button"><b>◎</b><span>投递区<small>W</small></span></button>
           </div>
 
-          <div class="world-style-grid" aria-label="KayKit 世界样式">
+          <div id="world-style-controls" class="world-style-grid" aria-label="KayKit 世界样式">
             <label for="world-theme">世界主题
               <select id="world-theme">
                 <option value="village">林间村落</option>
@@ -61,7 +61,7 @@
             </label>
           </div>
 
-          <div class="control-block building-controls">
+          <div id="building-controls" class="control-block building-controls" hidden>
             <label for="building-asset">建筑模型</label>
             <select id="building-asset">
               <option value="house">住宅</option>
@@ -86,7 +86,7 @@
             </select>
           </div>
 
-          <div class="control-block">
+          <div id="tree-controls" class="control-block">
             <label for="tree-variant">障碍品种</label>
             <select id="tree-variant">
               <option value="stump">树桩（推荐）</option>
@@ -95,7 +95,7 @@
               <option value="pine">松树</option>
             </select>
           </div>
-          <div class="control-block range-control">
+          <div id="brush-controls" class="control-block range-control">
             <label for="brush-size">画笔半径 <output id="brush-size-value">4.5</output></label>
             <input id="brush-size" type="range" min="1.5" max="11" step="0.5" value="4.5" />
           </div>
