@@ -490,7 +490,9 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
 
 export function resolveIslandTourMap(search = window.location.search): OrchardMap | null {
   const world = new URLSearchParams(search).get('world');
-  return world === 'island' ? cloneOrchardMap(SWEET_ORCHARD_ISLAND_MAP) : null;
+  return world === null || world === 'island'
+    ? cloneOrchardMap(SWEET_ORCHARD_ISLAND_MAP)
+    : null;
 }
 
 export function isIslandTourMap(map: OrchardMap): boolean {

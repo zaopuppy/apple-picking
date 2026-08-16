@@ -65,7 +65,7 @@
 ## KayKit 世界试验场
 
 - 完整发布源包的 226 个 GLB：objects 30、hex 128、square 68，总计 3,965,144 bytes；`public/assets/models/kaykit-medieval/catalog.json` 是运行时和后续编辑器共用的文件目录；
-- 默认 `/` 进入林间村落，另外两套候选通过 `?world=medieval&layout=riverside|fortified` 进入；`?world=classic` 运行本地编辑器保存的 v5 地图，并兼容迁移 v1–v4；
+- 默认 `/` 进入甜日果园岛；`?world=island` 保留为兼容入口，三套 KayKit 候选通过 `?world=medieval&layout=village|riverside|fortified` 进入；`?world=classic` 保留旧果园渲染对照，`?world=custom` 运行本地编辑器保存的 v5 地图，并兼容迁移 v1–v4；
 - 单张地图按语义使用目录中的相关模型，不把全部变体同时加载。完整资源库用于主题生成、自动铺地和后续编辑器资产面板；
 - 六边形地面按模型原始尖顶朝向无缝实例化；道路先使用宽沙土地块表达活动带，正式自动拼路延后到语义编辑器阶段；
 - KayKit 建筑只放进 `homestead` 的不可进入矩形，水面只覆盖 `pond` 的不可进入椭圆，城墙位于竞技场夹紧边界；模型网格不直接进入确定性模拟；

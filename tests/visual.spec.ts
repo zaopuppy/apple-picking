@@ -52,7 +52,7 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.goto('/');
+  await page.goto('/?world=medieval&layout=village');
   await expect(page.locator('#game-canvas')).toBeVisible();
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10);
   if (testInfo.project.name === 'desktop-chrome') {
@@ -1003,7 +1003,7 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     testInfo.project.name !== 'desktop-chrome',
     'Island desktop development is still in progress; mobile QA is deferred.',
   );
-  await page.goto('/?world=island');
+  await page.goto('/');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.worldMode))
     .toBe('island');
@@ -1110,6 +1110,25 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     bodyDepth: 17.5,
   });
   await expect(page.locator('[data-world-layout="island"]')).toHaveAttribute('aria-current', 'page');
+
+  const routeSelection = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    return {
+      defaultMap: island.resolveIslandTourMap('')?.id ?? null,
+      islandAlias: island.resolveIslandTourMap('?world=island')?.id ?? null,
+      classicMap: island.resolveIslandTourMap('?world=classic')?.id ?? null,
+      customMap: island.resolveIslandTourMap('?world=custom')?.id ?? null,
+      medievalMap: island.resolveIslandTourMap('?world=medieval&layout=village')?.id ?? null,
+    };
+  });
+  expect(routeSelection).toEqual({
+    defaultMap: 'sweet-orchard-island-p1',
+    islandAlias: 'sweet-orchard-island-p1',
+    classicMap: null,
+    customMap: null,
+    medievalMap: null,
+  });
 
   const sample = await sampleCanvas(page);
   expect(sample, `${testInfo.project.name}: ${JSON.stringify(sample)}`).toMatchObject({ ok: true });

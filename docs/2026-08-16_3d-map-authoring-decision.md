@@ -25,6 +25,8 @@
 
 3D 道路使用逐点点击：第一次确定起点，后续点击追加路段。树木和擦除使用当前画笔半径，可连续点击不同位置。切换工具或视图会结束当前 3D 道路链。
 
+左键交互按“单击放置、拖动操作”区分：指针移动超过 6 px 时不执行放置。建筑、池塘、果园/草地和角色/果实位置成功放置一次后自动退出放置状态；树木、擦除和道路仍是连续工具。模型类工具处于待放置状态时，点中已有模型会优先进入选择或拖动。
+
 ## 状态边界
 
 ```text
@@ -56,6 +58,20 @@ OrchardMap 草稿
 - `03bb10a editor: lock building orientation`
 - `90a6f2d editor: drag island structures in 3d`
 - `2ca098e editor: author map objects in 3d`
+- `df67260 editor: complete hybrid 3d workflow`
+- `c875d4a editor: separate 3d placement from dragging`
+
+## 默认地图晋升
+
+桌面编辑器闭环完成后，甜日果园岛晋升为产品默认地图：
+
+- `/`：甜日果园岛，作为正常玩家入口。
+- `/?world=island`：同一地图的兼容入口，保留旧书签和测试链接。
+- `/?world=classic`：旧果园渲染对照。
+- `/?world=custom`：编辑器当前保存地图，只在用户明确选择时加载。
+- `/?world=medieval&layout=village|riverside|fortified`：三套 KayKit 构图候选，不再占用默认地址。
+
+本地保存地图不会悄悄覆盖 `/`；这样默认体验稳定，同时保留编辑器试玩和历史方案比较。
 
 ## 验证范围
 
