@@ -23,10 +23,17 @@ export type IslandMaterials = {
   flowerYellow: THREE.MeshStandardMaterial;
   flowerWhite: THREE.MeshStandardMaterial;
   window: THREE.MeshStandardMaterial;
+  groundContact: THREE.MeshBasicMaterial;
 };
 
-function matte(color: THREE.ColorRepresentation, roughness = 0.9): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+function matte(
+  name: string,
+  color: THREE.ColorRepresentation,
+  roughness = 0.9,
+): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+  material.name = `island-${name}-material`;
+  return material;
 }
 
 export function createIslandMaterials(): IslandMaterials {
@@ -37,15 +44,15 @@ export function createIslandMaterials(): IslandMaterials {
   grassPatchTexture.needsUpdate = true;
 
   return {
-    grass: texturedGrass('#7eb45d', grassTexture, 0.94),
-    grassLight: texturedGrass('#88bb65', grassTexture, 0.95),
-    grassDark: texturedGrass('#65994d', grassTexture, 0.97),
-    grassPatch: texturedGrass('#82b75f', grassPatchTexture, 0.96),
-    cliff: matte('#c98957', 0.98),
-    cliffDark: matte('#98613f', 1),
-    sand: matte('#e6c77f', 0.96),
-    sandLight: matte('#f2dca0', 0.98),
-    soil: matte('#8a5b3e', 1),
+    grass: texturedGrass('grass', '#7eb45d', grassTexture, 0.94),
+    grassLight: texturedGrass('grass-light', '#88bb65', grassTexture, 0.95),
+    grassDark: texturedGrass('grass-dark', '#65994d', grassTexture, 0.97),
+    grassPatch: texturedGrass('grass-patch', '#82b75f', grassPatchTexture, 0.96),
+    cliff: matte('cliff', '#c98957', 0.95),
+    cliffDark: matte('cliff-dark', '#98613f', 0.99),
+    sand: matte('sand', '#e6c77f', 0.93),
+    sandLight: matte('sand-light', '#f2dca0', 0.96),
+    soil: matte('soil', '#8a5b3e', 0.99),
     water: new THREE.MeshPhysicalMaterial({
       color: '#36b9cd',
       roughness: 0.24,
@@ -63,16 +70,16 @@ export function createIslandMaterials(): IslandMaterials {
       depthWrite: false,
       side: THREE.DoubleSide,
     }),
-    wood: matte('#a96c3f', 0.88),
-    woodDark: matte('#6f402b', 0.94),
-    plaster: matte('#f3dfb7', 0.9),
-    roof: matte('#dd7160', 0.86),
-    roofLight: matte('#f09473', 0.88),
-    stone: matte('#a59d8c', 0.98),
-    foliage: matte('#4f9e4c', 0.92),
-    flowerPink: matte('#f59bb5', 0.86),
-    flowerYellow: matte('#f4d65c', 0.86),
-    flowerWhite: matte('#fff4dc', 0.9),
+    wood: matte('wood', '#a96c3f', 0.8),
+    woodDark: matte('wood-dark', '#6f402b', 0.9),
+    plaster: matte('plaster', '#f3dfb7', 0.92),
+    roof: matte('roof', '#dd7160', 0.74),
+    roofLight: matte('roof-light', '#f09473', 0.79),
+    stone: matte('stone', '#a59d8c', 0.96),
+    foliage: matte('foliage', '#4f9e4c', 0.9),
+    flowerPink: matte('flower-pink', '#f59bb5', 0.74),
+    flowerYellow: matte('flower-yellow', '#f4d65c', 0.74),
+    flowerWhite: matte('flower-white', '#fff4dc', 0.8),
     window: new THREE.MeshStandardMaterial({
       color: '#a9d9dc',
       emissive: '#5f9da2',
@@ -80,20 +87,31 @@ export function createIslandMaterials(): IslandMaterials {
       roughness: 0.42,
       metalness: 0,
     }),
+    groundContact: new THREE.MeshBasicMaterial({
+      name: 'island-ground-contact-material',
+      color: '#31533a',
+      transparent: true,
+      opacity: 0.14,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
   };
 }
 
 function texturedGrass(
+  name: string,
   color: THREE.ColorRepresentation,
   map: THREE.Texture,
   roughness: number,
 ): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshStandardMaterial({
     color,
     map,
     roughness,
     metalness: 0,
   });
+  material.name = `island-${name}-material`;
+  return material;
 }
 
 function createGrassTexture(): THREE.CanvasTexture {

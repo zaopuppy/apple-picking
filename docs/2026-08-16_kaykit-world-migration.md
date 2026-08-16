@@ -1,6 +1,6 @@
 # 地图世界迁移：持续迭代记录
 
-> 状态：P2b 已由提交 `83fcfa9` 固化；P3a 区域叙事道具与边缘密度已通过桌面验证，等待视觉评审。移动端专项验证延期到桌面版本完成后。
+> 状态：P3a 已由提交 `a1056ec` 固化；P3b 材质、接触阴影与环境动效已通过桌面验证，等待视觉评审。移动端专项验证延期到桌面版本完成后。
 
 ## 当前需要用户确认（P1.2）
 
@@ -515,6 +515,33 @@ P2b 已由提交 `83fcfa9`（`render: add island waterfalls and route resilience
 - 最终 active-play 截图为 `artifacts/canvas-inspection-island/p3a-desktop-final/desktop-active-play.png`。桌面实测 60 FPS，calls `156`、triangles `98,968`、geometries `128`、textures `14`；相对 P2b 分别增加 `7` calls、`1,164` triangles、`1` geometry、`0` textures，仍远低于预算。画布为非空，控制台错误和页面错误均为 `0`。
 - 外部素材策略保持不变：本轮没有新的主角、地标或标志性表面，低价值重复道具继续使用程序化矩形套件与现有岛屿材质，不调用 3D、图像、UI 或音频生成器。没有新增纹理、后处理、动态灯或独立阴影系统。
 - 视觉测试策略继续跳过像素级基线：地图尚在快速构图迭代，固定截图很容易把有意的道具移动当作失败；当前由确定性地图/组团诊断、完整交互回归、画布像素 smoke、renderer 预算和同机位人工截图共同覆盖。待桌面构图稳定后再统一决定是否建立视觉基线。
+
+### P3b 材质、接触阴影与环境动效（桌面优先）
+
+P3a 已由提交 `a1056ec`（`render: add island region story props`）固化。本轮不再增加区域数量或大型道具，而是让现有岛屿地形、程序化道具和 Nature Pack 植物在同一个光照与材质体系里更像一套玩具模型。
+
+#### 技术美术契约
+
+- 可渲染方向：保持明亮、低饱和阴影、暖日光和哑光玩具质感；岛屿轮廓、住宅、角色、树木、苹果和投递点是 active-play 距离必须保持清楚的主表面，花朵、泡沫、木箱和接触阴影属于可实例化的支撑表面。
+- 材质套件：继续使用现有草地、泥土、木材、屋顶、石材、叶片、水体和交互信号角色，但拉开木材/屋顶与土壤/崖壁的粗糙度差异。岛屿中的 Nature Pack 树与苹果使用独立的 `island-matte` 归一化配置；旧果园和编辑器仍保留素材源配置，避免全局改色。
+- 光照与接触：保留 ACES、sRGB、单个 Hemisphere fill、单个 Directional sun 和当前 Three.js 支持的 PCF；岛屿只收紧太阳阴影视锥并调整阴影半径，不使用已弃用且会在运行时退回 PCF 的 `PCFSoftShadowMap`，也不新增第二盏投影灯、后处理或环境贴图。树木和少量高价值区域锚点共用一个透明实例化接触阴影批次。
+- 环境动效：保留现有海浪/瀑布呼吸，再给花头和海滩遮阳伞加入极小幅度轻风。动画只改变视觉矩阵，不触碰碰撞、拾取或投递状态；`reduced-motion` 必须把新增位移与转动归零，同时保留静态构图。
+- 比例契约：角色约 `1.72`、苹果约 `0.78`、成熟树约 `2.55`–`2.90`、住宅约 `6.6` 个世界单位高；本轮锁定为 `island-toy-scale`，不通过视觉缩放制造碰撞代理与模型不一致。
+- 诊断必须补充 Nature 材质配置、比例配置、接触阴影实例数、环境动效组数/当前幅度，以及 tone mapping、曝光、阴影类型、阴影贴图、投影灯数量和 post pass 数量。
+- 桌面预算继续为 calls `<= 300`、triangles `<= 750k`、geometries `<= 300`、textures `<= 60`、投影灯 `<= 2`、shadow map `<= 2048`、post passes `<= 2`。P3a 基线为 60 FPS、calls `156`、triangles `98,968`、geometries `128`、textures `14`。
+- 本轮没有新的主角、建筑、标志性道具、纹理、图标或声音表面；外部 3D、图像、UI 和音频生成不在范围内，现有 Nature/KayKit 资产与程序化支撑件足以完成这次一致性修订。
+- 继续使用确定性语义/诊断、reduced-motion 行为断言、完整交互回归、画布 smoke、renderer 预算和同机位截图；地图仍在构图迭代，暂不建立像素级截图基线。移动端仍按用户决定延期。
+
+#### P3b 实施结果
+
+- 岛屿材质全部获得稳定名称并形成明确粗糙度梯度：土壤/崖壁最哑光，草地和石材保持柔和，木材/屋顶/花朵提供较清晰的暖色高光。Nature Pack 树与苹果在甜日岛使用轻微暖色、`roughness 0.88`、`metalness 0` 的 `island-matte` 配置；旧果园与 3D 编辑预览仍使用 `source` 配置。
+- 31 棵成熟树、2 张北侧果摊和 1 把海滩遮阳伞共用 34 个透明接触阴影实例，只增加 1 个几何和 1 个材质。运行时没有新增碰撞，物理仍为固定步长 `1/60`、9 bodies、61 colliders、4 sensors、0 CCD bodies。
+- 3 组花头、1 把遮阳伞和已有 5 组海浪/瀑布共同组成 9 组环境动效。新增花朵和伞面只更新视觉矩阵；桌面专项测试会先确认正常模式的 `ambientMotionAmplitude` 非零，再开启 reduced-motion 并断言幅度精确归零。
+- 光照继续使用 ACES、sRGB、曝光 `1.01`、单 Hemisphere fill、单 Directional sun、PCF、`2048` shadow map 和 0 个 post passes。首次专项测试发现当前 Three.js 会把已弃用的 `PCFSoftShadowMap` 自动退回 PCF，因此移除该弃用常量，保留收紧阴影视锥、阴影半径、bias 和 `normalBias` 的有效调整；诊断现在报告真实运行配置。
+- `npm run build` 通过；岛屿专项测试 `1/1` 通过；完整 `npx playwright test --project=desktop-chrome` 为 `42/42` 通过，覆盖规则、真实键盘输入、地图编辑器、资源加载/降级、画布、reduced-motion 和岛屿拓扑。按阶段约定没有运行移动端项目。
+- 最终 active-play 截图为 `artifacts/canvas-inspection-island/p3b-desktop-final/desktop-active-play.png`。桌面实测 60 FPS，calls `158`、triangles `100,600`、geometries `129`、textures `14`；相对 P3a 分别增加 `2` calls、`1,632` triangles、`1` geometry、`0` textures，仍远低于预算。世界自身为 92 meshes、10,926 triangles、29 materials、2 textures。
+- 画布像素为 entropy `3.26`、edge density `0.203`、contrast `66`、dominant share `0.534`；相对 P3a，边缘密度与明度对比略升，色彩熵略降是统一暖色哑光配置后的预期结果。画布非空，控制台错误和页面错误均为 `0`。
+- 外部素材来源没有变化：本轮只调整已有 Nature/KayKit/程序化表面的运行时材质、灯光和视觉矩阵，没有新的英雄或标志性资产，因此没有调用 3D、图像、UI 或音频生成器。视觉测试仍跳过像素基线，以免快速构图期的有意调色成为脆弱回归；语义/动效诊断、交互、画布 smoke、预算和同机位截图提供当前覆盖。
 
 ## 第一轮：可玩视觉试验场
 

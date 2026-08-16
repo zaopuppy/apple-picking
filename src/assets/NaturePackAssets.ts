@@ -17,18 +17,24 @@ const TREE_TARGET_HEIGHTS: Record<TreeVariant, number> = {
   cherry: 2.55,
 };
 const APPLE_TARGET_HEIGHT = 0.78;
+const ISLAND_MATTE_TINT = new THREE.Color('#f1e5c7');
+
+export type NatureMaterialProfile = 'source' | 'island-matte';
 
 export type LoadedTreeVisuals = {
   root: THREE.Group;
   variants: number;
   instances: number;
   triangles: number;
+  materials: number;
+  materialProfile: NatureMaterialProfile;
 };
 
 export type LoadedAppleVisual = {
   root: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
   triangles: number;
+  materialProfile: NatureMaterialProfile;
 };
 
 type MeshPrototype = {
@@ -43,6 +49,7 @@ let packPromise: Promise<GLTF> | null = null;
 
 export async function loadNaturePackTreeVisuals(
   placements: readonly OrchardTree[],
+  materialProfile: NatureMaterialProfile = 'source',
 ): Promise<LoadedTreeVisuals> {
   const gltf = await loadNaturePack();
   gltf.scene.updateMatrixWorld(true);
@@ -54,6 +61,7 @@ export async function loadNaturePackTreeVisuals(
   const root = new THREE.Group();
   root.name = 'nature-pack-orchard-trees';
   let triangles = 0;
+  const profiledMaterials = new Map<THREE.Material, THREE.Material>();
 
   for (const variant of Object.keys(TREE_NODE_NAMES) as TreeVariant[]) {
     const prototype = prototypes.get(variant);
@@ -62,7 +70,7 @@ export async function loadNaturePackTreeVisuals(
     if (variantPlacements.length === 0) continue;
     const instances = new THREE.InstancedMesh(
       prototype.geometry,
-      prototype.material,
+      materialForProfile(prototype.material, materialProfile, profiledMaterials),
       variantPlacements.length,
     );
     instances.name = `nature-pack-tree-${variant}`;
@@ -101,10 +109,14 @@ export async function loadNaturePackTreeVisuals(
     variants: prototypes.size,
     instances: placements.length,
     triangles,
+    materials: profiledMaterials.size,
+    materialProfile,
   };
 }
 
-export async function createNaturePackAppleVisual(): Promise<LoadedAppleVisual> {
+export async function createNaturePackAppleVisual(
+  materialProfile: NatureMaterialProfile = 'source',
+): Promise<LoadedAppleVisual> {
   const gltf = await loadNaturePack();
   gltf.scene.updateMatrixWorld(true);
   const prototype = extractPrototype(gltf.scene, APPLE_NODE_NAME);
@@ -115,6 +127,7 @@ export async function createNaturePackAppleVisual(): Promise<LoadedAppleVisual> 
 
   const material = sourceMaterial.clone();
   material.name = 'nature-pack-apple-instance-material';
+  applyMaterialProfile(material, materialProfile);
   material.emissive.set('#7f211b');
   material.emissiveIntensity = 0.08;
   const mesh = new THREE.Mesh(prototype.geometry, material);
@@ -142,7 +155,36 @@ export async function createNaturePackAppleVisual(): Promise<LoadedAppleVisual> 
     root,
     materials: [material],
     triangles: prototype.triangles,
+    materialProfile,
   };
+}
+
+function materialForProfile(
+  source: THREE.Material,
+  profile: NatureMaterialProfile,
+  cache: Map<THREE.Material, THREE.Material>,
+): THREE.Material {
+  const cached = cache.get(source);
+  if (cached) return cached;
+  const material = profile === 'source' ? source : source.clone();
+  material.name = profile === 'source'
+    ? material.name
+    : `island-matte-${source.name || source.type}`;
+  applyMaterialProfile(material, profile);
+  cache.set(source, material);
+  return material;
+}
+
+function applyMaterialProfile(
+  material: THREE.Material,
+  profile: NatureMaterialProfile,
+): void {
+  if (profile !== 'island-matte' || !(material instanceof THREE.MeshStandardMaterial)) return;
+  material.color.lerp(ISLAND_MATTE_TINT, 0.045);
+  material.roughness = 0.88;
+  material.metalness = 0;
+  material.envMapIntensity = 0.7;
+  material.dithering = true;
 }
 
 function loadNaturePack(): Promise<GLTF> {

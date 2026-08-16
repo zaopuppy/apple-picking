@@ -129,6 +129,9 @@ export class Game {
     if (this.islandWorld) this.configureIslandCamera();
     this.simulation = new GameSimulation(this.map);
     this.renderer = createRenderer(canvas);
+    if (this.islandWorld) {
+      this.renderer.toneMappingExposure = 1.01;
+    }
     if (this.islandWorld && window.matchMedia('(max-width: 600px)').matches) {
       this.renderer.shadowMap.enabled = false;
     }
@@ -444,17 +447,28 @@ export class Game {
   }
 
   private createLighting(): void {
+    if (this.islandWorld) {
+      this.hemisphere.color.set('#fff3d4');
+      this.hemisphere.groundColor.set('#4e7148');
+      this.sun.color.set('#ffe4a8');
+    }
     this.scene.add(this.hemisphere);
-    this.sun.position.set(-45, 90, 50);
+    this.sun.position.set(
+      this.islandWorld ? -42 : -45,
+      this.islandWorld ? 88 : 90,
+      this.islandWorld ? 46 : 50,
+    );
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 240;
-    this.sun.shadow.camera.left = -70;
-    this.sun.shadow.camera.right = 70;
-    this.sun.shadow.camera.top = 55;
-    this.sun.shadow.camera.bottom = -55;
-    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.camera.left = this.islandWorld ? -44 : -70;
+    this.sun.shadow.camera.right = this.islandWorld ? 44 : 70;
+    this.sun.shadow.camera.top = this.islandWorld ? 36 : 55;
+    this.sun.shadow.camera.bottom = this.islandWorld ? -36 : -55;
+    this.sun.shadow.bias = this.islandWorld ? -0.00025 : -0.0004;
+    this.sun.shadow.normalBias = this.islandWorld ? 0.025 : 0;
+    this.sun.shadow.radius = this.islandWorld ? 1.35 : 1;
     this.scene.add(this.sun);
   }
 
@@ -549,6 +563,7 @@ export class Game {
         this.debugTuning.reducedMotion = enabled;
         this.debugPanel?.refresh();
         this.syncPresentation();
+        this.publishDiagnostics();
       },
       hideDebugUi: (hidden: boolean) => {
         this.debugUiHidden = hidden;
@@ -631,6 +646,15 @@ export class Game {
         triangles: info.render.triangles,
         geometries: info.memory.geometries,
         textures: info.memory.textures,
+        toneMapping: 'ACESFilmic',
+        exposure: this.renderer.toneMappingExposure,
+        shadowMapEnabled: this.renderer.shadowMap.enabled,
+        shadowMapType: this.renderer.shadowMap.type === THREE.PCFSoftShadowMap
+          ? 'PCFSoft'
+          : 'PCF',
+        shadowMapSize: this.sun.shadow.mapSize.x,
+        shadowCastingLights: this.sun.castShadow ? 1 : 0,
+        postPasses: 0,
       },
       camera: {
         controlMode: this.cameraPointerMode ? 'mouse' : 'manual',

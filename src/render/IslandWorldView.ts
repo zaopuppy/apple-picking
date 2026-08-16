@@ -7,7 +7,11 @@ import {
   type IslandBridge,
   type IslandRouteBlock,
 } from '../game/maps/IslandTourMap';
-import type { OrchardMap, OrchardPath } from '../game/maps/OrchardMap';
+import {
+  treeColliderRadius,
+  type OrchardMap,
+  type OrchardPath,
+} from '../game/maps/OrchardMap';
 import { createIslandMaterials, type IslandMaterials } from './IslandMaterials';
 import { createIslandRegionPropVisual } from './IslandRegionPropKit';
 
@@ -15,6 +19,32 @@ type WaveStrip = {
   mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   baseScale: number;
   phase: number;
+};
+
+type FlowerHeadMotion = {
+  mesh: THREE.InstancedMesh;
+  entries: Array<{
+    x: number;
+    z: number;
+    baseY: number;
+    baseRotationY: number;
+    phase: number;
+  }>;
+};
+
+type AmbientObjectMotion = {
+  object: THREE.Object3D;
+  baseRotationX: number;
+  baseRotationZ: number;
+  phase: number;
+};
+
+type ContactShadowPlacement = {
+  x: number;
+  y: number;
+  z: number;
+  sizeX: number;
+  sizeZ: number;
 };
 
 type RectBlockDetail = {
@@ -41,6 +71,9 @@ export type IslandWorldVisual = {
   regionPropClusters: number;
   regionPropInstances: number;
   regionPropInstancedMeshes: number;
+  contactShadowInstances: number;
+  ambientMotionGroups: number;
+  readonly ambientMotionAmplitude: number;
   update(time: number, reducedMotion: boolean): void;
 };
 
@@ -79,6 +112,10 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   const root = new THREE.Group();
   const materials = createIslandMaterials();
   const waves: WaveStrip[] = [];
+  const flowerMotions: FlowerHeadMotion[] = [];
+  const objectMotions: AmbientObjectMotion[] = [];
+  const motionMatrix = new THREE.Object3D();
+  let ambientMotionAmplitude = 0;
   let propInstances = 0;
 
   root.name = 'sweet-orchard-island-world';
@@ -88,6 +125,9 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   root.add(createHouseTerrace(materials));
   root.add(createTerrainPatches(map, materials));
   root.add(createPaths(map.paths, materials));
+  const contactShadows = createContactShadows(map, materials);
+  propInstances += contactShadows.instances;
+  root.add(contactShadows.root);
   const waterway = createWaterway(materials, waves);
   propInstances += waterway.userData.propInstances as number;
   root.add(waterway);
@@ -98,11 +138,11 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   propInstances += orchard.userData.propInstances as number;
   root.add(orchard);
 
-  const beach = createBeachDetails(materials);
+  const beach = createBeachDetails(materials, objectMotions);
   propInstances += beach.userData.propInstances as number;
   root.add(beach);
 
-  const garden = createGardenDetails(materials);
+  const garden = createGardenDetails(materials, flowerMotions);
   propInstances += garden.userData.propInstances as number;
   root.add(garden);
 
@@ -132,16 +172,76 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
     regionPropClusters: regionProps.clusters,
     regionPropInstances: regionProps.propInstances,
     regionPropInstancedMeshes: regionProps.instancedMeshes,
+    contactShadowInstances: contactShadows.instances,
+    ambientMotionGroups: waves.length + flowerMotions.length + objectMotions.length,
+    get ambientMotionAmplitude(): number {
+      return ambientMotionAmplitude;
+    },
     ...stats,
     update(time: number, reducedMotion: boolean): void {
+      ambientMotionAmplitude = reducedMotion ? 0 : Math.sin(time * 0.85);
       for (const wave of waves) {
         const motion = reducedMotion ? 0 : Math.sin(time * 0.52 + wave.phase);
         const scale = wave.baseScale + motion * 0.018;
         wave.mesh.scale.set(scale, scale * 0.76, 1);
         wave.mesh.material.opacity = 0.2 + (motion + 1) * 0.065;
       }
+      updateFlowerMotions(flowerMotions, time, reducedMotion, motionMatrix);
+      for (const motion of objectMotions) {
+        const sway = reducedMotion ? 0 : Math.sin(time * 0.72 + motion.phase);
+        motion.object.rotation.x = motion.baseRotationX + sway * 0.018;
+        motion.object.rotation.z = motion.baseRotationZ + sway * 0.026;
+      }
     },
   };
+}
+
+function createContactShadows(
+  map: OrchardMap,
+  materials: IslandMaterials,
+): { root: THREE.Group; instances: number } {
+  const placements: ContactShadowPlacement[] = map.trees
+    .filter((tree) => tree.variant !== 'stump')
+    .map((tree) => {
+      const radius = treeColliderRadius(tree);
+      return {
+        x: tree.x + 0.16,
+        y: 0.052,
+        z: tree.z + 0.12,
+        sizeX: radius * 1.72,
+        sizeZ: radius * 1.08,
+      };
+    });
+  placements.push(
+    { x: -24.2, y: 0.69, z: -21.15, sizeX: 1.85, sizeZ: 0.72 },
+    { x: -12.6, y: 0.69, z: -21.05, sizeX: 1.85, sizeZ: 0.72 },
+    { x: -29, y: 0.052, z: 14.2, sizeX: 1.25, sizeZ: 0.72 },
+  );
+
+  const root = new THREE.Group();
+  root.name = 'island-instanced-contact-shadows';
+  const shadows = new THREE.InstancedMesh(
+    new THREE.CircleGeometry(1, 24),
+    materials.groundContact,
+    placements.length,
+  );
+  const matrix = new THREE.Object3D();
+  placements.forEach((placement, index) => {
+    setInstanceTransform(
+      shadows,
+      index,
+      matrix,
+      [placement.x, placement.y, placement.z],
+      [placement.sizeX, placement.sizeZ, 1],
+      [-Math.PI / 2, 0, 0],
+    );
+  });
+  shadows.name = 'island-contact-shadow-ellipses';
+  shadows.renderOrder = 1;
+  shadows.instanceMatrix.needsUpdate = true;
+  shadows.computeBoundingSphere();
+  root.add(shadows);
+  return { root, instances: placements.length };
 }
 
 function createOcean(materials: IslandMaterials, waves: WaveStrip[]): THREE.Group {
@@ -634,7 +734,10 @@ function createOrchardDetails(materials: IslandMaterials): THREE.Group {
   return group;
 }
 
-function createBeachDetails(materials: IslandMaterials): THREE.Group {
+function createBeachDetails(
+  materials: IslandMaterials,
+  objectMotions: AmbientObjectMotion[],
+): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-beach-details';
   let propInstances = 0;
@@ -660,6 +763,12 @@ function createBeachDetails(materials: IslandMaterials): THREE.Group {
   pole.position.y = 1.55;
   const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.35, 0.75, 10), materials.roofLight);
   canopy.position.y = 3.15;
+  objectMotions.push({
+    object: canopy,
+    baseRotationX: canopy.rotation.x,
+    baseRotationZ: canopy.rotation.z,
+    phase: 1.7,
+  });
   parasol.add(pole, canopy);
   markShadows(parasol);
   group.add(parasol);
@@ -668,7 +777,10 @@ function createBeachDetails(materials: IslandMaterials): THREE.Group {
   return group;
 }
 
-function createGardenDetails(materials: IslandMaterials): THREE.Group {
+function createGardenDetails(
+  materials: IslandMaterials,
+  flowerMotions: FlowerHeadMotion[],
+): THREE.Group {
   const group = new THREE.Group();
   group.name = 'island-flower-garden-details';
   if (window.matchMedia('(max-width: 600px)').matches) {
@@ -694,6 +806,7 @@ function createGardenDetails(materials: IslandMaterials): THREE.Group {
     Math.ceil(positions.length / flowerMaterials.length),
   ));
   const flowerCounts = flowerMaterials.map(() => 0);
+  const flowerMotionEntries: FlowerHeadMotion['entries'][] = flowerMaterials.map(() => []);
   const matrix = new THREE.Object3D();
   positions.forEach(([x, z], index) => {
     matrix.position.set(x, 0.31, z);
@@ -706,6 +819,13 @@ function createGardenDetails(materials: IslandMaterials): THREE.Group {
     matrix.rotation.y = index * 0.7;
     matrix.updateMatrix();
     flowerMeshes[materialIndex].setMatrixAt(flowerIndex, matrix.matrix);
+    flowerMotionEntries[materialIndex].push({
+      x,
+      z,
+      baseY: matrix.position.y,
+      baseRotationY: matrix.rotation.y,
+      phase: index * 0.63,
+    });
     flowerCounts[materialIndex] += 1;
   });
   stems.instanceMatrix.needsUpdate = true;
@@ -717,9 +837,29 @@ function createGardenDetails(materials: IslandMaterials): THREE.Group {
     mesh.name = `island-flower-heads-${index + 1}`;
     mesh.castShadow = true;
     group.add(mesh);
+    flowerMotions.push({ mesh, entries: flowerMotionEntries[index] });
   });
   group.userData.propInstances = positions.length * 2;
   return group;
+}
+
+function updateFlowerMotions(
+  motions: readonly FlowerHeadMotion[],
+  time: number,
+  reducedMotion: boolean,
+  matrix: THREE.Object3D,
+): void {
+  for (const motion of motions) {
+    motion.entries.forEach((entry, index) => {
+      const sway = reducedMotion ? 0 : Math.sin(time * 0.94 + entry.phase);
+      matrix.position.set(entry.x, entry.baseY + sway * 0.026, entry.z);
+      matrix.rotation.set(sway * 0.045, entry.baseRotationY + sway * 0.13, sway * 0.035);
+      matrix.scale.set(1 + sway * 0.028, 1 - sway * 0.018, 1);
+      matrix.updateMatrix();
+      motion.mesh.setMatrixAt(index, matrix.matrix);
+    });
+    motion.mesh.instanceMatrix.needsUpdate = true;
+  }
 }
 
 function createCoastalDetails(materials: IslandMaterials): THREE.Group {

@@ -124,6 +124,11 @@ export type EnvironmentAssetDiagnostics = {
   regionPropClusters: number;
   regionPropInstances: number;
   regionPropInstancedMeshes: number;
+  natureMaterialProfile: 'source' | 'island-matte';
+  visualScaleProfile: 'legacy' | 'island-toy-scale';
+  contactShadowInstances: number;
+  ambientMotionGroups: number;
+  ambientMotionAmplitude: number;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -225,6 +230,11 @@ export class ArenaView {
     regionPropClusters: 0,
     regionPropInstances: 0,
     regionPropInstancedMeshes: 0,
+    natureMaterialProfile: 'source',
+    visualScaleProfile: 'legacy',
+    contactShadowInstances: 0,
+    ambientMotionGroups: 0,
+    ambientMotionAmplitude: 0,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -265,6 +275,7 @@ export class ArenaView {
       terrainZones: map.terrainZones.length,
       deliveryZones: deliveryZonesForMap(map).length,
       worldPreset: this.worldPreset,
+      visualScaleProfile: this.islandWorld ? 'island-toy-scale' : 'legacy',
     };
     this.createWorld();
     void this.installImportedGuard('guard1');
@@ -436,6 +447,7 @@ export class ArenaView {
   getEnvironmentDiagnostics(): EnvironmentAssetDiagnostics {
     return {
       ...this.environmentDiagnostics,
+      ambientMotionAmplitude: this.islandWorldVisual?.ambientMotionAmplitude ?? 0,
       landmarkHouseBounds: this.environmentDiagnostics.landmarkHouseBounds
         ? { ...this.environmentDiagnostics.landmarkHouseBounds }
         : null,
@@ -493,6 +505,8 @@ export class ArenaView {
         regionPropClusters: island.regionPropClusters,
         regionPropInstances: island.regionPropInstances,
         regionPropInstancedMeshes: island.regionPropInstancedMeshes,
+        contactShadowInstances: island.contactShadowInstances,
+        ambientMotionGroups: island.ambientMotionGroups,
       };
       this.createForest();
       this.createDeliveryZones();
@@ -865,7 +879,10 @@ export class ArenaView {
 
   private async installImportedTrees(placements: readonly OrchardTree[]): Promise<void> {
     try {
-      const imported = await loadNaturePackTreeVisuals(placements);
+      const imported = await loadNaturePackTreeVisuals(
+        placements,
+        this.islandWorld ? 'island-matte' : 'source',
+      );
       if (this.disposed) {
         disposeObject3D(imported.root);
         return;
@@ -878,6 +895,7 @@ export class ArenaView {
         treeVariants: imported.variants,
         treeInstances: imported.instances,
         treeTriangles: imported.triangles,
+        natureMaterialProfile: imported.materialProfile,
         lastFailure: null,
       };
     } catch (error) {
@@ -899,7 +917,9 @@ export class ArenaView {
     try {
       let triangles = 0;
       for (const view of this.appleViews.values()) {
-        const imported = await createNaturePackAppleVisual();
+        const imported = await createNaturePackAppleVisual(
+          this.islandWorld ? 'island-matte' : 'source',
+        );
         if (this.disposed) {
           disposeObject3D(imported.root);
           return;
@@ -914,6 +934,7 @@ export class ArenaView {
         ...this.environmentDiagnostics,
         fruitMode: 'imported',
         fruitTriangles: triangles,
+        natureMaterialProfile: this.islandWorld ? 'island-matte' : 'source',
         lastFailure: null,
       };
     } catch (error) {

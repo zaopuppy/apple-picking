@@ -1021,7 +1021,7 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P3a',
+    mapName: '甜日果园岛 · P3b',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
@@ -1038,6 +1038,10 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     appleGroups: 3,
     regionPropClusters: 5,
     regionPropInstancedMeshes: 7,
+    natureMaterialProfile: 'island-matte',
+    visualScaleProfile: 'island-toy-scale',
+    contactShadowInstances: 34,
+    ambientMotionGroups: 9,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
@@ -1048,10 +1052,30 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   expect(diagnostics?.environment.treeMode).toBe('imported');
   expect(diagnostics?.renderer.calls).toBeLessThanOrEqual(300);
   expect(diagnostics?.renderer.triangles).toBeLessThanOrEqual(750_000);
+  expect(diagnostics?.renderer).toMatchObject({
+    toneMapping: 'ACESFilmic',
+    exposure: 1.01,
+    shadowMapEnabled: true,
+    shadowMapType: 'PCF',
+    shadowMapSize: 2048,
+    shadowCastingLights: 1,
+    postPasses: 0,
+  });
   await expect(page.locator('[data-world-layout="island"]')).toHaveAttribute('aria-current', 'page');
 
   const sample = await sampleCanvas(page);
   expect(sample, `${testInfo.project.name}: ${JSON.stringify(sample)}`).toMatchObject({ ok: true });
+
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setReducedMotion(true));
+  await expect
+    .poll(async () => page.evaluate(() =>
+      window.__THREE_GAME_DIAGNOSTICS__?.environment.ambientMotionAmplitude))
+    .toBe(0);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setReducedMotion(false));
+  await expect
+    .poll(async () => page.evaluate(() =>
+      Math.abs(window.__THREE_GAME_DIAGNOSTICS__?.environment.ambientMotionAmplitude ?? 0) > 0.001))
+    .toBe(true);
 
   const validation = await page.evaluate(async () => {
     const islandPath = String('/src/game/maps/IslandTourMap.ts');

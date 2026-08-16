@@ -101,6 +101,11 @@ declare global {
       regionPropClusters: number;
       regionPropInstances: number;
       regionPropInstancedMeshes: number;
+      natureMaterialProfile: 'source' | 'island-matte';
+      visualScaleProfile: 'legacy' | 'island-toy-scale';
+      contactShadowInstances: number;
+      ambientMotionGroups: number;
+      ambientMotionAmplitude: number;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;
@@ -144,6 +149,13 @@ declare global {
       triangles: number;
       geometries: number;
       textures: number;
+      toneMapping: 'ACESFilmic';
+      exposure: number;
+      shadowMapEnabled: boolean;
+      shadowMapType: 'PCF' | 'PCFSoft';
+      shadowMapSize: number;
+      shadowCastingLights: number;
+      postPasses: number;
     };
     camera: {
       controlMode: 'manual' | 'mouse';
