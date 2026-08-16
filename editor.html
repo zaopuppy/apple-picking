@@ -134,6 +134,7 @@
               <button id="island-geometry-apply" type="submit" disabled>应用结构修改</button>
               <button id="island-node-insert" type="button" hidden>在此后插入节点</button>
               <button id="island-node-delete" type="button" hidden>删除海岸节点</button>
+              <button id="island-object-duplicate" type="button" hidden>复制选中结构</button>
               <button id="island-object-delete" type="button" hidden>删除选中结构</button>
             </div>
           </form>
@@ -151,7 +152,27 @@
               <button id="delivery-zone-down" type="button" aria-label="下移选中投递点">↓ 下移</button>
             </div>
           </section>
-          <p class="tool-hint">2D 适合海岸节点和精确拓扑；3D 中可直接选择并拖动区域、矩形障碍、水面和桥梁，松开后自动校验并写入撤销记录。</p>
+          <form id="preview-object-panel" class="preview-object-panel" hidden>
+            <div class="preview-object-heading">
+              <small>3D SELECTION</small>
+              <strong id="preview-object-title">未选择物件</strong>
+            </div>
+            <div id="preview-object-position" class="preview-object-position">
+              <label for="preview-object-x">3D X 坐标
+                <input id="preview-object-x" type="number" step="0.1" />
+              </label>
+              <label for="preview-object-z">3D Z 坐标
+                <input id="preview-object-z" type="number" step="0.1" />
+              </label>
+              <button id="preview-object-apply" type="submit">应用位置</button>
+            </div>
+            <p id="preview-object-note">左键直接拖动；也可输入精确坐标。</p>
+            <div class="preview-object-actions">
+              <button id="preview-object-duplicate" type="button">复制 Ctrl+D</button>
+              <button id="preview-object-delete" type="button">删除 Delete</button>
+            </div>
+          </form>
+          <p class="tool-hint">2D 适合海岸节点和精确拓扑；3D 可放置、选择并拖动建筑、地块、投递点与岛屿结构，松开后自动校验并写入撤销记录。</p>
         </aside>
 
         <section class="map-board">

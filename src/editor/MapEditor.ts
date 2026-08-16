@@ -69,6 +69,7 @@ import {
 import {
   MapPreview3D,
   type MapPreviewMoveResult,
+  type MapPreviewPlacementKind,
   type MapPreviewSelection,
 } from './MapPreview3D';
 
@@ -194,6 +195,7 @@ export class MapEditor {
   );
   private readonly islandNodeInsert = getElement<HTMLButtonElement>('#island-node-insert');
   private readonly islandNodeDelete = getElement<HTMLButtonElement>('#island-node-delete');
+  private readonly islandObjectDuplicate = getElement<HTMLButtonElement>('#island-object-duplicate');
   private readonly islandObjectDelete = getElement<HTMLButtonElement>('#island-object-delete');
   private readonly deliveryZonePanel = getElement<HTMLElement>('#delivery-zone-panel');
   private readonly deliveryZoneCount = getElement<HTMLElement>('#delivery-zone-count');
@@ -203,6 +205,14 @@ export class MapEditor {
   private readonly deliveryZoneDelete = getElement<HTMLButtonElement>('#delivery-zone-delete');
   private readonly deliveryZoneUp = getElement<HTMLButtonElement>('#delivery-zone-up');
   private readonly deliveryZoneDown = getElement<HTMLButtonElement>('#delivery-zone-down');
+  private readonly previewObjectPanel = getElement<HTMLFormElement>('#preview-object-panel');
+  private readonly previewObjectTitle = getElement<HTMLElement>('#preview-object-title');
+  private readonly previewObjectPosition = getElement<HTMLElement>('#preview-object-position');
+  private readonly previewObjectX = getElement<HTMLInputElement>('#preview-object-x');
+  private readonly previewObjectZ = getElement<HTMLInputElement>('#preview-object-z');
+  private readonly previewObjectNote = getElement<HTMLElement>('#preview-object-note');
+  private readonly previewObjectDuplicate = getElement<HTMLButtonElement>('#preview-object-duplicate');
+  private readonly previewObjectDelete = getElement<HTMLButtonElement>('#preview-object-delete');
 
   private map = loadActiveMap();
   private candidates: OrchardMap[] = [];
@@ -213,6 +223,8 @@ export class MapEditor {
   private placingIslandObject: IslandObjectKind | null = null;
   private selectedDeliveryZoneId: string | null = null;
   private placingDeliveryZone = false;
+  private previewSelection: MapPreviewSelection | null = null;
+  private activeView: '2d' | '3d' = '2d';
   private islandDraggingIndex: number | null = null;
   private islandDragPointerStart: Vec2 | null = null;
   private islandDragHistoryPushed = false;
@@ -234,8 +246,9 @@ export class MapEditor {
     this.context = context;
     this.preview = new MapPreview3D(previewCanvas, previewStatus, {
       onSelectionChange: (selection) => this.handlePreviewSelection(selection),
-      onMovePreview: (selection, position) => this.previewIslandMoveIsValid(selection, position),
-      onMoveCommit: (selection, position) => this.commitPreviewIslandMove(selection, position),
+      onMovePreview: (selection, position) => this.previewMoveIsValid(selection, position),
+      onMoveCommit: (selection, position) => this.commitPreviewMove(selection, position),
+      onPlace: (kind, position) => this.placeFromPreview(kind, position),
     });
     this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
   }
@@ -321,6 +334,7 @@ export class MapEditor {
     }, { signal });
     this.islandNodeInsert.addEventListener('click', () => this.insertSelectedIslandNode(), { signal });
     this.islandNodeDelete.addEventListener('click', () => this.deleteSelectedIslandNode(), { signal });
+    this.islandObjectDuplicate.addEventListener('click', () => this.duplicatePreviewSelection(), { signal });
     this.islandObjectAdd.addEventListener('click', () => this.toggleIslandObjectPlacement(), { signal });
     this.islandObjectDelete.addEventListener('click', () => this.deleteSelectedIslandObject(), { signal });
     this.islandAddKind.addEventListener('change', () => {
@@ -332,6 +346,12 @@ export class MapEditor {
     this.deliveryZoneDelete.addEventListener('click', () => this.deleteSelectedDeliveryZone(), { signal });
     this.deliveryZoneUp.addEventListener('click', () => this.reorderSelectedDeliveryZone(-1), { signal });
     this.deliveryZoneDown.addEventListener('click', () => this.reorderSelectedDeliveryZone(1), { signal });
+    this.previewObjectPanel.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.applyPreviewObjectPosition();
+    }, { signal });
+    this.previewObjectDuplicate.addEventListener('click', () => this.duplicatePreviewSelection(), { signal });
+    this.previewObjectDelete.addEventListener('click', () => this.deletePreviewSelection(), { signal });
   }
 
   private readonly onPointerDown = (event: PointerEvent): void => {
@@ -430,6 +450,18 @@ export class MapEditor {
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     const active = document.activeElement;
     const editingText = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+    if (!editingText && this.activeView === '3d' &&
+      (event.ctrlKey || event.metaKey) && event.code === 'KeyD') {
+      event.preventDefault();
+      this.duplicatePreviewSelection();
+      return;
+    }
+    if (!editingText && this.activeView === '3d' &&
+      (event.code === 'Delete' || event.code === 'Backspace')) {
+      event.preventDefault();
+      this.deletePreviewSelection();
+      return;
+    }
     if (!editingText && TOOL_KEYS[event.code]) {
       event.preventDefault();
       this.selectTool(TOOL_KEYS[event.code]);
@@ -461,7 +493,25 @@ export class MapEditor {
     this.updateToolSpecificControls();
     this.updateIslandGeometryPanel();
     this.updateDeliveryZonePanel();
+    this.syncPreviewPlacement();
+    this.updatePreviewObjectPanel();
     this.draw();
+  }
+
+  private syncPreviewPlacement(): void {
+    if (this.activeView !== '3d') {
+      this.preview.setPlacement(null);
+      return;
+    }
+    if (this.tool === 'island-select' && this.placingIslandObject) {
+      this.preview.setPlacement(this.placingIslandObject);
+      return;
+    }
+    if (this.tool === 'delivery' && this.placingDeliveryZone) {
+      this.preview.setPlacement('delivery');
+      return;
+    }
+    this.preview.setPlacement(previewPlacementForTool(this.tool));
   }
 
   private updateToolSpecificControls(): void {
@@ -489,6 +539,7 @@ export class MapEditor {
       return;
     }
     this.selectedIsland = hitTestIslandLayout(this.map.islandLayout, point);
+    this.previewSelection = isPreviewSelection(this.selectedIsland) ? { ...this.selectedIsland } : null;
     this.updateIslandSelectionInfo();
     if (this.selectedIsland) {
       this.showToast(`已选择${islandSelectionLabel(this.map.islandLayout, this.selectedIsland)}。`);
@@ -497,32 +548,44 @@ export class MapEditor {
   }
 
   private handlePreviewSelection(selection: MapPreviewSelection | null): void {
+    this.previewSelection = selection ? { ...selection } : null;
     if (!selection) {
       this.selectedIsland = null;
       this.updateIslandSelectionInfo();
+      this.updatePreviewObjectPanel();
       return;
     }
-    this.selectTool('island-select');
-    this.selectedIsland = { ...selection };
-    this.preview.setSelection(selection);
-    this.updateIslandSelectionInfo();
-    if (this.map.islandLayout) {
-      this.showToast(`已在 3D 中选择${islandSelectionLabel(this.map.islandLayout, selection)}；直接拖动可移动。`);
+    if (isIslandPreviewSelection(selection)) {
+      this.selectTool('island-select');
+      this.selectedIsland = { ...selection };
+      this.updateIslandSelectionInfo();
+    } else if (selection.kind === 'delivery-zone') {
+      this.selectTool('delivery');
+      this.selectedDeliveryZoneId = selection.id;
+      this.placingDeliveryZone = false;
+      this.updateDeliveryZonePanel();
+    } else {
+      this.selectedIsland = null;
+      this.preview.setPlacement(null);
+      this.updateIslandSelectionInfo();
     }
+    this.preview.setSelection(selection);
+    this.updatePreviewObjectPanel();
+    this.showToast(`已在 3D 中选择${previewSelectionLabel(this.map, selection)}；直接拖动可移动。`);
   }
 
-  private previewIslandMoveIsValid(selection: MapPreviewSelection, position: Vec2): boolean {
+  private previewMoveIsValid(selection: MapPreviewSelection, position: Vec2): boolean {
     const candidate = cloneOrchardMap(this.map);
-    return applyPreviewIslandMove(candidate, selection, position) &&
+    return applyPreviewSelectionMove(candidate, selection, position) &&
       validateOrchardMap(candidate).valid;
   }
 
-  private commitPreviewIslandMove(
+  private commitPreviewMove(
     selection: MapPreviewSelection,
     position: Vec2,
   ): MapPreviewMoveResult {
     const candidate = cloneOrchardMap(this.map);
-    if (!applyPreviewIslandMove(candidate, selection, position)) {
+    if (!applyPreviewSelectionMove(candidate, selection, position)) {
       const message = '3D 移动失败：结构已经不存在或不允许这样移动。';
       this.showToast(message);
       return { ok: false, message };
@@ -535,11 +598,166 @@ export class MapEditor {
     }
     this.pushHistory();
     this.map = candidate;
-    this.selectedIsland = { ...selection };
+    this.previewSelection = { ...selection };
+    if (isIslandPreviewSelection(selection)) this.selectedIsland = { ...selection };
+    if (selection.kind === 'delivery-zone') this.selectedDeliveryZoneId = selection.id;
     this.refresh();
     this.showToast(selection.kind === 'bridge'
       ? '桥梁已沿水面移动，碰撞缺口已同步。'
       : '3D 位置已应用，并写入一条撤销记录。');
+    return { ok: true };
+  }
+
+  private updatePreviewObjectPanel(): void {
+    const selection = this.previewSelection;
+    const exists = selection && previewSelectionExists(this.map, selection);
+    this.previewObjectPanel.hidden = this.activeView !== '3d' || !exists ||
+      Boolean(selection && isIslandPreviewSelection(selection));
+    if (!selection || !exists) return;
+    const position = previewSelectionPosition(this.map, selection);
+    const islandSelection = isIslandPreviewSelection(selection);
+    this.previewObjectTitle.textContent = previewSelectionLabel(this.map, selection);
+    this.previewObjectPosition.hidden = islandSelection;
+    if (position) {
+      this.previewObjectX.value = formatGeometryNumber(position.x);
+      this.previewObjectZ.value = formatGeometryNumber(position.z);
+    }
+    this.previewObjectNote.textContent = islandSelection
+      ? '精确坐标和尺寸使用上方结构面板；这里可复制或删除。'
+      : selection.kind === 'delivery-zone'
+        ? '投递点直接拖动或输入坐标；至少保留一个投递点。'
+        : '左键直接拖动；也可输入精确坐标。';
+    this.previewObjectDelete.disabled =
+      (selection.kind === 'region' && (this.map.islandLayout?.regions.length ?? 0) <= 1) ||
+      (selection.kind === 'delivery-zone' && deliveryZonesForMap(this.map).length <= 1);
+    this.previewObjectDuplicate.disabled =
+      selection.kind === 'delivery-zone' && deliveryZonesForMap(this.map).length >= MAX_DELIVERY_ZONES;
+  }
+
+  private applyPreviewObjectPosition(): void {
+    const selection = this.previewSelection;
+    if (!selection || isIslandPreviewSelection(selection)) return;
+    const position = {
+      x: Number(this.previewObjectX.value),
+      z: Number(this.previewObjectZ.value),
+    };
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.z)) {
+      this.showToast('请输入有效的 3D 物件坐标。');
+      return;
+    }
+    this.commitPreviewMove(selection, position);
+  }
+
+  private deletePreviewSelection(): void {
+    const selection = this.previewSelection;
+    if (!selection || !previewSelectionExists(this.map, selection)) return;
+    const candidate = cloneOrchardMap(this.map);
+    let removed = false;
+    if (isIslandPreviewSelection(selection)) {
+      removed = removeIslandObject(candidate, selection.kind, selection.id).ok;
+    } else if (selection.kind === 'delivery-zone') {
+      removed = removeDeliveryZone(candidate, selection.id);
+    } else if (selection.kind === 'landmark') {
+      const before = candidate.landmarks.length;
+      candidate.landmarks = candidate.landmarks.filter((landmark) => landmark.id !== selection.id);
+      removed = candidate.landmarks.length < before;
+    } else {
+      const before = candidate.terrainZones.length;
+      candidate.terrainZones = candidate.terrainZones.filter((zone) => zone.id !== selection.id);
+      removed = candidate.terrainZones.length < before;
+    }
+    if (!removed || !validateOrchardMap(candidate).valid) {
+      this.showToast('该物件不能删除；地图必须保留完整且可游玩的结构。');
+      return;
+    }
+    this.pushHistory();
+    this.map = candidate;
+    this.previewSelection = null;
+    this.selectedIsland = null;
+    if (selection.kind === 'delivery-zone') {
+      this.selectedDeliveryZoneId = deliveryZonesForMap(candidate)[0]?.id ?? null;
+    }
+    this.refresh();
+    this.showToast(`${previewSelectionLabel(this.map, selection)}已删除。`);
+  }
+
+  private duplicatePreviewSelection(): void {
+    const selection = this.previewSelection;
+    if (!selection || !previewSelectionExists(this.map, selection)) return;
+    const duplicateId = `${selection.id}-copy-${Date.now()}-${this.serial}`;
+    const result = duplicatePreviewObject(this.map, selection, duplicateId);
+    if (!result) {
+      this.showToast('附近没有足够空间，无法复制选中物件。');
+      return;
+    }
+    this.serial += 1;
+    this.pushHistory();
+    this.map = result.map;
+    this.previewSelection = result.selection;
+    this.selectedIsland = isIslandPreviewSelection(result.selection) ? { ...result.selection } : null;
+    if (result.selection.kind === 'delivery-zone') this.selectedDeliveryZoneId = result.selection.id;
+    this.refresh();
+    this.showToast(`已复制${previewSelectionLabel(this.map, result.selection)}。`);
+  }
+
+  private placeFromPreview(kind: MapPreviewPlacementKind, position: Vec2): MapPreviewMoveResult {
+    if (isIslandObjectKindValue(kind)) {
+      const previousSelection = this.selectedIsland;
+      this.placingIslandObject = kind;
+      this.placeIslandObject(position);
+      const placed = this.selectedIsland && this.selectedIsland !== previousSelection;
+      this.syncPreviewPlacement();
+      return { ok: Boolean(placed) };
+    }
+    if (kind === 'delivery') {
+      const before = deliveryZonesForMap(this.map).length;
+      this.placingDeliveryZone = true;
+      this.handleDeliveryPointer(position);
+      const placed = deliveryZonesForMap(this.map).length > before;
+      if (placed && this.selectedDeliveryZoneId) {
+        this.previewSelection = { kind: 'delivery-zone', id: this.selectedDeliveryZoneId };
+        this.preview.setSelection(this.previewSelection);
+      }
+      this.syncPreviewPlacement();
+      this.updatePreviewObjectPanel();
+      return { ok: placed };
+    }
+
+    const previous = cloneOrchardMap(this.map);
+    const previousLandmarks = this.map.landmarks.length;
+    const previousTerrain = this.map.terrainZones.length;
+    const previousApples = this.map.appleSpawns.length;
+    if (kind === 'homestead' || kind === 'pond') this.placeLandmark(position, kind);
+    else if (kind === 'orchard' || kind === 'meadow') this.placeTerrainZone(position, kind);
+    else if (kind === 'apple' && this.map.appleSpawns.length < MAX_MAP_APPLES) {
+      this.map.appleSpawns.push({ ...position });
+      this.eraseTrees(position, 1.5);
+    } else if (kind === 'kid') this.map.kidStart = { ...position };
+    else if (kind === 'guard1') this.map.guardStarts[0] = { ...position };
+    else if (kind === 'guard2') this.map.guardStarts[1] = { ...position };
+
+    const changed = this.map.landmarks.length !== previousLandmarks ||
+      this.map.terrainZones.length !== previousTerrain ||
+      this.map.appleSpawns.length !== previousApples ||
+      (kind === 'kid' || kind === 'guard1' || kind === 'guard2');
+    if (!changed) return { ok: false };
+    const validation = validateOrchardMap(this.map);
+    if (!validation.valid) {
+      this.map = previous;
+      this.showToast(validation.errors[0] ?? '当前位置无法安全放置。');
+      return { ok: false };
+    }
+    this.pushHistorySnapshot(previous);
+    if (this.map.landmarks.length > previousLandmarks) {
+      this.previewSelection = { kind: 'landmark', id: this.map.landmarks.at(-1)!.id };
+    } else if (this.map.terrainZones.length > previousTerrain) {
+      this.previewSelection = { kind: 'terrain-zone', id: this.map.terrainZones.at(-1)!.id };
+    } else {
+      this.previewSelection = null;
+    }
+    this.refresh();
+    this.syncPreviewPlacement();
+    this.showToast(`${previewPlacementLabel(kind)}已从 3D 视图放置。`);
     return { ok: true };
   }
 
@@ -587,6 +805,7 @@ export class MapEditor {
       this.islandGeometryApply.disabled = true;
       this.islandNodeInsert.hidden = true;
       this.islandNodeDelete.hidden = true;
+      this.islandObjectDuplicate.hidden = true;
       this.islandObjectDelete.hidden = true;
       this.islandGeometryKindField.hidden = true;
       this.islandGeometryRotationField.hidden = true;
@@ -601,6 +820,7 @@ export class MapEditor {
     this.islandGeometryApply.disabled = !geometry?.editable;
     this.islandNodeInsert.hidden = nodeIndex === null;
     this.islandNodeDelete.hidden = nodeIndex === null;
+    this.islandObjectDuplicate.hidden = nodeIndex !== null || selection.kind === 'water-block';
     this.islandObjectDelete.hidden = nodeIndex !== null || selection.kind === 'water-block';
     this.islandObjectDelete.disabled = selection.kind === 'region' && layout.regions.length <= 1;
     this.islandNodeInsert.disabled = layout.outline.length >= MAX_ISLAND_OUTLINE_POINTS;
@@ -756,6 +976,7 @@ export class MapEditor {
   private toggleIslandObjectPlacement(): void {
     if (this.placingIslandObject) {
       this.placingIslandObject = null;
+      this.syncPreviewPlacement();
       this.updateIslandGeometryPanel();
       this.draw();
       this.showToast('已取消放置岛屿结构。');
@@ -763,6 +984,8 @@ export class MapEditor {
     }
     this.placingIslandObject = this.readIslandAddKind();
     this.selectedIsland = null;
+    this.previewSelection = null;
+    this.syncPreviewPlacement();
     this.updateIslandSelectionInfo();
     this.draw();
     this.showToast(islandPlacementHint(this.placingIslandObject));
@@ -779,6 +1002,7 @@ export class MapEditor {
       return;
     }
     this.selectedIsland = { kind, id: result.id };
+    this.previewSelection = { kind, id: result.id };
     this.placingIslandObject = null;
     this.refresh();
     this.showToast(`${islandObjectKindLabel(kind)}已添加；可继续精确调整。`);
@@ -795,6 +1019,7 @@ export class MapEditor {
       return;
     }
     this.selectedIsland = null;
+    this.previewSelection = null;
     this.refresh();
     this.showToast(`${islandObjectKindLabel(selection.kind)}已删除，派生碰撞已同步。`);
   }
@@ -850,6 +1075,7 @@ export class MapEditor {
   private selectDeliveryZone(id: string): void {
     if (!deliveryZonesForMap(this.map).some((zone) => zone.id === id)) return;
     this.selectedDeliveryZoneId = id;
+    this.previewSelection = { kind: 'delivery-zone', id };
     this.placingDeliveryZone = false;
     this.updateDeliveryZonePanel();
     this.draw();
@@ -860,6 +1086,8 @@ export class MapEditor {
     const zones = deliveryZonesForMap(this.map);
     if (zones.length >= MAX_DELIVERY_ZONES) return;
     this.placingDeliveryZone = !this.placingDeliveryZone;
+    if (this.placingDeliveryZone) this.previewSelection = null;
+    this.syncPreviewPlacement();
     this.canvas.classList.toggle('delivery-place-mode', this.placingDeliveryZone);
     this.updateDeliveryZonePanel();
     this.draw();
@@ -877,6 +1105,9 @@ export class MapEditor {
     }
     const remaining = deliveryZonesForMap(this.map);
     this.selectedDeliveryZoneId = remaining[Math.min(index, remaining.length - 1)]?.id ?? null;
+    this.previewSelection = this.selectedDeliveryZoneId
+      ? { kind: 'delivery-zone', id: this.selectedDeliveryZoneId }
+      : null;
     this.placingDeliveryZone = false;
     this.refresh();
     this.showToast('选中投递点已删除。');
@@ -1090,6 +1321,7 @@ export class MapEditor {
     }
     const candidateRadius = Math.hypot(landmark.radiusX, landmark.radiusZ);
     if (this.map.landmarks.some((existing) =>
+      (existing.kind === 'pond' || Boolean(existing.asset)) &&
       distance(existing, landmark) < candidateRadius + Math.hypot(existing.radiusX, existing.radiusZ) + 1.5,
     )) {
       this.showToast('地标之间需要保留宽阔的绕行空间。');
@@ -1137,7 +1369,11 @@ export class MapEditor {
   }
 
   private pushHistory(): void {
-    this.history.push(cloneOrchardMap(this.map));
+    this.pushHistorySnapshot(cloneOrchardMap(this.map));
+  }
+
+  private pushHistorySnapshot(snapshot: OrchardMap): void {
+    this.history.push(snapshot);
     if (this.history.length > 50) this.history.shift();
     this.future = [];
   }
@@ -1161,6 +1397,7 @@ export class MapEditor {
     this.selectedIsland = null;
     this.placingIslandObject = null;
     this.selectedDeliveryZoneId = null;
+    this.previewSelection = null;
     this.placingDeliveryZone = false;
     this.islandDraggingIndex = null;
     this.islandDragPointerStart = null;
@@ -1333,26 +1570,38 @@ export class MapEditor {
     }
     this.updateIslandSelectionInfo();
     this.updateDeliveryZonePanel();
+    this.updatePreviewObjectPanel();
     this.preview.setMap(this.map);
-    this.preview.setSelection(isPreviewSelection(this.selectedIsland) ? this.selectedIsland : null);
+    if (this.previewSelection && !previewSelectionExists(this.map, this.previewSelection)) {
+      this.previewSelection = null;
+    }
+    const previewSelection = this.previewSelection ??
+      (isPreviewSelection(this.selectedIsland) ? this.selectedIsland : null);
+    this.previewSelection = previewSelection ? { ...previewSelection } : null;
+    this.preview.setSelection(previewSelection);
     this.draw();
   }
 
   private selectView(view: '2d' | '3d'): void {
+    this.activeView = view;
     const previewVisible = view === '3d';
     this.canvas.hidden = previewVisible;
     this.mapLegend.hidden = previewVisible;
     this.previewHelp.hidden = !previewVisible;
     this.updateIslandSelectionInfo();
     this.updateDeliveryZonePanel();
+    this.updatePreviewObjectPanel();
     this.preview.setVisible(previewVisible);
+    this.syncPreviewPlacement();
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-editor-view]')) {
       const active = button.dataset.editorView === view;
       button.classList.toggle('active', active);
       button.setAttribute('aria-pressed', String(active));
     }
     if (previewVisible) {
-      this.preview.setSelection(isPreviewSelection(this.selectedIsland) ? this.selectedIsland : null);
+      const selection = this.previewSelection ??
+        (isPreviewSelection(this.selectedIsland) ? this.selectedIsland : null);
+      this.preview.setSelection(selection);
       this.preview.setMap(this.map);
     }
     else this.resizeCanvas();
@@ -1455,6 +1704,7 @@ function assignBuildingsForTheme(map: OrchardMap, theme: KayKitWorldTheme): void
   let buildingIndex = 0;
   for (const landmark of map.landmarks) {
     if (landmark.kind !== 'homestead') continue;
+    if (map.islandLayout && isIslandProxyLandmark(map.islandLayout, landmark.id)) continue;
     const themeAssets = assets[theme];
     landmark.asset = themeAssets[buildingIndex % themeAssets.length];
     landmark.rotationY = 0;
@@ -1587,13 +1837,222 @@ function isEditableIslandSelection(
     selection.kind === 'water-segment' || selection.kind === 'bridge';
 }
 
-function isPreviewSelection(selection: IslandSelection | null): selection is MapPreviewSelection {
+function isPreviewSelection(
+  selection: IslandSelection | null,
+): selection is IslandSelection & MapPreviewSelection {
   return Boolean(selection && isEditableIslandSelection(selection));
+}
+
+function isIslandPreviewSelection(
+  selection: MapPreviewSelection,
+): selection is MapPreviewSelection & { kind: EditableIslandGeometryKind } {
+  return selection.kind === 'region' || selection.kind === 'route-block' ||
+    selection.kind === 'water-segment' || selection.kind === 'bridge';
+}
+
+function isIslandObjectKindValue(kind: MapPreviewPlacementKind): kind is IslandObjectKind {
+  return kind === 'region' || kind === 'route-block' || kind === 'water-segment' || kind === 'bridge';
+}
+
+function previewPlacementForTool(tool: EditorTool): MapPreviewPlacementKind | null {
+  return tool === 'homestead' || tool === 'pond' || tool === 'orchard' || tool === 'meadow' ||
+    tool === 'apple' || tool === 'kid' || tool === 'guard1' || tool === 'guard2'
+    ? tool
+    : null;
+}
+
+function previewPlacementLabel(kind: MapPreviewPlacementKind): string {
+  if (kind === 'homestead') return '建筑';
+  if (kind === 'pond') return '池塘';
+  if (kind === 'orchard') return '果园地块';
+  if (kind === 'meadow') return '草地空场';
+  if (kind === 'apple') return '果实';
+  if (kind === 'kid') return '小偷起点';
+  if (kind === 'guard1') return '守卫一起点';
+  if (kind === 'guard2') return '守卫二起点';
+  if (kind === 'delivery') return '投递点';
+  return islandObjectKindLabel(kind);
+}
+
+function previewSelectionExists(map: OrchardMap, selection: MapPreviewSelection): boolean {
+  if (isIslandPreviewSelection(selection)) {
+    return Boolean(map.islandLayout && islandSelectionExists(map.islandLayout, selection));
+  }
+  if (selection.kind === 'landmark') {
+    return map.landmarks.some((landmark) => landmark.id === selection.id &&
+      (landmark.kind === 'pond' || Boolean(landmark.asset)));
+  }
+  if (selection.kind === 'terrain-zone') {
+    return map.terrainZones.some((zone) => zone.id === selection.id);
+  }
+  return deliveryZonesForMap(map).some((zone) => zone.id === selection.id);
+}
+
+function previewSelectionPosition(map: OrchardMap, selection: MapPreviewSelection): Vec2 | null {
+  if (isIslandPreviewSelection(selection)) {
+    const geometry = map.islandLayout ? islandGeometryView(map.islandLayout, selection) : null;
+    return geometry ? { x: geometry.x, z: geometry.z } : null;
+  }
+  if (selection.kind === 'landmark') {
+    const landmark = map.landmarks.find((entry) => entry.id === selection.id);
+    return landmark ? { x: landmark.x, z: landmark.z } : null;
+  }
+  if (selection.kind === 'terrain-zone') {
+    const zone = map.terrainZones.find((entry) => entry.id === selection.id);
+    return zone ? { x: zone.x, z: zone.z } : null;
+  }
+  const zone = deliveryZonesForMap(map).find((entry) => entry.id === selection.id);
+  return zone ? { x: zone.x, z: zone.z } : null;
+}
+
+function previewSelectionLabel(map: OrchardMap, selection: MapPreviewSelection): string {
+  if (isIslandPreviewSelection(selection) && map.islandLayout) {
+    return islandSelectionLabel(map.islandLayout, selection);
+  }
+  if (selection.kind === 'landmark') {
+    const landmark = map.landmarks.find((entry) => entry.id === selection.id);
+    if (landmark?.kind === 'pond') return `池塘 · ${selection.id}`;
+    if (landmark?.asset) return `${BUILDING_LABELS[landmark.asset]} · ${selection.id}`;
+  }
+  if (selection.kind === 'terrain-zone') {
+    const zone = map.terrainZones.find((entry) => entry.id === selection.id);
+    if (zone) return `${zone.kind === 'orchard' ? '果园地块' : zone.kind === 'meadow' ? '草地空场' : '花地区域'} · ${selection.id}`;
+  }
+  if (selection.kind === 'delivery-zone') {
+    const index = deliveryZonesForMap(map).findIndex((zone) => zone.id === selection.id);
+    return `投递点 ${index >= 0 ? index + 1 : ''} · ${selection.id}`;
+  }
+  return selection.id;
+}
+
+function applyPreviewSelectionMove(
+  map: OrchardMap,
+  selection: MapPreviewSelection,
+  position: Vec2,
+): boolean {
+  if (isIslandPreviewSelection(selection)) return applyPreviewIslandMove(map, selection, position);
+  if (!insideArena(position, 0.5)) return false;
+  if (selection.kind === 'delivery-zone') {
+    if (!moveDeliveryZone(map, selection.id, position)) return false;
+    map.trees = map.trees.filter((tree) => distance(tree, position) > GAME_CONFIG.deliveryRadius + 1);
+    return true;
+  }
+  if (selection.kind === 'terrain-zone') {
+    const zone = map.terrainZones.find((entry) => entry.id === selection.id);
+    if (!zone || Math.abs(position.x) + zone.radiusX > GAME_CONFIG.arenaHalfWidth ||
+      Math.abs(position.z) + zone.radiusZ > GAME_CONFIG.arenaHalfDepth) return false;
+    zone.x = position.x;
+    zone.z = position.z;
+    return true;
+  }
+  const landmark = map.landmarks.find((entry) => entry.id === selection.id &&
+    (entry.kind === 'pond' || Boolean(entry.asset)));
+  if (!landmark) return false;
+  const moved = { ...landmark, ...position };
+  if (!landmarkInsideArena(moved, 0.8)) return false;
+  const importantPoints = [
+    map.kidStart,
+    ...map.guardStarts,
+    ...deliveryZonesForMap(map),
+    ...map.appleSpawns,
+  ];
+  if (importantPoints.some((point) => landmarkBlocksPoint(moved, point, 2.2))) return false;
+  const candidateRadius = Math.hypot(moved.radiusX, moved.radiusZ);
+  const overlaps = map.landmarks.some((existing) => existing.id !== moved.id &&
+    (existing.kind === 'pond' || Boolean(existing.asset)) &&
+    distance(existing, moved) < candidateRadius + Math.hypot(existing.radiusX, existing.radiusZ) + 1.5);
+  if (overlaps) return false;
+  landmark.x = position.x;
+  landmark.z = position.z;
+  landmark.rotationY = landmark.asset ? 0 : landmark.rotationY;
+  map.trees = map.trees.filter((tree) => !landmarkBlocksPoint(landmark, tree, 0.9));
+  return true;
+}
+
+function duplicatePreviewObject(
+  sourceMap: OrchardMap,
+  selection: MapPreviewSelection,
+  duplicateId: string,
+): { map: OrchardMap; selection: MapPreviewSelection } | null {
+  const sourcePosition = previewSelectionPosition(sourceMap, selection);
+  if (!sourcePosition) return null;
+  const span = previewSelectionSpan(sourceMap, selection);
+  const offsets: Vec2[] = [
+    { x: span.x + 2, z: 0 },
+    { x: -(span.x + 2), z: 0 },
+    { x: 0, z: span.z + 2 },
+    { x: 0, z: -(span.z + 2) },
+  ];
+  for (const offset of offsets) {
+    const map = cloneOrchardMap(sourceMap);
+    const position = {
+      x: sourcePosition.x + offset.x,
+      z: selection.kind === 'bridge' ? sourcePosition.z : sourcePosition.z + offset.z,
+    };
+    let duplicate: MapPreviewSelection | null = null;
+    if (isIslandPreviewSelection(selection)) {
+      const geometry = map.islandLayout ? islandGeometryView(map.islandLayout, selection) : null;
+      const added = geometry ? addIslandObject(map, selection.kind, position) : null;
+      if (geometry && added?.ok && added.id && applyIslandGeometryUpdate(map, selection.kind, added.id, {
+        x: position.x,
+        z: position.z,
+        sizeX: geometry.sizeX,
+        sizeZ: geometry.sizeZ,
+        ...(geometry.semanticKind
+          ? { semanticKind: geometry.semanticKind as OrchardIslandRegionKind | OrchardIslandRouteBlockKind }
+          : {}),
+        ...(geometry.rotationY === undefined ? {} : { rotationY: geometry.rotationY }),
+      })) duplicate = { kind: selection.kind, id: added.id };
+    } else if (selection.kind === 'landmark') {
+      const landmark = map.landmarks.find((entry) => entry.id === selection.id);
+      if (landmark) {
+        const copy = { ...landmark, id: duplicateId, ...position, rotationY: landmark.asset ? 0 : landmark.rotationY };
+        map.landmarks.push(copy);
+        duplicate = { kind: 'landmark', id: copy.id };
+        if (!applyPreviewSelectionMove(map, duplicate, position)) duplicate = null;
+      }
+    } else if (selection.kind === 'terrain-zone') {
+      const zone = map.terrainZones.find((entry) => entry.id === selection.id);
+      if (zone && map.terrainZones.length < MAX_TERRAIN_ZONES) {
+        const copy = { ...zone, id: duplicateId, ...position };
+        map.terrainZones.push(copy);
+        duplicate = { kind: 'terrain-zone', id: copy.id };
+        if (!applyPreviewSelectionMove(map, duplicate, position)) duplicate = null;
+      }
+    } else {
+      const zone = addDeliveryZone(map, position);
+      if (zone) duplicate = { kind: 'delivery-zone', id: zone.id };
+    }
+    if (duplicate && validateOrchardMap(map).valid) return { map, selection: duplicate };
+  }
+  return null;
+}
+
+function previewSelectionSpan(map: OrchardMap, selection: MapPreviewSelection): Vec2 {
+  if (isIslandPreviewSelection(selection)) {
+    const geometry = map.islandLayout ? islandGeometryView(map.islandLayout, selection) : null;
+    if (!geometry) return { x: 4, z: 4 };
+    const halfSize = selection.kind === 'region' || selection.kind === 'route-block';
+    return {
+      x: halfSize ? geometry.sizeX * 2 : geometry.sizeX,
+      z: halfSize ? geometry.sizeZ * 2 : geometry.sizeZ,
+    };
+  }
+  if (selection.kind === 'landmark') {
+    const landmark = map.landmarks.find((entry) => entry.id === selection.id);
+    const diameter = landmark ? Math.hypot(landmark.radiusX, landmark.radiusZ) * 2 : 4;
+    return { x: diameter, z: diameter };
+  }
+  if (selection.kind === 'terrain-zone') {
+    const zone = map.terrainZones.find((entry) => entry.id === selection.id);
+    return zone ? { x: zone.radiusX * 2, z: zone.radiusZ * 2 } : { x: 4, z: 4 };
+  }
+  return { x: GAME_CONFIG.deliveryRadius * 2, z: GAME_CONFIG.deliveryRadius * 2 };
 }
 
 function applyPreviewIslandMove(
   map: OrchardMap,
-  selection: MapPreviewSelection,
+  selection: MapPreviewSelection & { kind: EditableIslandGeometryKind },
   position: Vec2,
 ): boolean {
   if (!map.islandLayout) return false;

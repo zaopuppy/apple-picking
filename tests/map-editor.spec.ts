@@ -551,7 +551,7 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-world-mode', 'island-v5');
   await expect(preview).toHaveAttribute('data-island-regions', '5');
-  await expect(preview).toHaveAttribute('data-editor-proxies', '17');
+  await expect(preview).toHaveAttribute('data-editor-proxies', '23');
   await expect(preview).toHaveAttribute('data-selected-kind', 'bridge');
   await expect(preview).toHaveAttribute('data-selected-id', 'island-bridge-west');
   await expect(page.locator('#island-geometry-panel')).toBeVisible();
@@ -579,7 +579,7 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   await dragBridge();
   await expect(page.getByText('桥梁已沿水面移动，碰撞缺口已同步。')).toBeVisible();
   await expect(page.getByRole('button', { name: '撤销' })).toBeEnabled();
-  await expect(page.getByLabel('中心 X')).not.toHaveValue('-22');
+  await expect(page.locator('#island-geometry-x')).not.toHaveValue('-22');
   await page.getByRole('button', { name: '撤销' }).click();
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   const restoredBox = await preview.boundingBox();
@@ -591,9 +591,104 @@ test('island v5 editor displays and selects semantic layout with matching 3D pre
   const restoredBridge = restoredScreens.find((entry) => entry.id === 'island-bridge-west');
   if (!restoredBox || !restoredBridge) throw new Error('Restored 3D bridge projection is unavailable.');
   await page.mouse.click(restoredBox.x + restoredBridge.x, restoredBox.y + restoredBridge.y);
-  await expect(page.getByLabel('中心 X')).toHaveValue('-22');
+  await expect(page.locator('#island-geometry-x')).toHaveValue('-22');
+  await page.getByLabel('新结构').selectOption('region');
+  await page.getByRole('button', { name: '放置新结构' }).click();
+  await expect(preview).toHaveAttribute('data-placement-kind', 'region');
+  await page.mouse.click(restoredBox.x + restoredBox.width / 2, restoredBox.y + restoredBox.height / 2);
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-selected-kind', 'region');
+  await expect(preview).toHaveAttribute('data-editor-proxies', '24');
+  await page.getByRole('button', { name: '删除选中结构' }).click();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-editor-proxies', '23');
   await page.screenshot({
     path: testInfo.outputPath('island-v5-editor-3d.png'),
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test('3D editor places, duplicates and deletes buildings through real pointer input', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', '3D editor authoring is desktop-first.');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/editor.html');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  await page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
+    localStorage.setItem('apple-picking.active-map.v5', JSON.stringify({
+      ...map,
+      id: '3d-authoring-test',
+      name: '3D 建筑验收',
+      trees: [],
+      landmarks: [],
+      terrainZones: [],
+      paths: [],
+    }));
+  });
+  await page.reload();
+  await page.getByRole('button', { name: '3D 预览' }).click();
+  const preview = page.getByLabel('KayKit 地图三维预览');
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  const previewBox = await preview.boundingBox();
+  if (!previewBox) throw new Error('3D editor preview is unavailable.');
+
+  await page.getByRole('button', { name: /KayKit 建筑 3/ }).click();
+  await page.getByLabel('建筑模型').selectOption('market');
+  await expect(preview).toHaveAttribute('data-placement-kind', 'homestead');
+  await page.mouse.click(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-selected-kind', 'landmark');
+  await expect(page.locator('#preview-object-panel')).toBeVisible();
+  await expect(page.locator('#preview-object-title')).toContainText('集市');
+
+  await page.getByRole('button', { name: /岛屿结构 R/ }).click();
+  await expect(preview).toHaveAttribute('data-placement-kind', '');
+  await page.locator('#preview-object-x').fill('1');
+  await page.getByRole('button', { name: '应用位置' }).click();
+  await expect(page.getByText('3D 位置已应用，并写入一条撤销记录。')).toBeVisible();
+  await page.getByRole('button', { name: '复制 Ctrl+D' }).click();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  let buildings = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].landmarks);
+  expect(buildings).toHaveLength(2);
+  expect(buildings.every((landmark: { asset?: string; rotationY: number }) =>
+    landmark.asset === 'market' && landmark.rotationY === 0)).toBe(true);
+
+  await page.getByRole('button', { name: '删除 Delete' }).click();
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  buildings = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].landmarks);
+  expect(buildings).toHaveLength(1);
+  await page.getByRole('button', { name: '撤销' }).click();
+  await page.getByRole('button', { name: '保存地图' }).click();
+  buildings = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].landmarks);
+  expect(buildings).toHaveLength(2);
+
+  await page.getByRole('button', { name: /投递区 W/ }).click();
+  await page.getByRole('button', { name: '添加新点' }).click();
+  await expect(preview).toHaveAttribute('data-placement-kind', 'delivery');
+  await page.mouse.click(
+    previewBox.x + previewBox.width * 0.28,
+    previewBox.y + previewBox.height * 0.72,
+  );
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-selected-kind', 'delivery-zone');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  const deliveryZones = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].deliveryZones);
+  expect(deliveryZones).toHaveLength(2);
+  await page.screenshot({
+    path: testInfo.outputPath('desktop-3d-authoring.png'),
     fullPage: true,
   });
   expect(consoleErrors).toEqual([]);

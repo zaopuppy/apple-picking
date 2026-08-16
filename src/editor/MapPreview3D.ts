@@ -25,6 +25,24 @@ export type MapPreviewSelectionKind =
   | 'region'
   | 'route-block'
   | 'water-segment'
+  | 'bridge'
+  | 'landmark'
+  | 'terrain-zone'
+  | 'delivery-zone';
+
+export type MapPreviewPlacementKind =
+  | 'homestead'
+  | 'pond'
+  | 'orchard'
+  | 'meadow'
+  | 'apple'
+  | 'kid'
+  | 'guard1'
+  | 'guard2'
+  | 'delivery'
+  | 'region'
+  | 'route-block'
+  | 'water-segment'
   | 'bridge';
 
 export type MapPreviewSelection = {
@@ -41,6 +59,7 @@ export type MapPreview3DHandlers = {
   onSelectionChange: (selection: MapPreviewSelection | null) => void;
   onMovePreview: (selection: MapPreviewSelection, position: Vec2) => boolean;
   onMoveCommit: (selection: MapPreviewSelection, position: Vec2) => MapPreviewMoveResult;
+  onPlace: (kind: MapPreviewPlacementKind, position: Vec2) => MapPreviewMoveResult;
 };
 
 type EditorProxyDescriptor = {
@@ -80,6 +99,7 @@ export class MapPreview3D {
   private islandVisual: IslandWorldVisual | null = null;
   private pendingMap: OrchardMap | null = null;
   private selection: MapPreviewSelection | null = null;
+  private placement: MapPreviewPlacementKind | null = null;
   private drag: PreviewDrag | null = null;
   private readyStatusText = '';
   private rebuildTimer: number | null = null;
@@ -155,6 +175,17 @@ export class MapPreview3D {
     this.syncSelectionVisual();
   }
 
+  setPlacement(placement: MapPreviewPlacementKind | null): void {
+    this.placement = placement;
+    this.canvas.dataset.placementKind = placement ?? '';
+    this.canvas.classList.toggle('placement-mode', placement !== null);
+    if (!this.visible || !this.readyStatusText) return;
+    this.status.dataset.state = placement ? 'editing' : 'ready';
+    this.status.textContent = placement
+      ? `放置模式 · ${previewPlacementLabel(placement)} · 点击地面放置`
+      : this.readyStatusText;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.revision += 1;
@@ -228,6 +259,7 @@ export class MapPreview3D {
           `${map.islandLayout?.bridges.length ?? 0} 桥 · ${world.propInstances} 场景物件`
         : `3D 已同步 · ${world.tileInstances} 地块 · ${world.propInstances} 场景物件`;
       this.status.textContent = this.readyStatusText;
+      this.setPlacement(this.placement);
     } catch (error) {
       if (this.disposed || revision !== this.revision) return;
       this.canvas.dataset.ready = 'error';
@@ -256,6 +288,16 @@ export class MapPreview3D {
 
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.visible || event.button !== 0 || !this.editorProxyRoot) return;
+    if (this.placement) {
+      const point = this.pointerGroundIntersection(event);
+      if (!point) return;
+      event.preventDefault();
+      this.handlers.onPlace(this.placement, {
+        x: snapEditorCoordinate(point.x),
+        z: snapEditorCoordinate(point.z),
+      });
+      return;
+    }
     const proxy = this.pickEditorProxy(event);
     if (!proxy) {
       this.setSelection(null);
@@ -393,7 +435,6 @@ export class MapPreview3D {
     });
     const descriptor = proxy?.userData.editorDescriptor as EditorProxyDescriptor | undefined;
     if (!descriptor) {
-      this.selection = null;
       delete this.canvas.dataset.selectedKind;
       delete this.canvas.dataset.selectedId;
       return;
@@ -452,7 +493,38 @@ export class MapPreview3D {
 function createEditorProxyRoot(map: OrchardMap): THREE.Group {
   const root = new THREE.Group();
   root.name = 'map-editor-3d-semantic-proxies';
-  const descriptors = map.islandLayout ? islandEditorDescriptors(map.islandLayout) : [];
+  const descriptors: EditorProxyDescriptor[] = [
+    ...(map.islandLayout ? islandEditorDescriptors(map.islandLayout) : []),
+    ...map.landmarks
+      .filter((landmark) => landmark.kind === 'pond' || Boolean(landmark.asset))
+      .map((landmark) => ({
+        selection: { kind: 'landmark' as const, id: landmark.id },
+        x: landmark.x,
+        z: landmark.z,
+        sizeX: landmark.radiusX * 2,
+        sizeZ: landmark.radiusZ * 2,
+        rotationY: landmark.rotationY,
+        priority: 6,
+      })),
+    ...(map.islandLayout ? [] : map.terrainZones.map((zone) => ({
+      selection: { kind: 'terrain-zone' as const, id: zone.id },
+      x: zone.x,
+      z: zone.z,
+      sizeX: zone.radiusX * 2,
+      sizeZ: zone.radiusZ * 2,
+      rotationY: zone.rotationY,
+      priority: 1,
+    }))),
+    ...deliveryZonesForMap(map).map((zone) => ({
+      selection: { kind: 'delivery-zone' as const, id: zone.id },
+      x: zone.x,
+      z: zone.z,
+      sizeX: GAME_CONFIG.deliveryRadius * 2,
+      sizeZ: GAME_CONFIG.deliveryRadius * 2,
+      rotationY: 0,
+      priority: 7,
+    })),
+  ];
   for (const descriptor of descriptors) {
     const geometry = new THREE.BoxGeometry(descriptor.sizeX, 0.7, descriptor.sizeZ);
     const material = new THREE.MeshBasicMaterial({
@@ -570,6 +642,25 @@ function constrainPreviewMove(
       ? startPosition.z
       : clampEditorCoordinate(position.z, -GAME_CONFIG.arenaHalfDepth, GAME_CONFIG.arenaHalfDepth),
   };
+}
+
+function previewPlacementLabel(kind: MapPreviewPlacementKind): string {
+  const labels: Record<MapPreviewPlacementKind, string> = {
+    homestead: '建筑',
+    pond: '池塘',
+    orchard: '果园地块',
+    meadow: '草地空场',
+    apple: '果实',
+    kid: '小偷起点',
+    guard1: '守卫一起点',
+    guard2: '守卫二起点',
+    delivery: '投递点',
+    region: '视觉区域',
+    'route-block': '矩形障碍',
+    'water-segment': '水面段',
+    bridge: '桥梁',
+  };
+  return labels[kind];
 }
 
 function snapEditorCoordinate(value: number): number {
