@@ -90,6 +90,9 @@ declare global {
       worldCatalogAssets: number;
       worldTileShape: 'square' | 'hex' | null;
       worldLastFailure: string | null;
+      groundMaterialMode: 'flat-color' | 'grass-texture';
+      deliveryMarkerMode: 'ring' | 'parcel-sign';
+      deliveryMarkerLabels: number;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;

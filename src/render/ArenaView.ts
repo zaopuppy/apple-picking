@@ -59,6 +59,11 @@ type AppleView = {
   transition: AppleTransition | null;
 };
 
+type DeliveryZoneVisual = {
+  pulseRings: THREE.InstancedMesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  zones: ReadonlyArray<{ x: number; z: number }>;
+};
+
 const FIELD_GROUND_SIZE = Math.max(
   GAME_CONFIG.arenaHalfWidth * 2,
   GAME_CONFIG.arenaHalfDepth * 2,
@@ -108,6 +113,9 @@ export type EnvironmentAssetDiagnostics = {
   worldCatalogAssets: number;
   worldTileShape: KayKitTileShape | null;
   worldLastFailure: string | null;
+  groundMaterialMode: 'flat-color' | 'grass-texture';
+  deliveryMarkerMode: 'ring' | 'parcel-sign';
+  deliveryMarkerLabels: number;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -155,6 +163,7 @@ export class ArenaView {
   private readonly islandWorld: boolean;
   private readonly worldPreset: MedievalWorldPreset | null;
   private islandWorldVisual: IslandWorldVisual | null = null;
+  private deliveryZoneVisual: DeliveryZoneVisual | null = null;
   private importedKidView: ImportedKidView | null = null;
   private disposed = false;
   private environmentDiagnostics: EnvironmentAssetDiagnostics = {
@@ -197,6 +206,9 @@ export class ArenaView {
     worldCatalogAssets: 0,
     worldTileShape: null,
     worldLastFailure: null,
+    groundMaterialMode: 'flat-color',
+    deliveryMarkerMode: 'ring',
+    deliveryMarkerLabels: 0,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -391,6 +403,7 @@ export class ArenaView {
     }
     for (const apple of snapshot.apples) this.syncApple(apple, snapshot, renderTime, reducedMotion);
     this.islandWorldVisual?.update(renderTime, reducedMotion);
+    this.syncDeliveryZones(renderTime, reducedMotion);
 
     this.pickingRing.visible = snapshot.kid.state === 'Picking';
     if (this.pickingRing.visible) {
@@ -455,6 +468,7 @@ export class ArenaView {
         worldCatalogAssets: 0,
         worldTileShape: null,
         worldLastFailure: null,
+        groundMaterialMode: 'grass-texture',
       };
       this.createForest();
       this.createDeliveryZones();
@@ -958,6 +972,158 @@ export class ArenaView {
   }
 
   private createDeliveryZones(): void {
+    const zones = deliveryZonesForMap(this.map);
+    if (!this.islandWorld) {
+      this.createRingDeliveryZones(zones);
+      return;
+    }
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      deliveryMarkerMode: 'parcel-sign',
+      deliveryMarkerLabels: zones.length,
+    };
+    const fillGeometry = new THREE.CircleGeometry(GAME_CONFIG.deliveryRadius - 0.18, 48);
+    const outlineGeometry = new THREE.RingGeometry(
+      GAME_CONFIG.deliveryRadius - 0.22,
+      GAME_CONFIG.deliveryRadius + 0.12,
+      48,
+    );
+    const pulseGeometry = new THREE.RingGeometry(
+      GAME_CONFIG.deliveryRadius + 0.26,
+      GAME_CONFIG.deliveryRadius + 0.56,
+      48,
+    );
+    const fillMaterial = new THREE.MeshBasicMaterial({
+      color: '#f8df75',
+      transparent: true,
+      opacity: this.islandWorld ? 0.28 : 0.2,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const outlineMaterial = new THREE.MeshBasicMaterial({
+      color: '#fff2a9',
+      transparent: true,
+      opacity: 0.98,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const pulseMaterial = new THREE.MeshBasicMaterial({
+      color: '#f2a33b',
+      transparent: true,
+      opacity: 0.32,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const fills = new THREE.InstancedMesh(fillGeometry, fillMaterial, zones.length);
+    const outlines = new THREE.InstancedMesh(outlineGeometry, outlineMaterial, zones.length);
+    const pulseRings = new THREE.InstancedMesh(pulseGeometry, pulseMaterial, zones.length);
+    fills.name = 'delivery-zone-fills';
+    outlines.name = 'delivery-zone-outlines';
+    pulseRings.name = 'delivery-zone-pulse-rings';
+    fills.renderOrder = 3;
+    outlines.renderOrder = 4;
+    pulseRings.renderOrder = 2;
+
+    const padMaterial = new THREE.MeshStandardMaterial({
+      color: '#f7e7a3',
+      roughness: 0.94,
+      metalness: 0,
+    });
+    const parcelMaterial = new THREE.MeshStandardMaterial({
+      color: '#dc8b37',
+      roughness: 0.86,
+      metalness: 0,
+    });
+    const ribbonMaterial = new THREE.MeshStandardMaterial({
+      color: '#fff4c7',
+      roughness: 0.9,
+      metalness: 0,
+    });
+    const pads = new THREE.InstancedMesh(new THREE.BoxGeometry(1.95, 0.09, 1.95), padMaterial, zones.length);
+    const parcels = new THREE.InstancedMesh(new THREE.BoxGeometry(0.92, 0.34, 0.72), parcelMaterial, zones.length);
+    const ribbons = new THREE.InstancedMesh(new THREE.BoxGeometry(1.02, 0.055, 0.17), ribbonMaterial, zones.length * 2);
+    pads.name = 'delivery-zone-parcel-pads';
+    parcels.name = 'delivery-zone-parcels';
+    ribbons.name = 'delivery-zone-parcel-ribbons';
+    pads.castShadow = true;
+    parcels.castShadow = true;
+    parcels.receiveShadow = true;
+
+    const labelTexture = createDeliveryLabelTexture();
+    const labelMaterial = new THREE.SpriteMaterial({
+      map: labelTexture,
+      transparent: true,
+      depthWrite: false,
+      sizeAttenuation: true,
+    });
+    const labelRoot = new THREE.Group();
+    labelRoot.name = 'delivery-zone-labels';
+
+    zones.forEach((zone, index) => {
+      this.setInstance(
+        fills,
+        index,
+        new THREE.Vector3(zone.x, 0.03, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(-Math.PI / 2, 0, 0),
+      );
+      this.setInstance(
+        outlines,
+        index,
+        new THREE.Vector3(zone.x, 0.045, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(-Math.PI / 2, 0, 0),
+      );
+      this.setInstance(
+        pulseRings,
+        index,
+        new THREE.Vector3(zone.x, 0.038, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(-Math.PI / 2, 0, 0),
+      );
+      this.setInstance(
+        pads,
+        index,
+        new THREE.Vector3(zone.x, 0.095, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(0, Math.PI / 4, 0),
+      );
+      this.setInstance(
+        parcels,
+        index,
+        new THREE.Vector3(zone.x, 0.31, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(0, Math.PI / 4, 0),
+      );
+      for (let ribbonIndex = 0; ribbonIndex < 2; ribbonIndex += 1) {
+        this.setInstance(
+          ribbons,
+          index * 2 + ribbonIndex,
+          new THREE.Vector3(zone.x, 0.51, zone.z),
+          new THREE.Vector3(1, 1, 1),
+          new THREE.Euler(0, Math.PI / 4 + ribbonIndex * Math.PI / 2, 0),
+        );
+      }
+
+      const label = new THREE.Sprite(labelMaterial);
+      label.name = `delivery-zone-${zone.id}-label`;
+      label.position.set(zone.x, 2.1, zone.z - 1.65);
+      label.scale.set(4.25, 1.6, 1);
+      label.renderOrder = 6;
+      labelRoot.add(label);
+    });
+
+    fills.instanceMatrix.needsUpdate = true;
+    outlines.instanceMatrix.needsUpdate = true;
+    pulseRings.instanceMatrix.needsUpdate = true;
+    pads.instanceMatrix.needsUpdate = true;
+    parcels.instanceMatrix.needsUpdate = true;
+    ribbons.instanceMatrix.needsUpdate = true;
+    this.deliveryZoneVisual = { pulseRings, zones };
+    this.root.add(fills, outlines, pulseRings, pads, parcels, ribbons, labelRoot);
+  }
+
+  private createRingDeliveryZones(zones: ReadonlyArray<{ x: number; z: number }>): void {
     const fillGeometry = new THREE.CircleGeometry(GAME_CONFIG.deliveryRadius, 48);
     const outlineGeometry = new THREE.RingGeometry(
       GAME_CONFIG.deliveryRadius - 0.12,
@@ -978,17 +1144,50 @@ export class ArenaView {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    for (const zone of deliveryZonesForMap(this.map)) {
-      const fill = new THREE.Mesh(fillGeometry, fillMaterial);
-      const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
-      fill.name = `delivery-zone-${zone.id}-fill`;
-      outline.name = `delivery-zone-${zone.id}-outline`;
-      fill.rotation.x = -Math.PI / 2;
-      outline.rotation.x = -Math.PI / 2;
-      fill.position.set(zone.x, 0.021, zone.z);
-      outline.position.set(zone.x, 0.026, zone.z);
-      this.root.add(fill, outline);
-    }
+    const fills = new THREE.InstancedMesh(fillGeometry, fillMaterial, zones.length);
+    const outlines = new THREE.InstancedMesh(outlineGeometry, outlineMaterial, zones.length);
+    fills.name = 'delivery-zone-fills';
+    outlines.name = 'delivery-zone-outlines';
+    zones.forEach((zone, index) => {
+      this.setInstance(
+        fills,
+        index,
+        new THREE.Vector3(zone.x, 0.021, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(-Math.PI / 2, 0, 0),
+      );
+      this.setInstance(
+        outlines,
+        index,
+        new THREE.Vector3(zone.x, 0.026, zone.z),
+        new THREE.Vector3(1, 1, 1),
+        new THREE.Euler(-Math.PI / 2, 0, 0),
+      );
+    });
+    fills.instanceMatrix.needsUpdate = true;
+    outlines.instanceMatrix.needsUpdate = true;
+    this.environmentDiagnostics = {
+      ...this.environmentDiagnostics,
+      deliveryMarkerMode: 'ring',
+      deliveryMarkerLabels: 0,
+    };
+    this.root.add(fills, outlines);
+  }
+
+  private syncDeliveryZones(time: number, reducedMotion: boolean): void {
+    const visual = this.deliveryZoneVisual;
+    if (!visual) return;
+    const pulse = reducedMotion ? 0.5 : (Math.sin(time * 2.1) + 1) / 2;
+    const scale = 0.985 + pulse * 0.045;
+    visual.pulseRings.material.opacity = 0.18 + pulse * 0.24;
+    visual.zones.forEach((zone, index) => {
+      this.matrixDummy.position.set(zone.x, 0.038, zone.z);
+      this.matrixDummy.scale.set(scale, scale, 1);
+      this.matrixDummy.rotation.set(-Math.PI / 2, 0, 0);
+      this.matrixDummy.updateMatrix();
+      visual.pulseRings.setMatrixAt(index, this.matrixDummy.matrix);
+    });
+    visual.pulseRings.instanceMatrix.needsUpdate = true;
   }
 
   private createApple(id: number): void {
@@ -1138,6 +1337,41 @@ export class ArenaView {
     this.matrixDummy.updateMatrix();
     mesh.setMatrixAt(index, this.matrixDummy.matrix);
   }
+}
+
+function createDeliveryLabelTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 96;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Unable to create the delivery label texture.');
+
+  context.beginPath();
+  context.roundRect(5, 5, 246, 86, 25);
+  context.fillStyle = '#fff2b6';
+  context.fill();
+  context.lineWidth = 7;
+  context.strokeStyle = '#6f4a26';
+  context.stroke();
+
+  context.fillStyle = '#dc8b37';
+  context.fillRect(25, 29, 44, 37);
+  context.fillStyle = '#fff4c7';
+  context.fillRect(43, 29, 8, 37);
+  context.fillRect(25, 43, 44, 8);
+
+  context.fillStyle = '#4a351f';
+  context.font = '700 42px "Microsoft YaHei", "Noto Sans SC", sans-serif';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText('投递', 165, 49);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.name = 'delivery-zone-label-texture';
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
 }
 
 function proceduralCrownScale(variant: TreeVariant, scale: number): THREE.Vector3 {

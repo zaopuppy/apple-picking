@@ -199,12 +199,7 @@ function createTerrainPatches(map: OrchardMap, materials: IslandMaterials): THRE
   const group = new THREE.Group();
   group.name = 'island-authored-ground-patches';
   for (const zone of map.terrainZones) {
-    const material = zone.kind === 'orchard'
-      ? materials.soil
-      : zone.kind === 'wildflowers'
-        ? materials.grassLight
-        : materials.sandLight;
-    const patch = new THREE.Mesh(new THREE.CircleGeometry(1, 48), material);
+    const patch = new THREE.Mesh(new THREE.CircleGeometry(1, 48), materials.grassPatch);
     patch.name = `island-zone-${zone.kind}`;
     patch.rotation.x = -Math.PI / 2;
     patch.rotation.z = -zone.rotationY;

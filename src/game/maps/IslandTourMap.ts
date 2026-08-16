@@ -154,7 +154,7 @@ function createRouteBlockLandmarks(): OrchardLandmark[] {
 export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
   version: 4,
   id: SWEET_ORCHARD_ISLAND_ID,
-  name: '甜日果园岛 · P1.2',
+  name: '甜日果园岛 · P1.3',
   seed: 20260816,
   worldStyle: {
     theme: 'riverside',

@@ -1017,13 +1017,16 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P1.2',
+    mapName: '甜日果园岛 · P1.3',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
     paths: 5,
     landmarks: 14,
     deliveryZones: 4,
+    groundMaterialMode: 'grass-texture',
+    deliveryMarkerMode: 'parcel-sign',
+    deliveryMarkerLabels: 4,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
