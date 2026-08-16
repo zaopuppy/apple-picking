@@ -20,6 +20,7 @@ const PREVIEW_BACKGROUND = '#9fba78';
 const ISLAND_PREVIEW_BACKGROUND = '#54bfd0';
 const EDITOR_SELECTION_COLOR = '#ffd15c';
 const EDITOR_INVALID_COLOR = '#ef6a52';
+const PLACEMENT_CLICK_TOLERANCE_PX = 6;
 
 export type MapPreviewSelectionKind =
   | 'region'
@@ -85,6 +86,14 @@ type PreviewDrag = {
   valid: boolean;
 };
 
+type PendingPreviewPlacement = {
+  pointerId: number;
+  kind: MapPreviewPlacementKind;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
+};
+
 export class MapPreview3D {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -103,6 +112,7 @@ export class MapPreview3D {
   private pendingMap: OrchardMap | null = null;
   private selection: MapPreviewSelection | null = null;
   private placement: MapPreviewPlacementKind | null = null;
+  private pendingPlacement: PendingPreviewPlacement | null = null;
   private drag: PreviewDrag | null = null;
   private readyStatusText = '';
   private rebuildTimer: number | null = null;
@@ -291,17 +301,17 @@ export class MapPreview3D {
 
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.visible || event.button !== 0 || !this.editorProxyRoot) return;
-    if (this.placement) {
-      const point = this.pointerGroundIntersection(event);
-      if (!point) return;
-      event.preventDefault();
-      this.handlers.onPlace(this.placement, {
-        x: snapEditorCoordinate(point.x),
-        z: snapEditorCoordinate(point.z),
-      });
+    const proxy = this.pickEditorProxy(event);
+    if (this.placement && (!proxy || !placementYieldsToEditorProxy(this.placement))) {
+      this.pendingPlacement = {
+        pointerId: event.pointerId,
+        kind: this.placement,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      };
       return;
     }
-    const proxy = this.pickEditorProxy(event);
     if (!proxy) {
       this.setSelection(null);
       this.handlers.onSelectionChange(null);
@@ -328,6 +338,14 @@ export class MapPreview3D {
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
+    const pendingPlacement = this.pendingPlacement;
+    if (pendingPlacement?.pointerId === event.pointerId) {
+      pendingPlacement.moved ||= Math.hypot(
+        event.clientX - pendingPlacement.startClientX,
+        event.clientY - pendingPlacement.startClientY,
+      ) > PLACEMENT_CLICK_TOLERANCE_PX;
+      return;
+    }
     const drag = this.drag;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const ground = this.pointerGroundIntersection(event);
@@ -351,12 +369,28 @@ export class MapPreview3D {
   };
 
   private readonly onPointerUp = (event: PointerEvent): void => {
+    if (this.finishPendingPlacement(event)) return;
     this.finishDrag(event.pointerId, false);
   };
 
   private readonly onPointerCancel = (event: PointerEvent): void => {
+    if (this.pendingPlacement?.pointerId === event.pointerId) this.pendingPlacement = null;
     this.finishDrag(event.pointerId, true);
   };
+
+  private finishPendingPlacement(event: PointerEvent): boolean {
+    const pendingPlacement = this.pendingPlacement;
+    if (!pendingPlacement || pendingPlacement.pointerId !== event.pointerId) return false;
+    this.pendingPlacement = null;
+    if (pendingPlacement.moved) return true;
+    const point = this.pointerGroundIntersection(event);
+    if (!point) return true;
+    this.handlers.onPlace(pendingPlacement.kind, {
+      x: snapEditorCoordinate(point.x),
+      z: snapEditorCoordinate(point.z),
+    });
+    return true;
+  }
 
   private finishDrag(pointerId: number, cancelled: boolean): void {
     const drag = this.drag;
@@ -491,6 +525,10 @@ export class MapPreview3D {
     this.selectionVisual.removeFromParent();
     this.selectionVisual = null;
   }
+}
+
+function placementYieldsToEditorProxy(kind: MapPreviewPlacementKind): boolean {
+  return kind === 'homestead' || kind === 'pond' || kind === 'orchard' || kind === 'meadow';
 }
 
 function createEditorProxyRoot(map: OrchardMap): THREE.Group {

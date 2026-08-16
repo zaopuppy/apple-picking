@@ -659,21 +659,61 @@ test('3D editor places, duplicates and deletes buildings through real pointer in
   await page.getByRole('button', { name: /KayKit 建筑 3/ }).click();
   await page.getByLabel('建筑模型').selectOption('market');
   await expect(preview).toHaveAttribute('data-placement-kind', 'homestead');
+  await preview.scrollIntoViewIfNeeded();
+  const placementBox = await preview.boundingBox();
+  if (!placementBox) throw new Error('3D editor preview is unavailable.');
+  await page.mouse.move(
+    placementBox.x + placementBox.width * 0.5,
+    placementBox.y + placementBox.height * 0.5,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    placementBox.x + placementBox.width * 0.5 + 18,
+    placementBox.y + placementBox.height * 0.5 + 10,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  await page.getByRole('button', { name: '保存地图' }).click();
+  const buildingsAfterCameraDrag = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].landmarks);
+  expect(buildingsAfterCameraDrag).toHaveLength(0);
+  await expect(preview).toHaveAttribute('data-placement-kind', 'homestead');
   await clickPreviewAt(0.5, 0.5);
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await expect(preview).toHaveAttribute('data-selected-kind', 'landmark');
+  await expect(preview).toHaveAttribute('data-placement-kind', '');
   await expect(page.locator('#preview-object-panel')).toBeVisible();
   await expect(page.locator('#preview-object-title')).toContainText('集市');
 
-  await page.getByRole('button', { name: /岛屿结构 R/ }).click();
-  await expect(preview).toHaveAttribute('data-placement-kind', '');
+  await preview.scrollIntoViewIfNeeded();
+  const buildingId = await preview.getAttribute('data-selected-id');
+  const buildingScreens = JSON.parse(
+    await preview.getAttribute('data-editor-proxy-screens') ?? '[]',
+  ) as Array<{ id: string; x: number; y: number }>;
+  const buildingScreen = buildingScreens.find((entry) => entry.id === buildingId);
+  const buildingBox = await preview.boundingBox();
+  if (!buildingScreen || !buildingBox) throw new Error('Placed building projection is unavailable.');
+  await page.mouse.move(buildingBox.x + buildingScreen.x, buildingBox.y + buildingScreen.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    buildingBox.x + buildingScreen.x + 18,
+    buildingBox.y + buildingScreen.y + 10,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  await expect(page.getByText('3D 位置已应用，并写入一条撤销记录。')).toBeVisible();
+  await page.getByRole('button', { name: '保存地图' }).click();
+  let buildings = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].landmarks);
+  expect(buildings).toHaveLength(1);
+
   await page.locator('#preview-object-x').fill('1');
   await page.getByRole('button', { name: '应用位置' }).click();
   await expect(page.getByText('3D 位置已应用，并写入一条撤销记录。')).toBeVisible();
   await page.getByRole('button', { name: '复制 Ctrl+D' }).click();
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await page.getByRole('button', { name: '保存地图' }).click();
-  let buildings = await page.evaluate(() =>
+  buildings = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0].landmarks);
   expect(buildings).toHaveLength(2);
   expect(buildings.every((landmark: { asset?: string; rotationY: number }) =>

@@ -790,7 +790,8 @@ export class MapEditor {
       this.previewSelection = null;
     }
     this.refresh();
-    this.syncPreviewPlacement();
+    if (isContinuousPreviewPlacement(kind)) this.syncPreviewPlacement();
+    else this.preview.setPlacement(null);
     this.showToast(`${previewPlacementLabel(kind)}已从 3D 视图放置。`);
     return { ok: true };
   }
@@ -1899,6 +1900,10 @@ function previewPlacementForTool(tool: EditorTool): MapPreviewPlacementKind | nu
     tool === 'apple' || tool === 'kid' || tool === 'guard1' || tool === 'guard2'
     ? tool
     : null;
+}
+
+function isContinuousPreviewPlacement(kind: MapPreviewPlacementKind): boolean {
+  return kind === 'tree' || kind === 'erase' || kind === 'path';
 }
 
 function previewPlacementLabel(kind: MapPreviewPlacementKind): string {
