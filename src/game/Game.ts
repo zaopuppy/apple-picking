@@ -69,6 +69,9 @@ export class Game {
   private readonly orthographicControls: OrbitControls;
   private readonly perspectiveControls: OrbitControls;
   private readonly input = new InputRouter();
+  private readonly cameraControl = getElement<HTMLElement>('#camera-control');
+  private readonly cameraModeToggle = getElement<HTMLButtonElement>('#camera-mode-toggle');
+  private readonly cameraModeLabel = getElement<HTMLElement>('#camera-mode-label');
   private readonly map: OrchardMap;
   private readonly islandWorld: boolean;
   private readonly simulation: GameSimulation;
@@ -94,6 +97,9 @@ export class Game {
   };
   private readonly handleCanvasContextMenu = (event: MouseEvent): void => {
     if (this.cameraPointerMode) event.preventDefault();
+  };
+  private readonly handleCameraModeToggle = (): void => {
+    this.setCameraPointerMode(!this.cameraPointerMode);
   };
 
   private frame = 0;
@@ -149,6 +155,7 @@ export class Game {
     this.configureCameraControls(this.orthographicControls, this.handleOrthographicControlsChange);
     this.configureCameraControls(this.perspectiveControls, this.handlePerspectiveControlsChange);
     this.canvas.addEventListener('contextmenu', this.handleCanvasContextMenu);
+    this.cameraModeToggle.addEventListener('click', this.handleCameraModeToggle);
     this.createLighting();
     this.view = new ArenaView(this.scene, this.map);
     const mapName = document.querySelector<HTMLElement>('#active-map-name');
@@ -156,6 +163,7 @@ export class Game {
     this.configureWorldNavigation(medievalWorld?.preset ?? null, this.islandWorld);
     resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
     this.updateCameraComposition();
+    this.syncCameraControlUi();
     this.syncPresentation();
     this.installTestHooks();
     this.publishDiagnostics();
@@ -212,6 +220,7 @@ export class Game {
     this.orthographicControls.dispose();
     this.perspectiveControls.dispose();
     this.canvas.removeEventListener('contextmenu', this.handleCanvasContextMenu);
+    this.cameraModeToggle.removeEventListener('click', this.handleCameraModeToggle);
     this.canvas.classList.remove('camera-pointer-mode');
     this.renderer.dispose();
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
@@ -330,7 +339,10 @@ export class Game {
   }
 
   private setCameraPointerMode(enabled: boolean): void {
-    if (this.cameraPointerMode === enabled) return;
+    if (this.cameraPointerMode === enabled) {
+      this.syncCameraControlUi();
+      return;
+    }
     this.cameraPointerMode = enabled;
     this.orthographicControls.enabled = false;
     this.perspectiveControls.enabled = false;
@@ -342,7 +354,23 @@ export class Game {
     }
     this.syncCameraTuningFromControls();
     this.debugPanel?.setCameraPointerMode(enabled);
+    this.syncCameraControlUi();
     this.publishDiagnostics();
+  }
+
+  private syncCameraControlUi(): void {
+    this.cameraControl.dataset.mode = this.cameraPointerMode ? 'mouse' : 'fixed';
+    this.cameraModeToggle.setAttribute('aria-pressed', String(this.cameraPointerMode));
+    this.cameraModeToggle.title = this.cameraPointerMode
+      ? '固定当前镜头'
+      : '开启自由镜头';
+    this.cameraModeToggle.setAttribute(
+      'aria-label',
+      this.cameraPointerMode
+        ? '自由镜头已开启，点击固定当前镜头'
+        : '开启自由镜头：左键旋转，右键平移，滚轮缩放',
+    );
+    this.cameraModeLabel.textContent = this.cameraPointerMode ? '固定镜头' : '自由镜头';
   }
 
   private setCameraProjection(projection: CameraProjection): void {
@@ -567,7 +595,6 @@ export class Game {
       },
       hideDebugUi: (hidden: boolean) => {
         this.debugUiHidden = hidden;
-        if (hidden) this.setCameraPointerMode(false);
         this.debugPanel?.setHidden(hidden);
       },
     };
@@ -692,4 +719,10 @@ export class Game {
 
 function roundCameraValue(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function getElement<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing ${selector} element.`);
+  return element;
 }

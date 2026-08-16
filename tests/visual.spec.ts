@@ -418,14 +418,34 @@ test('development tuning panel is live and can be hidden by the visual test hook
   await expect(panel).toBeHidden();
 });
 
-test('mouse camera mode zooms, orbits, pans, and focuses the debug panel', async ({ page }, testInfo) => {
+test('gameplay mouse camera zooms, orbits, pans, and stays independent from debug UI', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chrome', 'Mouse camera controls only need one desktop target.');
-  await page.goto('/?world=classic');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
   await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
 
   const panel = page.locator('[data-testid="debug-panel"]');
   const canvas = page.locator('#game-canvas');
-  await panel.getByRole('button', { name: '进入鼠标调镜头' }).click();
+  const cameraControl = page.locator('#camera-control');
+  const cameraToggle = page.locator('#camera-mode-toggle');
+  await expect(cameraToggle).toBeVisible();
+  await expect(cameraToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(cameraToggle).toContainText('自由镜头');
+  await expect(cameraControl).toHaveAttribute('data-mode', 'fixed');
+  const mapLinkBox = await page.locator('#map-editor-link').boundingBox();
+  const cameraControlBox = await cameraControl.boundingBox();
+  if (!mapLinkBox || !cameraControlBox) throw new Error('Gameplay camera control is unavailable.');
+  expect(cameraControlBox.y).toBeGreaterThanOrEqual(mapLinkBox.y + mapLinkBox.height);
+
+  await cameraToggle.click();
+  await expect(cameraToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(cameraToggle).toContainText('固定镜头');
+  await expect(cameraControl).toHaveAttribute('data-mode', 'mouse');
   await expect(panel).toHaveAttribute('data-camera-control', 'mouse');
   await expect(panel.getByRole('button', { name: '退出鼠标调镜头' })).toBeVisible();
   await expect(panel.getByRole('textbox', { name: '鼠标操作' }))
@@ -539,12 +559,32 @@ test('mouse camera mode zooms, orbits, pans, and focuses the debug panel', async
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera.controlMode))
     .toBe('manual');
 
-  await panel.getByRole('button', { name: '进入鼠标调镜头' }).click();
+  await cameraToggle.click();
+  await expect(cameraToggle).toHaveAttribute('aria-pressed', 'true');
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.hideDebugUi(true));
   await expect(panel).toBeHidden();
-  await expect(canvas).not.toHaveClass(/camera-pointer-mode/);
+  await expect(cameraToggle).toBeVisible();
+  await expect(canvas).toHaveClass(/camera-pointer-mode/);
   await expect.poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.camera.controlMode))
-    .toBe('manual');
+    .toBe('mouse');
+
+  const guardStart = await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__!.scenario('active-play');
+    return window.__THREE_GAME_TEST_HOOKS__!.getSnapshot().guards[0].position.z;
+  });
+  await page.keyboard.down('e');
+  await page.waitForTimeout(120);
+  await page.keyboard.up('e');
+  const guardEnd = await page.evaluate(() =>
+    window.__THREE_GAME_TEST_HOOKS__!.getSnapshot().guards[0].position.z);
+  expect(guardStart - guardEnd).toBeGreaterThan(0.1);
+
+  await page.screenshot({
+    path: testInfo.outputPath('desktop-gameplay-camera-control.png'),
+    fullPage: true,
+  });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });
 
 test('right shift delivers exactly one apple through the real input path', async ({ page }, testInfo) => {

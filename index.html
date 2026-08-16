@@ -17,6 +17,20 @@
         <b>编辑 ↗</b>
       </a>
 
+      <div id="camera-control" data-mode="fixed">
+        <button
+          id="camera-mode-toggle"
+          type="button"
+          aria-pressed="false"
+          aria-describedby="camera-gesture-hint"
+          title="开启自由镜头"
+        >
+          <span class="camera-control-mark" aria-hidden="true"></span>
+          <span id="camera-mode-label">自由镜头</span>
+        </button>
+        <span id="camera-gesture-hint">左键旋转 · 右键平移 · 滚轮缩放</span>
+      </div>
+
       <nav id="world-lab" aria-label="地图世界候选">
         <span>世界实验室</span>
         <a data-world-layout="island" href="?world=island">甜日果园岛</a>
