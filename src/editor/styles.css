@@ -230,6 +230,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 }
 .island-geometry-panel[hidden],
 .island-geometry-fields[hidden],
+.island-geometry-fields label[hidden],
 .island-geometry-size-field[hidden],
 .island-geometry-actions button[hidden] { display: none; }
 .island-geometry-heading small {
@@ -239,6 +240,22 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
   letter-spacing: .16em;
 }
 .island-geometry-heading strong { display: block; margin-top: 3px; font-size: .72rem; }
+.island-object-builder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 7px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgba(225, 184, 81, .2);
+}
+.island-object-builder label { display: grid; gap: 4px; color: var(--fern); font-size: .56rem; font-weight: 800; }
+.island-object-builder select { min-width: 0; min-height: 34px; padding: 0 7px; font-size: .62rem; }
+.island-object-builder button { min-width: 86px; }
+.island-object-builder button[data-placing="true"] {
+  border-color: #fff4bd;
+  color: #fff4bd;
+  background: rgba(69, 119, 75, .5);
+}
 .island-geometry-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .island-geometry-fields label {
   display: grid;
@@ -248,7 +265,8 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
   font-weight: 800;
   letter-spacing: .05em;
 }
-.island-geometry-fields input { min-height: 34px; padding: 0 7px; font: 700 .68rem ui-monospace, monospace; }
+.island-geometry-fields input,
+.island-geometry-fields select { min-width: 0; min-height: 34px; padding: 0 7px; font: 700 .68rem ui-monospace, monospace; }
 .island-geometry-fields input:disabled { color: #6d705e; background: #cfc4a0; }
 .island-geometry-panel p { margin: 0; color: rgba(242,230,191,.66); font-size: .59rem; line-height: 1.45; }
 .island-geometry-panel button {
@@ -268,6 +286,12 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
   background: rgba(225, 184, 81, .1);
 }
 .island-geometry-actions #island-node-delete {
+  border-color: rgba(230, 120, 88, .62);
+  color: #ffd4be;
+  background: rgba(171, 65, 39, .22);
+}
+.island-geometry-actions #island-object-delete {
+  grid-column: 1 / -1;
   border-color: rgba(230, 120, 88, .62);
   color: #ffd4be;
   background: rgba(171, 65, 39, .22);
@@ -414,6 +438,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); }
 #map-preview-canvas { cursor: grab; }
 #map-preview-canvas:active { cursor: grabbing; }
 #map-editor-canvas.island-select-mode { cursor: pointer; }
+#map-editor-canvas.island-select-mode.island-place-mode { cursor: crosshair; }
 #map-editor-canvas[hidden],
 #map-preview-canvas[hidden],
 .preview-status[hidden],

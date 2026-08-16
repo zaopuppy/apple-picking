@@ -140,10 +140,15 @@ export class MapPreview3D {
       this.canvas.dataset.mapId = map.id;
       this.canvas.dataset.worldMode = islandMode ? 'island-v5' : 'kaykit';
       this.canvas.dataset.islandRegions = String(map.islandLayout?.regions.length ?? 0);
+      this.canvas.dataset.islandRouteBlocks = String(map.islandLayout?.routeBlocks.length ?? 0);
+      this.canvas.dataset.islandWaterSegments = String(map.islandLayout?.waterSegments.length ?? 0);
+      this.canvas.dataset.islandBridges = String(map.islandLayout?.bridges.length ?? 0);
       this.renderer.setClearColor(islandMode ? ISLAND_PREVIEW_BACKGROUND : PREVIEW_BACKGROUND);
       this.status.dataset.state = 'ready';
       this.status.textContent = islandMode
-        ? `岛屿 v5 已同步 · ${map.islandLayout?.regions.length ?? 0} 区域 · ${world.propInstances} 场景物件`
+        ? `岛屿 v5 已同步 · ${map.islandLayout?.regions.length ?? 0} 区域 · ` +
+          `${map.islandLayout?.waterSegments.length ?? 0} 水面 · ` +
+          `${map.islandLayout?.bridges.length ?? 0} 桥 · ${world.propInstances} 场景物件`
         : `3D 已同步 · ${world.tileInstances} 地块 · ${world.propInstances} 场景物件`;
     } catch (error) {
       if (this.disposed || revision !== this.revision) return;

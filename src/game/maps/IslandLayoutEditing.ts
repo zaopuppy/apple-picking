@@ -13,20 +13,39 @@ import type {
   OrchardIslandWaterSegment,
   OrchardLandmark,
   OrchardMap,
+  OrchardIslandRegionKind,
+  OrchardIslandRouteBlockKind,
 } from './OrchardMap';
 import {
+  cloneOrchardMap,
   deliveryZonesForMap,
+  ISLAND_REGION_KINDS,
+  ISLAND_ROUTE_BLOCK_KINDS,
+  MAX_ISLAND_BRIDGES,
   MAX_ISLAND_OUTLINE_POINTS,
+  MAX_ISLAND_REGIONS,
+  MAX_ISLAND_ROUTE_BLOCKS,
+  MAX_ISLAND_WATER_SEGMENTS,
   MAX_MAP_LANDMARKS,
 } from './OrchardMap';
 
-export type EditableIslandGeometryKind = 'region' | 'route-block' | 'bridge';
+export type EditableIslandGeometryKind = 'region' | 'route-block' | 'water-segment' | 'bridge';
+export type IslandObjectKind = EditableIslandGeometryKind;
 
 export type IslandGeometryUpdate = {
   x: number;
   z: number;
   sizeX: number;
   sizeZ: number;
+  semanticKind?: OrchardIslandRegionKind | OrchardIslandRouteBlockKind;
+  rotationY?: number;
+};
+
+export type IslandObjectEditResult = {
+  ok: boolean;
+  kind: IslandObjectKind;
+  id?: string;
+  error?: string;
 };
 
 const ARENA_PADDING = 0.4;
@@ -119,52 +138,213 @@ export function synchronizeIslandCoastCollisionProxies(map: OrchardMap): void {
   })];
 }
 
+export function addIslandObject(
+  map: OrchardMap,
+  kind: IslandObjectKind,
+  point: Vec2,
+): IslandObjectEditResult {
+  const draft = cloneOrchardMap(map);
+  const layout = draft.islandLayout;
+  if (!layout) return objectFailure(kind, '当前地图没有 v5 岛屿结构。');
+  const id = uniqueIslandObjectId(layout, kind);
+
+  if (kind === 'region') {
+    if (layout.regions.length >= MAX_ISLAND_REGIONS) {
+      return objectFailure(kind, `岛屿区域最多 ${MAX_ISLAND_REGIONS} 个。`);
+    }
+    const radiusX = 6;
+    const radiusZ = 4.5;
+    layout.regions.push({
+      id,
+      kind: 'garden',
+      x: clampCenter(point.x, radiusX, GAME_CONFIG.arenaHalfWidth),
+      z: clampCenter(point.z, radiusZ, GAME_CONFIG.arenaHalfDepth),
+      rotationY: 0,
+      radiusX,
+      radiusZ,
+    });
+  } else if (kind === 'route-block') {
+    if (layout.routeBlocks.length >= MAX_ISLAND_ROUTE_BLOCKS) {
+      return objectFailure(kind, `矩形通路块最多 ${MAX_ISLAND_ROUTE_BLOCKS} 个。`);
+    }
+    const radiusX = 3.6;
+    const radiusZ = 2.4;
+    layout.routeBlocks.push({
+      id,
+      kind: 'hedge',
+      x: clampCenter(point.x, radiusX, GAME_CONFIG.arenaHalfWidth),
+      z: clampCenter(point.z, radiusZ, GAME_CONFIG.arenaHalfDepth),
+      radiusX,
+      radiusZ,
+    });
+    synchronizeIslandCollisionProxies(draft);
+  } else if (kind === 'water-segment') {
+    if (layout.waterSegments.length >= MAX_ISLAND_WATER_SEGMENTS) {
+      return objectFailure(kind, `水面段最多 ${MAX_ISLAND_WATER_SEGMENTS} 个。`);
+    }
+    const sizeX = 14;
+    const sizeZ = 3.4;
+    layout.waterSegments.push({
+      id,
+      x: clampCenter(point.x, sizeX / 2, GAME_CONFIG.arenaHalfWidth),
+      z: clampCenter(point.z, sizeZ / 2, GAME_CONFIG.arenaHalfDepth),
+      sizeX,
+      sizeZ,
+    });
+    const obsoleteWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
+    rebuildIslandWaterBlocks(layout);
+    synchronizeIslandCollisionProxies(draft, obsoleteWaterBlockIds);
+  } else {
+    if (layout.bridges.length >= MAX_ISLAND_BRIDGES) {
+      return objectFailure(kind, `桥梁最多 ${MAX_ISLAND_BRIDGES} 座。`);
+    }
+    const segment = waterSegmentAtPoint(layout, point);
+    if (!segment) return objectFailure(kind, '请在一段可见水面上放置桥梁。');
+    const width = Math.min(5.2, Math.max(1, segment.sizeX - MIN_WATER_BLOCK_WIDTH));
+    layout.bridges.push({
+      id,
+      x: clamp(
+        point.x,
+        segment.x - segment.sizeX / 2 + width / 2,
+        segment.x + segment.sizeX / 2 - width / 2,
+      ),
+      z: segment.z,
+      width,
+      depth: clamp(segment.sizeZ + 1.8, segment.sizeZ + 0.6, 24),
+    });
+    const obsoleteWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
+    rebuildIslandWaterBlocks(layout);
+    synchronizeIslandCollisionProxies(draft, obsoleteWaterBlockIds);
+  }
+
+  const error = islandDraftIssue(draft);
+  if (error) return objectFailure(kind, error);
+  commitIslandDraft(map, draft);
+  return { ok: true, kind, id };
+}
+
+export function removeIslandObject(
+  map: OrchardMap,
+  kind: IslandObjectKind,
+  id: string,
+): IslandObjectEditResult {
+  const draft = cloneOrchardMap(map);
+  const layout = draft.islandLayout;
+  if (!layout) return objectFailure(kind, '当前地图没有 v5 岛屿结构。');
+
+  if (kind === 'region') {
+    if (layout.regions.length <= 1) return objectFailure(kind, '岛屿至少保留一个区域。');
+    const next = layout.regions.filter((entry) => entry.id !== id);
+    if (next.length === layout.regions.length) return objectFailure(kind, '找不到对应的岛屿区域。');
+    layout.regions = next;
+  } else if (kind === 'route-block') {
+    const next = layout.routeBlocks.filter((entry) => entry.id !== id);
+    if (next.length === layout.routeBlocks.length) return objectFailure(kind, '找不到对应的矩形通路块。');
+    layout.routeBlocks = next;
+    draft.landmarks = draft.landmarks.filter((landmark) => landmark.id !== id);
+    synchronizeIslandCollisionProxies(draft);
+  } else if (kind === 'water-segment') {
+    const segment = layout.waterSegments.find((entry) => entry.id === id);
+    if (!segment) return objectFailure(kind, '找不到对应的水面段。');
+    const attachedBridgeIds = new Set(layout.bridges
+      .filter((bridge) => waterSegmentForBridge(layout, bridge)?.id === id)
+      .map((bridge) => bridge.id));
+    const obsoleteWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
+    layout.waterSegments = layout.waterSegments.filter((entry) => entry.id !== id);
+    layout.bridges = layout.bridges.filter((bridge) => !attachedBridgeIds.has(bridge.id));
+    rebuildIslandWaterBlocks(layout);
+    synchronizeIslandCollisionProxies(draft, obsoleteWaterBlockIds);
+  } else {
+    const next = layout.bridges.filter((entry) => entry.id !== id);
+    if (next.length === layout.bridges.length) return objectFailure(kind, '找不到对应的桥梁。');
+    const obsoleteWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
+    layout.bridges = next;
+    rebuildIslandWaterBlocks(layout);
+    synchronizeIslandCollisionProxies(draft, obsoleteWaterBlockIds);
+  }
+
+  const error = islandDraftIssue(draft);
+  if (error) return objectFailure(kind, error);
+  commitIslandDraft(map, draft);
+  return { ok: true, kind, id };
+}
+
 export function applyIslandGeometryUpdate(
   map: OrchardMap,
   kind: EditableIslandGeometryKind,
   id: string,
   update: IslandGeometryUpdate,
 ): boolean {
-  const layout = map.islandLayout;
+  const draft = cloneOrchardMap(map);
+  const layout = draft.islandLayout;
   if (!layout || !validUpdate(update)) return false;
 
   if (kind === 'region') {
     const region = layout.regions.find((entry) => entry.id === id);
     if (!region) return false;
+    if (update.semanticKind && ISLAND_REGION_KINDS.includes(
+      update.semanticKind as OrchardIslandRegionKind,
+    )) region.kind = update.semanticKind as OrchardIslandRegionKind;
+    if (update.rotationY !== undefined) region.rotationY = normalizeAngle(update.rotationY);
     region.radiusX = clamp(update.sizeX, 1, Math.min(36, GAME_CONFIG.arenaHalfWidth - ARENA_PADDING));
     region.radiusZ = clamp(update.sizeZ, 1, Math.min(28, GAME_CONFIG.arenaHalfDepth - ARENA_PADDING));
     region.x = clampCenter(update.x, region.radiusX, GAME_CONFIG.arenaHalfWidth);
     region.z = clampCenter(update.z, region.radiusZ, GAME_CONFIG.arenaHalfDepth);
-    return true;
-  }
-
-  if (kind === 'route-block') {
+  } else if (kind === 'route-block') {
     const block = layout.routeBlocks.find((entry) => entry.id === id);
     if (!block) return false;
+    if (update.semanticKind && ISLAND_ROUTE_BLOCK_KINDS.includes(
+      update.semanticKind as OrchardIslandRouteBlockKind,
+    )) block.kind = update.semanticKind as OrchardIslandRouteBlockKind;
     block.radiusX = clamp(update.sizeX, 0.5, Math.min(20, GAME_CONFIG.arenaHalfWidth - ARENA_PADDING));
     block.radiusZ = clamp(update.sizeZ, 0.5, Math.min(20, GAME_CONFIG.arenaHalfDepth - ARENA_PADDING));
     block.x = clampCenter(update.x, block.radiusX, GAME_CONFIG.arenaHalfWidth);
     block.z = clampCenter(update.z, block.radiusZ, GAME_CONFIG.arenaHalfDepth);
-    synchronizeIslandCollisionProxies(map);
-    return true;
+    synchronizeIslandCollisionProxies(draft);
+  } else if (kind === 'water-segment') {
+    const segment = layout.waterSegments.find((entry) => entry.id === id);
+    if (!segment) return false;
+    const attachedBridgeIds = new Set(layout.bridges
+      .filter((bridge) => waterSegmentForBridge(layout, bridge)?.id === id)
+      .map((bridge) => bridge.id));
+    const previousWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
+    segment.sizeX = clamp(update.sizeX, 2, (GAME_CONFIG.arenaHalfWidth - ARENA_PADDING) * 2);
+    segment.sizeZ = clamp(update.sizeZ, 1, 18);
+    segment.x = clampCenter(update.x, segment.sizeX / 2, GAME_CONFIG.arenaHalfWidth);
+    segment.z = clampCenter(update.z, segment.sizeZ / 2, GAME_CONFIG.arenaHalfDepth);
+    for (const bridge of layout.bridges.filter((entry) => attachedBridgeIds.has(entry.id))) {
+      const maximumWidth = Math.max(1, Math.min(24, segment.sizeX - MIN_WATER_BLOCK_WIDTH));
+      bridge.width = clamp(bridge.width, 1, maximumWidth);
+      bridge.depth = clamp(bridge.depth, segment.sizeZ + 0.6, 24);
+      bridge.x = clamp(
+        bridge.x,
+        segment.x - segment.sizeX / 2 + bridge.width / 2,
+        segment.x + segment.sizeX / 2 - bridge.width / 2,
+      );
+      bridge.z = segment.z;
+    }
+    rebuildIslandWaterBlocks(layout);
+    synchronizeIslandCollisionProxies(draft, previousWaterBlockIds);
+  } else {
+    const bridge = layout.bridges.find((entry) => entry.id === id);
+    if (!bridge) return false;
+    const segment = waterSegmentForBridge(layout, bridge);
+    if (!segment) return false;
+    const previousWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
+    const maximumWidth = Math.max(1, Math.min(24, segment.sizeX - MIN_WATER_BLOCK_WIDTH));
+    bridge.width = clamp(update.sizeX, 1, maximumWidth);
+    bridge.depth = clamp(update.sizeZ, Math.min(24, segment.sizeZ + 0.6), 24);
+    bridge.x = clamp(
+      update.x,
+      segment.x - segment.sizeX / 2 + bridge.width / 2,
+      segment.x + segment.sizeX / 2 - bridge.width / 2,
+    );
+    bridge.z = segment.z;
+    rebuildIslandWaterBlocks(layout);
+    synchronizeIslandCollisionProxies(draft, previousWaterBlockIds);
   }
-
-  const bridge = layout.bridges.find((entry) => entry.id === id);
-  if (!bridge) return false;
-  const segment = waterSegmentForBridge(layout, bridge);
-  if (!segment) return false;
-  const previousWaterBlockIds = new Set(layout.waterBlocks.map((block) => block.id));
-  const maximumWidth = Math.max(1, Math.min(24, segment.sizeX - MIN_WATER_BLOCK_WIDTH));
-  bridge.width = clamp(update.sizeX, 1, maximumWidth);
-  bridge.depth = clamp(update.sizeZ, Math.min(24, segment.sizeZ + 0.6), 24);
-  bridge.x = clamp(
-    update.x,
-    segment.x - segment.sizeX / 2 + bridge.width / 2,
-    segment.x + segment.sizeX / 2 - bridge.width / 2,
-  );
-  bridge.z = segment.z;
-  rebuildIslandWaterBlocks(layout);
-  synchronizeIslandCollisionProxies(map, previousWaterBlockIds);
+  if (islandDraftIssue(draft)) return false;
+  commitIslandDraft(map, draft);
   return true;
 }
 
@@ -302,7 +482,8 @@ function clampCenter(value: number, radius: number, halfExtent: number): number 
 
 function validUpdate(update: IslandGeometryUpdate): boolean {
   return Number.isFinite(update.x) && Number.isFinite(update.z) &&
-    Number.isFinite(update.sizeX) && Number.isFinite(update.sizeZ);
+    Number.isFinite(update.sizeX) && Number.isFinite(update.sizeZ) &&
+    (update.rotationY === undefined || Number.isFinite(update.rotationY));
 }
 
 function validateOutlineCandidate(map: OrchardMap, candidate: readonly Vec2[]): string | null {
@@ -313,6 +494,31 @@ function validateOutlineCandidate(map: OrchardMap, candidate: readonly Vec2[]): 
   if (currentArea !== 0 && Math.sign(currentArea) !== Math.sign(candidateArea)) {
     return '海岸节点顺序不能翻转。';
   }
+  const contentError = islandContentIssue(map, candidate);
+  if (contentError) return contentError;
+  const preservedLandmarks = map.landmarks.filter((landmark) =>
+    !landmark.id.startsWith('island-boundary-') &&
+      !landmark.id.startsWith('island-coast-edge-')).length;
+  if (preservedLandmarks + candidate.length > MAX_MAP_LANDMARKS) {
+    return `海岸碰撞代理会让地标超过 ${MAX_MAP_LANDMARKS} 个上限。`;
+  }
+  return null;
+}
+
+function islandDraftIssue(map: OrchardMap): string | null {
+  const outline = map.islandLayout?.outline;
+  if (!outline) return '当前地图没有 v5 岛屿结构。';
+  const geometryError = validateIslandOutlineGeometry(outline)[0];
+  if (geometryError) return geometryError;
+  const contentError = islandContentIssue(map, outline);
+  if (contentError) return contentError;
+  if (map.landmarks.length > MAX_MAP_LANDMARKS) {
+    return `结构碰撞代理会让地标超过 ${MAX_MAP_LANDMARKS} 个上限。`;
+  }
+  return null;
+}
+
+function islandContentIssue(map: OrchardMap, outline: readonly Vec2[]): string | null {
   const anchors = [
     map.kidStart,
     ...map.guardStarts,
@@ -323,18 +529,59 @@ function validateOutlineCandidate(map: OrchardMap, candidate: readonly Vec2[]): 
     ...(map.islandLayout?.waterSegments ?? []),
     ...(map.islandLayout?.bridges ?? []),
   ];
-  if (anchors.some((point) =>
-    !pointInsideIslandOutline(point, candidate) ||
-      distanceToIslandOutline(point, candidate) < COAST_CONTENT_PADDING)) {
-    return '海岸线必须包住出生点、目标和岛屿语义中心。';
-  }
-  const preservedLandmarks = map.landmarks.filter((landmark) =>
-    !landmark.id.startsWith('island-boundary-') &&
-      !landmark.id.startsWith('island-coast-edge-')).length;
-  if (preservedLandmarks + candidate.length > MAX_MAP_LANDMARKS) {
-    return `海岸碰撞代理会让地标超过 ${MAX_MAP_LANDMARKS} 个上限。`;
-  }
-  return null;
+  return anchors.some((point) =>
+    !pointInsideIslandOutline(point, outline) ||
+      distanceToIslandOutline(point, outline) < COAST_CONTENT_PADDING)
+    ? '海岸线必须包住出生点、目标和岛屿语义中心。'
+    : null;
+}
+
+function uniqueIslandObjectId(layout: OrchardIslandLayout, kind: IslandObjectKind): string {
+  const prefix = kind === 'region'
+    ? 'island-region-custom'
+    : kind === 'route-block'
+      ? 'island-route-custom'
+      : kind === 'water-segment'
+        ? 'island-water-custom'
+        : 'island-bridge-custom';
+  const ids = new Set([
+    ...layout.regions.map((entry) => entry.id),
+    ...layout.routeBlocks.map((entry) => entry.id),
+    ...layout.waterSegments.map((entry) => entry.id),
+    ...layout.waterBlocks.map((entry) => entry.id),
+    ...layout.bridges.map((entry) => entry.id),
+  ]);
+  let suffix = 1;
+  while (ids.has(`${prefix}-${suffix}`)) suffix += 1;
+  return `${prefix}-${suffix}`;
+}
+
+function waterSegmentAtPoint(
+  layout: OrchardIslandLayout,
+  point: Vec2,
+): OrchardIslandWaterSegment | null {
+  return layout.waterSegments
+    .filter((segment) =>
+      Math.abs(point.x - segment.x) <= segment.sizeX / 2 &&
+        Math.abs(point.z - segment.z) <= segment.sizeZ / 2 + 0.8)
+    .sort((first, second) =>
+      Math.hypot(point.x - first.x, point.z - first.z) -
+        Math.hypot(point.x - second.x, point.z - second.z) ||
+      first.id.localeCompare(second.id))[0] ?? null;
+}
+
+function commitIslandDraft(map: OrchardMap, draft: OrchardMap): void {
+  map.islandLayout = draft.islandLayout;
+  map.landmarks = draft.landmarks;
+}
+
+function objectFailure(kind: IslandObjectKind, error: string): IslandObjectEditResult {
+  return { ok: false, kind, error };
+}
+
+function normalizeAngle(value: number): number {
+  const fullTurn = Math.PI * 2;
+  return ((value % fullTurn) + fullTurn) % fullTurn;
 }
 
 function outlineFailure(index: number, error: string): IslandOutlineEditResult {

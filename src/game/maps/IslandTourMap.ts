@@ -205,8 +205,8 @@ export const ISLAND_WATER_SEGMENTS: IslandWaterSegment[] = [
 ];
 
 export const ISLAND_WATER_BLOCKS: IslandWaterBlock[] = [
-  { id: 'island-water-block-west-coast', x: -29.75, z: -5.8, radiusX: 5.25, radiusZ: 1.35 },
-  { id: 'island-water-block-west-inner', x: -13.75, z: -5.8, radiusX: 5.75, radiusZ: 1.35 },
+  { id: 'island-water-block-west-coast', x: -29.8, z: -5.8, radiusX: 5.2, radiusZ: 1.35 },
+  { id: 'island-water-block-west-inner', x: -13.7, z: -5.8, radiusX: 5.7, radiusZ: 1.35 },
   { id: 'island-water-block-center', x: 0, z: -6.5, radiusX: 8.25, radiusZ: 1.35 },
   { id: 'island-water-block-east-inner', x: 9.7, z: -7.2, radiusX: 1.7, radiusZ: 1.35 },
   { id: 'island-water-block-east-coast', x: 25.8, z: -7.2, radiusX: 9.2, radiusZ: 1.35 },

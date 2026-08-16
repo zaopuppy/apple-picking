@@ -897,3 +897,169 @@ test('coast editor safely moves, inserts and removes outline nodes with collisio
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+test('island object builder completes region, obstacle, water and bridge CRUD', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Island editor work is desktop-first.');
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    localStorage.setItem(
+      'apple-picking.active-map.v5',
+      JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP),
+    );
+  });
+  await page.goto('/editor.html');
+
+  const canvas = page.getByLabel('果园地图编辑画布');
+  const clickWorld = async (x: number, z: number) => {
+    await canvas.scrollIntoViewIfNeeded();
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('Island editor canvas is not visible.');
+    const padding = Math.min(24, Math.max(10, Math.min(box.width, box.height) * 0.04));
+    const scale = Math.min((box.width - padding * 2) / 72, (box.height - padding * 2) / 54);
+    await page.mouse.click(
+      box.x + box.width / 2 + x * scale,
+      box.y + box.height / 2 + z * scale,
+    );
+  };
+  const addKind = page.getByLabel('新结构');
+  const addButton = page.getByRole('button', { name: '放置新结构' });
+
+  await page.getByRole('button', { name: /岛屿结构/ }).click();
+  await addKind.selectOption('region');
+  await addButton.click();
+  await expect(page.getByRole('button', { name: '取消放置' })).toBeVisible();
+  await clickWorld(4, 19);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-region-custom-1');
+  await expect(canvas).toHaveAttribute('data-island-regions', '6');
+  await page.getByLabel('区域类型').selectOption('beach');
+  await page.getByLabel('旋转角度').fill('15');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await page.getByRole('button', { name: '删除选中结构' }).click();
+  await expect(canvas).toHaveAttribute('data-island-regions', '5');
+
+  await addKind.selectOption('route-block');
+  await addButton.click();
+  await clickWorld(-3, 20);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-route-custom-1');
+  await expect(canvas).toHaveAttribute('data-island-route-blocks', '8');
+  await page.getByLabel('障碍类型').selectOption('shrine');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await page.getByRole('button', { name: '删除选中结构' }).click();
+  await expect(canvas).toHaveAttribute('data-island-route-blocks', '7');
+
+  await addKind.selectOption('water-segment');
+  await addButton.click();
+  await clickWorld(0, 20);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-water-custom-1');
+  await expect(canvas).toHaveAttribute('data-island-water-segments', '4');
+  await page.getByLabel('中心 Z').fill('19');
+  await page.getByLabel('水面长度').fill('12');
+  await page.getByLabel('水面宽度').fill('3');
+  await page.getByRole('button', { name: '应用结构修改' }).click();
+  await expect(page.locator('#editor-toast')).toHaveText('水面、所属桥梁与派生碰撞已同步。');
+
+  await addKind.selectOption('bridge');
+  await addButton.click();
+  await clickWorld(0, 19);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-bridge-custom-1');
+  await expect(canvas).toHaveAttribute('data-island-bridges', '3');
+  await page.screenshot({
+    path: testInfo.outputPath('island-object-builder-2d.png'),
+    fullPage: true,
+  });
+
+  await page.getByRole('button', { name: '3D 预览' }).click();
+  const preview = page.getByLabel('KayKit 地图三维预览');
+  await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
+  await expect(preview).toHaveAttribute('data-island-water-segments', '4');
+  await expect(preview).toHaveAttribute('data-island-bridges', '3');
+  await page.screenshot({
+    path: testInfo.outputPath('island-object-builder-3d.png'),
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: '2D 编辑' }).click();
+  await page.getByRole('button', { name: '删除选中结构' }).click();
+  await expect(canvas).toHaveAttribute('data-island-bridges', '2');
+  await clickWorld(0, 19);
+  await expect(canvas).toHaveAttribute('data-selected-island-id', 'island-water-custom-1');
+  await page.getByRole('button', { name: '删除选中结构' }).click();
+  await expect(canvas).toHaveAttribute('data-island-water-segments', '3');
+  await page.getByRole('button', { name: '撤销' }).click();
+  await expect(canvas).toHaveAttribute('data-island-water-segments', '4');
+  await page.getByRole('button', { name: '重做' }).click();
+  await expect(canvas).toHaveAttribute('data-island-water-segments', '3');
+  await page.getByRole('button', { name: '保存地图' }).click();
+
+  const result = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const editingPath = String('/src/game/maps/IslandLayoutEditing.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const editing = await import(/* @vite-ignore */ editingPath);
+    const draft = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+    const region = editing.addIslandObject(draft, 'region', { x: 4, z: 19 });
+    const route = editing.addIslandObject(draft, 'route-block', { x: -3, z: 20 });
+    const water = editing.addIslandObject(draft, 'water-segment', { x: 0, z: 20 });
+    const bridge = editing.addIslandObject(draft, 'bridge', { x: 0, z: 20 });
+    if (!water.id || !bridge.id || !route.id || !region.id) throw new Error('CRUD setup failed.');
+    const waterUpdated = editing.applyIslandGeometryUpdate(draft, 'water-segment', water.id, {
+      x: 2,
+      z: 18,
+      sizeX: 10,
+      sizeZ: 4,
+    });
+    const updatedBridge = draft.islandLayout.bridges.find(
+      (entry: { id: string }) => entry.id === bridge.id,
+    );
+    const routeProxy = draft.landmarks.find((entry: { id: string }) => entry.id === route.id);
+    const validationBeforeDelete = orchardMaps.validateOrchardMap(draft);
+    editing.removeIslandObject(draft, 'water-segment', water.id);
+    editing.removeIslandObject(draft, 'route-block', route.id);
+    editing.removeIslandObject(draft, 'region', region.id);
+    const malformed = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+    malformed.islandLayout.waterBlocks[0].x += 1;
+    return {
+      ids: { region: region.id, route: route.id, water: water.id, bridge: bridge.id },
+      waterUpdated,
+      updatedBridge,
+      routeProxy,
+      validBeforeDelete: validationBeforeDelete.valid,
+      bridgeRemovedWithWater: !draft.islandLayout.bridges.some(
+        (entry: { id: string }) => entry.id === bridge.id,
+      ),
+      routeProxyRemoved: !draft.landmarks.some((entry: { id: string }) => entry.id === route.id),
+      countsAfterDelete: {
+        regions: draft.islandLayout.regions.length,
+        routeBlocks: draft.islandLayout.routeBlocks.length,
+        waterSegments: draft.islandLayout.waterSegments.length,
+        bridges: draft.islandLayout.bridges.length,
+      },
+      malformedErrors: orchardMaps.validateOrchardMap(malformed).errors,
+    };
+  });
+  expect(result.ids).toEqual({
+    region: 'island-region-custom-1',
+    route: 'island-route-custom-1',
+    water: 'island-water-custom-1',
+    bridge: 'island-bridge-custom-1',
+  });
+  expect(result.waterUpdated).toBe(true);
+  expect(result.updatedBridge).toMatchObject({ z: 18 });
+  expect(result.routeProxy).toMatchObject({ id: result.ids.route, kind: 'homestead' });
+  expect(result.validBeforeDelete).toBe(true);
+  expect(result.bridgeRemovedWithWater).toBe(true);
+  expect(result.routeProxyRemoved).toBe(true);
+  expect(result.countsAfterDelete).toEqual({ regions: 5, routeBlocks: 7, waterSegments: 3, bridges: 2 });
+  expect(result.malformedErrors).toContain('水域碰撞块必须由水面与桥梁自动派生。');
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

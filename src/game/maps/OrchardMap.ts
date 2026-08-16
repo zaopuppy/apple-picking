@@ -454,6 +454,28 @@ function validateIslandLayout(
       layout.bridges.some((bridge) => !positiveFiniteDimensions(bridge.width, bridge.depth))) {
     errors.push('岛屿水系或桥梁包含无效尺寸。');
   }
+  if (layout.waterSegments.some((segment) =>
+    Math.abs(segment.x) + segment.sizeX / 2 > GAME_CONFIG.arenaHalfWidth ||
+      Math.abs(segment.z) + segment.sizeZ / 2 > GAME_CONFIG.arenaHalfDepth)) {
+    errors.push('岛屿水面段超出了竞技区域。');
+  }
+  if (layout.bridges.some((bridge) => {
+    const segment = nearestWaterSegment(layout, bridge);
+    return !segment || !approximatelyEqual(bridge.z, segment.z) ||
+      bridge.x - bridge.width / 2 < segment.x - segment.sizeX / 2 - 0.0001 ||
+      bridge.x + bridge.width / 2 > segment.x + segment.sizeX / 2 + 0.0001 ||
+      bridge.depth < segment.sizeZ + 0.6 - 0.0001;
+  })) {
+    errors.push('桥梁必须完整跨在所属水面上。');
+  }
+  const expectedWaterBlocks = expectedIslandWaterBlocks(layout);
+  if (expectedWaterBlocks.length !== layout.waterBlocks.length ||
+    expectedWaterBlocks.some((expected) => !layout.waterBlocks.some((actual) =>
+      approximatelyEqual(actual.x, expected.x) && approximatelyEqual(actual.z, expected.z) &&
+      approximatelyEqual(actual.radiusX, expected.radiusX) &&
+      approximatelyEqual(actual.radiusZ, expected.radiusZ)))) {
+    errors.push('水域碰撞块必须由水面与桥梁自动派生。');
+  }
   const collisionBlocks = [...layout.routeBlocks, ...layout.waterBlocks];
   if (collisionBlocks.some((block) => {
     const proxy = landmarks.find((landmark) => landmark.id === block.id);
@@ -463,6 +485,68 @@ function validateIslandLayout(
   })) {
     errors.push('岛屿通路或水域碰撞代理与语义结构不同步。');
   }
+}
+
+function expectedIslandWaterBlocks(
+  layout: OrchardIslandLayout,
+): Array<Vec2 & { radiusX: number; radiusZ: number }> {
+  const blocks: Array<Vec2 & { radiusX: number; radiusZ: number }> = [];
+  for (const segment of layout.waterSegments) {
+    const segmentStart = segment.x - segment.sizeX / 2;
+    const segmentEnd = segment.x + segment.sizeX / 2;
+    const gaps = layout.bridges
+      .filter((bridge) => nearestWaterSegment(layout, bridge)?.id === segment.id)
+      .map((bridge) => ({
+        start: clamp(bridge.x - bridge.width / 2, segmentStart, segmentEnd),
+        end: clamp(bridge.x + bridge.width / 2, segmentStart, segmentEnd),
+      }))
+      .sort((first, second) => first.start - second.start);
+    let cursor = segmentStart;
+    for (const gap of gaps) {
+      appendExpectedWaterBlock(blocks, segment, cursor, gap.start);
+      cursor = Math.max(cursor, gap.end);
+    }
+    appendExpectedWaterBlock(blocks, segment, cursor, segmentEnd);
+  }
+  return blocks;
+}
+
+function appendExpectedWaterBlock(
+  blocks: Array<Vec2 & { radiusX: number; radiusZ: number }>,
+  segment: OrchardIslandWaterSegment,
+  start: number,
+  end: number,
+): void {
+  if (end - start < 1) return;
+  blocks.push({
+    x: (start + end) / 2,
+    z: segment.z,
+    radiusX: (end - start) / 2,
+    radiusZ: Math.max(0.5, segment.sizeZ / 2 - 0.35),
+  });
+}
+
+function nearestWaterSegment(
+  layout: OrchardIslandLayout,
+  bridge: OrchardIslandBridge,
+): OrchardIslandWaterSegment | null {
+  let nearest: OrchardIslandWaterSegment | null = null;
+  let nearestScore = Number.POSITIVE_INFINITY;
+  for (const segment of layout.waterSegments) {
+    const start = segment.x - segment.sizeX / 2;
+    const end = segment.x + segment.sizeX / 2;
+    const horizontalDistance = bridge.x < start
+      ? start - bridge.x
+      : bridge.x > end
+        ? bridge.x - end
+        : 0;
+    const score = Math.abs(bridge.z - segment.z) * 4 + horizontalDistance;
+    if (score < nearestScore) {
+      nearest = segment;
+      nearestScore = score;
+    }
+  }
+  return nearest;
 }
 
 function positiveFiniteDimensions(first: number, second: number): boolean {

@@ -104,7 +104,24 @@
               <small>ISLAND GEOMETRY</small>
               <strong id="island-geometry-title">选择岛屿结构</strong>
             </div>
+            <div class="island-object-builder">
+              <label for="island-add-kind">新结构
+                <select id="island-add-kind">
+                  <option value="region">视觉区域</option>
+                  <option value="route-block">矩形障碍</option>
+                  <option value="water-segment">水面段</option>
+                  <option value="bridge">桥梁</option>
+                </select>
+              </label>
+              <button id="island-object-add" type="button">放置新结构</button>
+            </div>
             <div id="island-geometry-fields" class="island-geometry-fields" hidden>
+              <label id="island-geometry-kind-field" for="island-geometry-kind" hidden><span id="island-geometry-kind-label">结构类型</span>
+                <select id="island-geometry-kind"></select>
+              </label>
+              <label id="island-geometry-rotation-field" for="island-geometry-rotation" hidden>旋转角度
+                <input id="island-geometry-rotation" type="number" min="-180" max="180" step="5" />
+              </label>
               <label for="island-geometry-x">中心 X
                 <input id="island-geometry-x" type="number" step="0.1" />
               </label>
@@ -123,6 +140,7 @@
               <button id="island-geometry-apply" type="submit" disabled>应用结构修改</button>
               <button id="island-node-insert" type="button" hidden>在此后插入节点</button>
               <button id="island-node-delete" type="button" hidden>删除海岸节点</button>
+              <button id="island-object-delete" type="button" hidden>删除选中结构</button>
             </div>
           </form>
           <section id="delivery-zone-panel" class="delivery-zone-panel" aria-label="多投递点管理" hidden>
