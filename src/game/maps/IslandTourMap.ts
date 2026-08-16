@@ -1,6 +1,14 @@
 import {
   cloneOrchardMap,
+  ORCHARD_MAP_VERSION,
   type OrchardDeliveryZone,
+  type OrchardIslandBridge,
+  type OrchardIslandLayout,
+  type OrchardIslandRegion,
+  type OrchardIslandRouteBlock,
+  type OrchardIslandRouteBlockKind,
+  type OrchardIslandWaterBlock,
+  type OrchardIslandWaterSegment,
   type OrchardLandmark,
   type OrchardMap,
   type OrchardTree,
@@ -52,40 +60,11 @@ const TREE_SEEDS: readonly TreeSeed[] = [
   [9, 6, 'stump', 0.92],
 ];
 
-export type IslandRouteBlockKind = 'hedge' | 'hill' | 'shrine' | 'woodlot';
-
-export type IslandRouteBlock = {
-  id: string;
-  kind: IslandRouteBlockKind;
-  x: number;
-  z: number;
-  radiusX: number;
-  radiusZ: number;
-};
-
-export type IslandWaterSegment = {
-  id: string;
-  x: number;
-  z: number;
-  sizeX: number;
-  sizeZ: number;
-};
-
-export type IslandWaterBlock = {
-  id: string;
-  x: number;
-  z: number;
-  radiusX: number;
-  radiusZ: number;
-};
-
-export type IslandBridge = {
-  id: string;
-  x: number;
-  z: number;
-  width: number;
-  depth: number;
-};
+export type IslandRouteBlockKind = OrchardIslandRouteBlockKind;
+export type IslandRouteBlock = OrchardIslandRouteBlock;
+export type IslandWaterSegment = OrchardIslandWaterSegment;
+export type IslandWaterBlock = OrchardIslandWaterBlock;
+export type IslandBridge = OrchardIslandBridge;
 
 export type IslandAppleGroup = {
   id: string;
@@ -93,7 +72,74 @@ export type IslandAppleGroup = {
   spawns: readonly [Vec2, Vec2];
 };
 
-export const ISLAND_ROUTE_BLOCKS: readonly IslandRouteBlock[] = [
+export const ISLAND_OUTLINE: Vec2[] = [
+  { x: -31, z: -23 },
+  { x: -18, z: -25 },
+  { x: 0, z: -24.5 },
+  { x: 19, z: -25 },
+  { x: 30, z: -21 },
+  { x: 34, z: -10 },
+  { x: 34, z: 5 },
+  { x: 31, z: 18 },
+  { x: 22, z: 24 },
+  { x: 7, z: 26 },
+  { x: -9, z: 25.5 },
+  { x: -23, z: 24 },
+  { x: -32, z: 19 },
+  { x: -35, z: 9 },
+  { x: -35, z: -7 },
+  { x: -34, z: -17 },
+];
+
+export const ISLAND_REGIONS: OrchardIslandRegion[] = [
+  {
+    id: 'island-region-orchard',
+    kind: 'orchard',
+    x: -21,
+    z: -13,
+    rotationY: 0,
+    radiusX: 11.5,
+    radiusZ: 6.3,
+  },
+  {
+    id: 'island-region-homestead',
+    kind: 'homestead',
+    x: 21.5,
+    z: -17.4,
+    rotationY: 0,
+    radiusX: 9,
+    radiusZ: 6,
+  },
+  {
+    id: 'island-region-plaza',
+    kind: 'plaza',
+    x: 0,
+    z: 3,
+    rotationY: 0,
+    radiusX: 5.2,
+    radiusZ: 4.6,
+  },
+  {
+    id: 'island-region-garden',
+    kind: 'garden',
+    x: 17,
+    z: 13,
+    rotationY: -0.12,
+    radiusX: 12,
+    radiusZ: 7.4,
+  },
+  {
+    id: 'island-region-beach',
+    kind: 'beach',
+    x: -23,
+    z: 16,
+    rotationY: 0.22,
+    radiusX: 9.5,
+    radiusZ: 6,
+  },
+];
+
+export const ISLAND_ROUTE_BLOCKS: IslandRouteBlock[] = [
   {
     id: 'island-route-orchard-hedge',
     kind: 'hedge',
@@ -152,13 +198,13 @@ export const ISLAND_ROUTE_BLOCKS: readonly IslandRouteBlock[] = [
   },
 ];
 
-export const ISLAND_WATER_SEGMENTS: readonly IslandWaterSegment[] = [
+export const ISLAND_WATER_SEGMENTS: IslandWaterSegment[] = [
   { id: 'island-water-west', x: -21.5, z: -5.8, sizeX: 27, sizeZ: 3.4 },
   { id: 'island-water-center', x: 0, z: -6.5, sizeX: 16.5, sizeZ: 3.4 },
   { id: 'island-water-east', x: 21.5, z: -7.2, sizeX: 27, sizeZ: 3.4 },
 ];
 
-export const ISLAND_WATER_BLOCKS: readonly IslandWaterBlock[] = [
+export const ISLAND_WATER_BLOCKS: IslandWaterBlock[] = [
   { id: 'island-water-block-west-coast', x: -29.75, z: -5.8, radiusX: 5.25, radiusZ: 1.35 },
   { id: 'island-water-block-west-inner', x: -13.75, z: -5.8, radiusX: 5.75, radiusZ: 1.35 },
   { id: 'island-water-block-center', x: 0, z: -6.5, radiusX: 8.25, radiusZ: 1.35 },
@@ -166,10 +212,19 @@ export const ISLAND_WATER_BLOCKS: readonly IslandWaterBlock[] = [
   { id: 'island-water-block-east-coast', x: 25.8, z: -7.2, radiusX: 9.2, radiusZ: 1.35 },
 ];
 
-export const ISLAND_BRIDGES: readonly IslandBridge[] = [
+export const ISLAND_BRIDGES: IslandBridge[] = [
   { id: 'island-bridge-west', x: -22, z: -5.8, width: 5.2, depth: 5.2 },
   { id: 'island-bridge-east', x: 14, z: -7.2, width: 5.2, depth: 5.2 },
 ];
+
+export const ISLAND_LAYOUT: OrchardIslandLayout = {
+  outline: ISLAND_OUTLINE,
+  regions: ISLAND_REGIONS,
+  routeBlocks: ISLAND_ROUTE_BLOCKS,
+  waterSegments: ISLAND_WATER_SEGMENTS,
+  waterBlocks: ISLAND_WATER_BLOCKS,
+  bridges: ISLAND_BRIDGES,
+};
 
 export const ISLAND_DELIVERY_ZONES: readonly OrchardDeliveryZone[] = [
   { id: 'island-delivery-homestead', x: 19, z: -11 },
@@ -237,7 +292,7 @@ function createWaterBlockLandmarks(): OrchardLandmark[] {
 }
 
 export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
-  version: 4,
+  version: ORCHARD_MAP_VERSION,
   id: SWEET_ORCHARD_ISLAND_ID,
   name: '甜日果园岛 · P3b',
   seed: 20260816,
@@ -430,6 +485,7 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
   ],
   deliveryZone: { x: ISLAND_DELIVERY_ZONES[0].x, z: ISLAND_DELIVERY_ZONES[0].z },
   deliveryZones: ISLAND_DELIVERY_ZONES.map((zone) => ({ ...zone })),
+  islandLayout: ISLAND_LAYOUT,
 };
 
 export function resolveIslandTourMap(search = window.location.search): OrchardMap | null {

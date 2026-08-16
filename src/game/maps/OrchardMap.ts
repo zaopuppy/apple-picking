@@ -2,13 +2,19 @@ import { ARENA_SCALE, GAME_CONFIG } from '../config';
 import type { Vec2 } from '../types';
 import { createSeededRandom } from '../../utils/random';
 
-export const ORCHARD_MAP_VERSION = 4;
+export const ORCHARD_MAP_VERSION = 5;
 export const MIN_MAP_APPLES = 6;
 export const MAX_MAP_APPLES = 12;
 export const MAX_MAP_TREES = 2000;
 export const MAX_MAP_LANDMARKS = 48;
 export const MAX_TERRAIN_ZONES = 64;
 export const MAX_DELIVERY_ZONES = 4;
+export const MAX_ISLAND_OUTLINE_POINTS = 64;
+export const MAX_ISLAND_REGIONS = 24;
+export const MAX_ISLAND_ROUTE_BLOCKS = 64;
+export const MAX_ISLAND_WATER_SEGMENTS = 32;
+export const MAX_ISLAND_WATER_BLOCKS = 64;
+export const MAX_ISLAND_BRIDGES = 16;
 export const TREE_COLLIDER_RADIUS = 0.31;
 
 export const TREE_VARIANTS = ['stump', 'broadleaf', 'pine', 'cherry'] as const;
@@ -16,6 +22,8 @@ export const LANDMARK_KINDS = ['homestead', 'pond'] as const;
 export const TERRAIN_ZONE_KINDS = ['meadow', 'orchard', 'wildflowers'] as const;
 export const KAYKIT_WORLD_THEMES = ['village', 'riverside', 'fortified'] as const;
 export const KAYKIT_TILE_SHAPES = ['square', 'hex'] as const;
+export const ISLAND_REGION_KINDS = ['orchard', 'homestead', 'plaza', 'garden', 'beach'] as const;
+export const ISLAND_ROUTE_BLOCK_KINDS = ['hedge', 'hill', 'shrine', 'woodlot'] as const;
 export const KAYKIT_BUILDING_ASSETS = [
   'house',
   'market',
@@ -37,6 +45,8 @@ export type TerrainZoneKind = typeof TERRAIN_ZONE_KINDS[number];
 export type KayKitWorldTheme = typeof KAYKIT_WORLD_THEMES[number];
 export type KayKitTileShape = typeof KAYKIT_TILE_SHAPES[number];
 export type KayKitBuildingAsset = typeof KAYKIT_BUILDING_ASSETS[number];
+export type OrchardIslandRegionKind = typeof ISLAND_REGION_KINDS[number];
+export type OrchardIslandRouteBlockKind = typeof ISLAND_ROUTE_BLOCK_KINDS[number];
 
 export type OrchardWorldStyle = {
   theme: KayKitWorldTheme;
@@ -82,6 +92,48 @@ export type OrchardDeliveryZone = Vec2 & {
   id: string;
 };
 
+export type OrchardIslandRegion = Vec2 & {
+  id: string;
+  kind: OrchardIslandRegionKind;
+  rotationY: number;
+  radiusX: number;
+  radiusZ: number;
+};
+
+export type OrchardIslandRouteBlock = Vec2 & {
+  id: string;
+  kind: OrchardIslandRouteBlockKind;
+  radiusX: number;
+  radiusZ: number;
+};
+
+export type OrchardIslandWaterSegment = Vec2 & {
+  id: string;
+  sizeX: number;
+  sizeZ: number;
+};
+
+export type OrchardIslandWaterBlock = Vec2 & {
+  id: string;
+  radiusX: number;
+  radiusZ: number;
+};
+
+export type OrchardIslandBridge = Vec2 & {
+  id: string;
+  width: number;
+  depth: number;
+};
+
+export type OrchardIslandLayout = {
+  outline: Vec2[];
+  regions: OrchardIslandRegion[];
+  routeBlocks: OrchardIslandRouteBlock[];
+  waterSegments: OrchardIslandWaterSegment[];
+  waterBlocks: OrchardIslandWaterBlock[];
+  bridges: OrchardIslandBridge[];
+};
+
 export type OrchardMap = {
   version: typeof ORCHARD_MAP_VERSION;
   id: string;
@@ -98,6 +150,7 @@ export type OrchardMap = {
   guardStarts: [Vec2, Vec2];
   deliveryZone: Vec2;
   deliveryZones?: OrchardDeliveryZone[];
+  islandLayout?: OrchardIslandLayout;
 };
 
 export type MapValidation = {
@@ -142,11 +195,23 @@ export function cloneOrchardMap(map: OrchardMap): OrchardMap {
     ...(map.deliveryZones
       ? { deliveryZones: map.deliveryZones.map((zone) => ({ ...zone })) }
       : {}),
+    ...(map.islandLayout
+      ? {
+          islandLayout: {
+            outline: map.islandLayout.outline.map((point) => ({ ...point })),
+            regions: map.islandLayout.regions.map((region) => ({ ...region })),
+            routeBlocks: map.islandLayout.routeBlocks.map((block) => ({ ...block })),
+            waterSegments: map.islandLayout.waterSegments.map((segment) => ({ ...segment })),
+            waterBlocks: map.islandLayout.waterBlocks.map((block) => ({ ...block })),
+            bridges: map.islandLayout.bridges.map((bridge) => ({ ...bridge })),
+          },
+        }
+      : {}),
   };
 }
 
 export function parseOrchardMap(value: unknown): OrchardMap | null {
-  if (!isRecord(value) || ![1, 2, 3, ORCHARD_MAP_VERSION].includes(Number(value.version))) return null;
+  if (!isRecord(value) || ![1, 2, 3, 4, ORCHARD_MAP_VERSION].includes(Number(value.version))) return null;
   const sourceVersion = Number(value.version);
   const trees = parseArray(value.trees, parseTree);
   const paths = parseArray(value.paths, (entry, index) => parsePath(entry, index, sourceVersion));
@@ -163,10 +228,14 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
   const deliveryZones = value.deliveryZones === undefined
     ? undefined
     : parseArray(value.deliveryZones, parseDeliveryZone);
+  const islandLayout = sourceVersion >= 5 && value.islandLayout !== undefined
+    ? parseIslandLayout(value.islandLayout)
+    : undefined;
   if (!trees || !paths || !clearings || !landmarks || !terrainZones || !appleSpawns || !kidStart || !deliveryZone) {
     return null;
   }
   if (value.deliveryZones !== undefined && !deliveryZones) return null;
+  if (sourceVersion >= 5 && value.islandLayout !== undefined && !islandLayout) return null;
   if (!Array.isArray(value.guardStarts) || value.guardStarts.length !== 2) return null;
   const guard1 = parseVec2(value.guardStarts[0], 0);
   const guard2 = parseVec2(value.guardStarts[1], 1);
@@ -192,6 +261,7 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
     ...(deliveryZones?.length
       ? { deliveryZones: deliveryZones.slice(0, MAX_DELIVERY_ZONES) }
       : {}),
+    ...(islandLayout ? { islandLayout } : {}),
   };
   if (sourceVersion === 1) return migrateVersionOneMap(parsed);
   if (sourceVersion === 2) return migrateVersionTwoMap(parsed);
@@ -223,6 +293,7 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   if (new Set(deliveryZones.map((zone) => zone.id)).size !== deliveryZones.length) {
     errors.push('投递区 ID 不能重复。');
   }
+  validateIslandLayout(map.islandLayout, errors);
   if (map.trees.length > 360) warnings.push('树木较多，可能切碎开放地形并遮挡角色。');
 
   const importantPoints = [
@@ -297,6 +368,62 @@ export function treeColliderRadius(tree: OrchardTree): number {
 export function deliveryZonesForMap(map: OrchardMap): readonly OrchardDeliveryZone[] {
   if (map.deliveryZones && map.deliveryZones.length > 0) return map.deliveryZones;
   return [{ id: 'delivery-primary', ...map.deliveryZone }];
+}
+
+function validateIslandLayout(layout: OrchardIslandLayout | undefined, errors: string[]): void {
+  if (!layout) return;
+  if (layout.outline.length < 3 || layout.outline.length > MAX_ISLAND_OUTLINE_POINTS) {
+    errors.push(`岛屿轮廓需要 3-${MAX_ISLAND_OUTLINE_POINTS} 个点。`);
+  }
+  if (layout.regions.length === 0 || layout.regions.length > MAX_ISLAND_REGIONS) {
+    errors.push(`岛屿区域需要 1-${MAX_ISLAND_REGIONS} 个。`);
+  }
+  if (layout.routeBlocks.length > MAX_ISLAND_ROUTE_BLOCKS) {
+    errors.push(`岛屿通路块不能超过 ${MAX_ISLAND_ROUTE_BLOCKS} 个。`);
+  }
+  if (layout.waterSegments.length > MAX_ISLAND_WATER_SEGMENTS) {
+    errors.push(`岛屿水面段不能超过 ${MAX_ISLAND_WATER_SEGMENTS} 个。`);
+  }
+  if (layout.waterBlocks.length > MAX_ISLAND_WATER_BLOCKS) {
+    errors.push(`岛屿水域碰撞块不能超过 ${MAX_ISLAND_WATER_BLOCKS} 个。`);
+  }
+  if (layout.bridges.length > MAX_ISLAND_BRIDGES) {
+    errors.push(`岛屿桥梁不能超过 ${MAX_ISLAND_BRIDGES} 个。`);
+  }
+
+  const semanticObjects = [
+    ...layout.regions,
+    ...layout.routeBlocks,
+    ...layout.waterSegments,
+    ...layout.waterBlocks,
+    ...layout.bridges,
+  ];
+  if (new Set(semanticObjects.map((entry) => entry.id)).size !== semanticObjects.length) {
+    errors.push('岛屿语义对象 ID 不能重复。');
+  }
+  if (layout.outline.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.z))) {
+    errors.push('岛屿轮廓包含无效坐标。');
+  }
+  if (layout.regions.some((region) =>
+    !ISLAND_REGION_KINDS.includes(region.kind) ||
+      !positiveFiniteDimensions(region.radiusX, region.radiusZ))) {
+    errors.push('岛屿区域包含无效类型或尺寸。');
+  }
+  if (layout.routeBlocks.some((block) =>
+    !ISLAND_ROUTE_BLOCK_KINDS.includes(block.kind) ||
+      !positiveFiniteDimensions(block.radiusX, block.radiusZ))) {
+    errors.push('岛屿通路块包含无效类型或尺寸。');
+  }
+  if (layout.waterSegments.some((segment) =>
+    !positiveFiniteDimensions(segment.sizeX, segment.sizeZ)) ||
+      layout.waterBlocks.some((block) => !positiveFiniteDimensions(block.radiusX, block.radiusZ)) ||
+      layout.bridges.some((bridge) => !positiveFiniteDimensions(bridge.width, bridge.depth))) {
+    errors.push('岛屿水系或桥梁包含无效尺寸。');
+  }
+}
+
+function positiveFiniteDimensions(first: number, second: number): boolean {
+  return Number.isFinite(first) && first > 0 && Number.isFinite(second) && second > 0;
 }
 
 export function landmarkBlocksPoint(
@@ -506,7 +633,7 @@ function parsePath(value: unknown, index: number, sourceVersion: number): Orchar
       ? clamp(finiteNumber(value.width, 2.4), 1.4, 5)
       : sourceVersion === 2
         ? clamp(finiteNumber(value.width, 12), 6, 25)
-        : clamp(finiteNumber(value.width, 7.2), 3.6, 15),
+        : clamp(finiteNumber(value.width, 7.2), 1.4, 15),
     points,
   };
 }
@@ -544,8 +671,8 @@ function parseLandmark(value: unknown, index: number): OrchardLandmark | null {
     rotationY: kind === 'homestead'
       ? alignToQuarterTurn(finiteNumber(value.rotationY, 0))
       : finiteNumber(value.rotationY, 0),
-    radiusX: clamp(finiteNumber(value.radiusX, kind === 'homestead' ? 5 : 4), 2.4, 9),
-    radiusZ: clamp(finiteNumber(value.radiusZ, kind === 'homestead' ? 4 : 3.2), 2, 7),
+    radiusX: clamp(finiteNumber(value.radiusX, kind === 'homestead' ? 5 : 4), 0.25, 40),
+    radiusZ: clamp(finiteNumber(value.radiusZ, kind === 'homestead' ? 4 : 3.2), 0.25, 30),
   };
 }
 
@@ -585,6 +712,93 @@ function parseDeliveryZone(value: unknown, index: number): OrchardDeliveryZone |
   return {
     ...point,
     id: text(value.id, `delivery-${index + 1}`),
+  };
+}
+
+function parseIslandLayout(value: unknown): OrchardIslandLayout | null {
+  if (!isRecord(value)) return null;
+  const outline = parseArray(value.outline, parseVec2);
+  const regions = parseArray(value.regions, parseIslandRegion);
+  const routeBlocks = parseArray(value.routeBlocks, parseIslandRouteBlock);
+  const waterSegments = parseArray(value.waterSegments, parseIslandWaterSegment);
+  const waterBlocks = parseArray(value.waterBlocks, parseIslandWaterBlock);
+  const bridges = parseArray(value.bridges, parseIslandBridge);
+  if (!outline || outline.length < 3 || !regions || regions.length === 0 || !routeBlocks ||
+    !waterSegments || !waterBlocks || !bridges) {
+    return null;
+  }
+  return {
+    outline: outline.slice(0, MAX_ISLAND_OUTLINE_POINTS),
+    regions: regions.slice(0, MAX_ISLAND_REGIONS),
+    routeBlocks: routeBlocks.slice(0, MAX_ISLAND_ROUTE_BLOCKS),
+    waterSegments: waterSegments.slice(0, MAX_ISLAND_WATER_SEGMENTS),
+    waterBlocks: waterBlocks.slice(0, MAX_ISLAND_WATER_BLOCKS),
+    bridges: bridges.slice(0, MAX_ISLAND_BRIDGES),
+  };
+}
+
+function parseIslandRegion(value: unknown, index: number): OrchardIslandRegion | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point || !ISLAND_REGION_KINDS.includes(value.kind as OrchardIslandRegionKind)) return null;
+  return {
+    ...point,
+    id: text(value.id, `island-region-${index + 1}`),
+    kind: value.kind as OrchardIslandRegionKind,
+    rotationY: finiteNumber(value.rotationY, 0),
+    radiusX: clamp(finiteNumber(value.radiusX, 6), 1, 36),
+    radiusZ: clamp(finiteNumber(value.radiusZ, 5), 1, 28),
+  };
+}
+
+function parseIslandRouteBlock(value: unknown, index: number): OrchardIslandRouteBlock | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point || !ISLAND_ROUTE_BLOCK_KINDS.includes(value.kind as OrchardIslandRouteBlockKind)) {
+    return null;
+  }
+  return {
+    ...point,
+    id: text(value.id, `island-route-block-${index + 1}`),
+    kind: value.kind as OrchardIslandRouteBlockKind,
+    radiusX: clamp(finiteNumber(value.radiusX, 2), 0.5, 20),
+    radiusZ: clamp(finiteNumber(value.radiusZ, 2), 0.5, 20),
+  };
+}
+
+function parseIslandWaterSegment(value: unknown, index: number): OrchardIslandWaterSegment | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point) return null;
+  return {
+    ...point,
+    id: text(value.id, `island-water-segment-${index + 1}`),
+    sizeX: clamp(finiteNumber(value.sizeX, 8), 1, 80),
+    sizeZ: clamp(finiteNumber(value.sizeZ, 3), 1, 56),
+  };
+}
+
+function parseIslandWaterBlock(value: unknown, index: number): OrchardIslandWaterBlock | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point) return null;
+  return {
+    ...point,
+    id: text(value.id, `island-water-block-${index + 1}`),
+    radiusX: clamp(finiteNumber(value.radiusX, 3), 0.5, 40),
+    radiusZ: clamp(finiteNumber(value.radiusZ, 1.5), 0.5, 28),
+  };
+}
+
+function parseIslandBridge(value: unknown, index: number): OrchardIslandBridge | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point) return null;
+  return {
+    ...point,
+    id: text(value.id, `island-bridge-${index + 1}`),
+    width: clamp(finiteNumber(value.width, 5), 1, 24),
+    depth: clamp(finiteNumber(value.depth, 5), 1, 24),
   };
 }
 

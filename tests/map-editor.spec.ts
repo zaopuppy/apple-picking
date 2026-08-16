@@ -62,7 +62,7 @@ test('manual KayKit building and square world settings persist into the playable
   await page.goto('/editor.html');
   await page.getByRole('button', { name: '保存地图' }).click();
   const editableMap = await page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0];
+    const map = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
     return {
       ...map,
       id: 'manual-kaykit-test',
@@ -102,7 +102,7 @@ test('manual KayKit building and square world settings persist into the playable
   await expect.poll(() => preview.getAttribute('data-ready')).toBe('true');
   await page.getByRole('button', { name: '保存地图' }).click();
   const saved = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0]);
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0]);
   expect(saved.worldStyle).toEqual({ theme: 'fortified', tileShape: 'square' });
   expect(saved.landmarks).toHaveLength(1);
   expect(saved.paths).toHaveLength(1);
@@ -170,9 +170,9 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   await page.getByRole('button', { name: '保存地图' }).click();
   await expect(page.getByText('自动验收果园', { exact: true })).toBeVisible();
   const semanticMap = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0],
+    JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0],
   );
-  expect(semanticMap.version).toBe(4);
+  expect(semanticMap.version).toBe(5);
   expect(semanticMap.worldStyle).toEqual({ theme: 'fortified', tileShape: 'square' });
   expect(semanticMap.landmarks.map((landmark: { kind: string }) => landmark.kind)).toEqual(
     expect.arrayContaining(['homestead', 'pond']),
@@ -190,7 +190,7 @@ test('map editor candidates, drawing, undo, save and play flow work together', a
   expect(download.suggestedFilename()).toMatch(/\.json$/);
 
   const importedMap = await page.evaluate(() => {
-    const library = JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]');
+    const library = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]');
     return { ...library[0], name: '导入验收果园' };
   });
   await page.locator('#import-input').setInputFiles({
@@ -223,7 +223,7 @@ test('legacy editor maps keep their layout and gain dense stump fill', async ({ 
   await page.getByRole('button', { name: '保存地图' }).click();
 
   const expectedKidStart = await page.evaluate(() => {
-    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0];
+    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
     const shrink = (point: { x: number; z: number }) => ({ x: point.x / 5, z: point.z / 5 });
     const legacy = {
       ...current,
@@ -250,8 +250,8 @@ test('legacy editor maps keep their layout and gain dense stump fill', async ({ 
       guardStarts: current.guardStarts.map(shrink),
       deliveryZone: shrink(current.deliveryZone),
     };
-    localStorage.removeItem('apple-picking.active-map.v4');
-    localStorage.removeItem('apple-picking.map-library.v4');
+    localStorage.removeItem('apple-picking.active-map.v5');
+    localStorage.removeItem('apple-picking.map-library.v5');
     localStorage.setItem('apple-picking.active-map.v1', JSON.stringify(legacy));
     localStorage.setItem('apple-picking.map-library.v1', JSON.stringify([legacy]));
     return {
@@ -265,10 +265,10 @@ test('legacy editor maps keep their layout and gain dense stump fill', async ({ 
   await expect(page.getByText(/可游玩 · 方格 · 0 地标 · [3-9]\d{2} 木本点缀（3 大树） · 6 果实/)).toBeVisible();
   await expect(page.getByText('全部 9 个关键目标可达。')).toBeVisible();
   const migrated = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('apple-picking.active-map.v4') ?? 'null'),
+    JSON.parse(localStorage.getItem('apple-picking.active-map.v5') ?? 'null'),
   );
   expect(migrated).toMatchObject({
-    version: 4,
+    version: 5,
     id: 'legacy-migration-test-expanded',
     landmarks: [],
     terrainZones: [],
@@ -284,7 +284,7 @@ test('five-times maps compact to the three-times arena without drifting key poin
   await page.getByRole('button', { name: '保存地图' }).click();
 
   const originalKidStart = await page.evaluate(() => {
-    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0];
+    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
     const expand = (point: { x: number; z: number }) => ({ x: point.x * 5 / 3, z: point.z * 5 / 3 });
     const fiveTimes = {
       ...current,
@@ -307,8 +307,8 @@ test('five-times maps compact to the three-times arena without drifting key poin
       guardStarts: current.guardStarts.map(expand),
       deliveryZone: expand(current.deliveryZone),
     };
-    localStorage.removeItem('apple-picking.active-map.v4');
-    localStorage.removeItem('apple-picking.map-library.v4');
+    localStorage.removeItem('apple-picking.active-map.v5');
+    localStorage.removeItem('apple-picking.map-library.v5');
     localStorage.setItem('apple-picking.active-map.v2', JSON.stringify(fiveTimes));
     localStorage.setItem('apple-picking.map-library.v2', JSON.stringify([fiveTimes]));
     return current.kidStart;
@@ -319,10 +319,10 @@ test('five-times maps compact to the three-times arena without drifting key poin
   await expect(page.getByText(/可游玩 · 方格 · 0 地标 · [3-9]\d{2} 木本点缀（4 大树） · 6 果实/)).toBeVisible();
   await expect(page.getByText('全部 9 个关键目标可达。')).toBeVisible();
   const migrated = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('apple-picking.active-map.v4') ?? 'null'),
+    JSON.parse(localStorage.getItem('apple-picking.active-map.v5') ?? 'null'),
   );
   expect(migrated).toMatchObject({
-    version: 4,
+    version: 5,
     id: 'five-times-migration-test-compact',
     landmarks: [],
     terrainZones: [],
@@ -338,27 +338,123 @@ test('version-three maps migrate to semantic schema without invented landmarks',
   await page.goto('/editor.html');
   await page.getByRole('button', { name: '保存地图' }).click();
   await page.evaluate(() => {
-    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v4') ?? '[]')[0];
+    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
     const legacy = {
       ...current,
       version: 3,
       id: 'version-three-migration-test',
       name: '三版语义迁移测试',
     };
-    localStorage.removeItem('apple-picking.active-map.v4');
-    localStorage.removeItem('apple-picking.map-library.v4');
+    localStorage.removeItem('apple-picking.active-map.v5');
+    localStorage.removeItem('apple-picking.map-library.v5');
     localStorage.setItem('apple-picking.active-map.v3', JSON.stringify(legacy));
   });
 
   await page.reload();
   await expect(page.getByRole('textbox', { name: '地图名称' })).toHaveValue('三版语义迁移测试');
   const migrated = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('apple-picking.active-map.v4') ?? 'null'),
+    JSON.parse(localStorage.getItem('apple-picking.active-map.v5') ?? 'null'),
   );
   expect(migrated).toMatchObject({
-    version: 4,
+    version: 5,
     id: 'version-three-migration-test',
     landmarks: [],
     terrainZones: [],
   });
+});
+
+test('version-four maps migrate to v5 without invented island semantics', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Storage migration only needs one installed Chrome run.');
+  await page.goto('/editor.html');
+  await page.getByRole('button', { name: '保存地图' }).click();
+  await page.evaluate(() => {
+    const current = JSON.parse(localStorage.getItem('apple-picking.map-library.v5') ?? '[]')[0];
+    const legacy = {
+      ...current,
+      version: 4,
+      id: 'version-four-migration-test',
+      name: '四版岛屿语义迁移测试',
+    };
+    delete legacy.islandLayout;
+    localStorage.removeItem('apple-picking.active-map.v5');
+    localStorage.removeItem('apple-picking.map-library.v5');
+    localStorage.setItem('apple-picking.active-map.v4', JSON.stringify(legacy));
+  });
+
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: '地图名称' })).toHaveValue('四版岛屿语义迁移测试');
+  const migrated = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('apple-picking.active-map.v5') ?? 'null'),
+  );
+  expect(migrated).toMatchObject({
+    version: 5,
+    id: 'version-four-migration-test',
+  });
+  expect(migrated.islandLayout).toBeUndefined();
+});
+
+test('island v5 semantics roundtrip and clone without shared nested state', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chrome', 'Map schema regression only needs one installed Chrome run.');
+  await page.goto('/?world=island');
+  const result = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const parsed = orchardMaps.parseOrchardMap(
+      JSON.parse(JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP)),
+    );
+    if (!parsed?.islandLayout) throw new Error('Island layout did not survive parsing.');
+    const clone = orchardMaps.cloneOrchardMap(parsed);
+    if (!clone.islandLayout) throw new Error('Island layout did not survive cloning.');
+    const original = {
+      outlineX: parsed.islandLayout.outline[0].x,
+      regionX: parsed.islandLayout.regions[0].x,
+      routeX: parsed.islandLayout.routeBlocks[0].x,
+      waterX: parsed.islandLayout.waterSegments[0].x,
+      bridgeX: parsed.islandLayout.bridges[0].x,
+    };
+    clone.islandLayout.outline[0].x += 1;
+    clone.islandLayout.regions[0].x += 1;
+    clone.islandLayout.routeBlocks[0].x += 1;
+    clone.islandLayout.waterSegments[0].x += 1;
+    clone.islandLayout.bridges[0].x += 1;
+    const malformed = JSON.parse(JSON.stringify(island.SWEET_ORCHARD_ISLAND_MAP));
+    malformed.islandLayout.outline = [{ x: 0, z: 0 }, { x: 1, z: 1 }];
+    const validation = orchardMaps.validateOrchardMap(parsed);
+    return {
+      version: parsed.version,
+      valid: validation.valid,
+      counts: {
+        outline: parsed.islandLayout.outline.length,
+        regions: parsed.islandLayout.regions.length,
+        routeBlocks: parsed.islandLayout.routeBlocks.length,
+        waterSegments: parsed.islandLayout.waterSegments.length,
+        waterBlocks: parsed.islandLayout.waterBlocks.length,
+        bridges: parsed.islandLayout.bridges.length,
+      },
+      original,
+      parsedAfterCloneMutation: {
+        outlineX: parsed.islandLayout.outline[0].x,
+        regionX: parsed.islandLayout.regions[0].x,
+        routeX: parsed.islandLayout.routeBlocks[0].x,
+        waterX: parsed.islandLayout.waterSegments[0].x,
+        bridgeX: parsed.islandLayout.bridges[0].x,
+      },
+      malformedRejected: orchardMaps.parseOrchardMap(malformed) === null,
+    };
+  });
+
+  expect(result.version).toBe(5);
+  expect(result.valid).toBe(true);
+  expect(result.counts).toEqual({
+    outline: 16,
+    regions: 5,
+    routeBlocks: 7,
+    waterSegments: 3,
+    waterBlocks: 5,
+    bridges: 2,
+  });
+  expect(result.parsedAfterCloneMutation).toEqual(result.original);
+  expect(result.malformedRejected).toBe(true);
 });

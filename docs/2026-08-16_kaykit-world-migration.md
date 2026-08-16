@@ -1,30 +1,12 @@
 # 地图世界迁移：持续迭代记录
 
-> 状态：P3a 已由提交 `a1056ec` 固化；P3b 材质、接触阴影与环境动效已通过桌面验证，等待视觉评审。移动端专项验证延期到桌面版本完成后。
+> 状态：P3b 已由提交 `24756b7` 固化；P4a 地图 v5 语义结构与兼容迁移已通过桌面回归，等待提交确认。移动端专项验证延期到桌面版本完成后。
 
-## 当前需要用户确认（P1.2）
+## 当前需要用户确认
 
-这里是当前唯一需要用户反馈的清单。整体方向、镜头、岛形、区域位置和 P1.1 的通路密度已经确认，不需要重复回答。
+当前只有一个确认项：
 
-1. [ ] **果园开放性**：去掉木栅栏后，果树行列与矩形种植床是否既能区分果园，又不会形成单入口院落？
-2. [ ] **投递点位置**：住宅、果园集市、海滩码头、花园 4 个投递点是否都容易辨认、到达且位置合理？
-3. [ ] **玩法平衡**：4 个投递点会明显缩短部分苹果的运送距离；全部常驻是否合适，还是应每局只激活其中 2–3 个？
-4. [ ] **下一步**：如果开放果园和多投递方向成立，推荐先做一次完整追逐—投递试玩，再决定进入 P2 水系或继续 P1.3 路线平衡。
-
-可直接按下面格式回复，不需要写长评审：
-
-```text
-果园开放性：合适 / 仍像围栏 / 过于松散，原因：
-投递点位置：合适 / 需要移动，具体是：
-投递点数量：4 个常驻 / 每局激活 3 个 / 每局激活 2 个
-下一步：继续 P1.3 / 可以进入 P2
-```
-
-评审材料：
-
-- 游戏入口：`http://127.0.0.1:5188/?world=island`
-- 桌面截图：`artifacts/canvas-inspection-island/p1-2-final-desktop/desktop-active-play.png`
-- 窄屏截图：`artifacts/canvas-inspection-island/p1-2-final-mobile/mobile-active-play.png`
+- [ ] **P4a 是否可以提交并继续 P4b？** 本轮只改变地图数据契约、本地存档迁移和解析器的无损尺寸范围，不改变现有画面、碰撞或投递规则。若接受，可直接回复“提交后继续”。
 
 ### 已确认的 P1 / P1.1 反馈
 
@@ -56,8 +38,8 @@
 | 轮次 | 内容 | 退出条件 | 状态 |
 | --- | --- | --- | --- |
 | 1 | 三套可玩的 KayKit 视觉试验场 | 能切换、能完整游玩、资产失败可回退、桌面可辨识 | 已完成，继续扩充资产组合 |
-| 2 | 明亮岛屿垂直切片 | 一张手工地图完成海岸、台地、广场、果园、建筑区与同机位 A/B 截图 | P1.2 技术验收完成，待用户视觉与试玩确认 |
-| 3 | 地图 v5：岛屿语义与多投递区 | 旧 v4 可迁移，水域/桥梁/岸线碰撞可信，多投递区规则通过 | 待开始 |
+| 2 | 明亮岛屿垂直切片 | 一张手工地图完成海岸、台地、广场、果园、建筑区与同机位 A/B 截图 | P1–P3b 已完成并提交 |
+| 3 | 地图 v5：岛屿语义与多投递区 | 旧 v4 可迁移，水域/桥梁/岸线碰撞可信，多投递区规则通过 | P4a：schema、深克隆与 v1–v4 迁移完成，桌面 44/44 通过，待提交确认 |
 | 4 | 编辑器岛屿画笔与区域生成 | 海岸、台地、广场、桥梁、果园区和建筑槽位可编辑，3D 预览一致 | 待开始；旧 KayKit 编辑能力作为基础保留 |
 | 5 | 密度、动效与发布级优化 | 桌面/窄屏构图、性能、视觉回归和完整玩法路径通过 | 待开始 |
 
@@ -196,28 +178,42 @@ src/render/IslandMaterials.ts        共享色板、地表与水体材质
 src/assets/IslandPropAssets.ts       Nature/KayKit 资产筛选、缩放和诊断
 ```
 
-进入地图 v5 时再扩展数据，而不是在第一张图尚未好看时先做通用格式。拟议字段：
+P3b 构图通过后进入地图 v5。P4a 先记录已经验证的结构，不提前引入逐格高度导航；实际字段为：
 
 ```ts
-type IslandCell = {
-  column: number;
-  row: number;
-  elevation: 0 | 1;
-  surface: 'grass' | 'sand' | 'water';
-  walkable: boolean;
-  variantSeed: number;
+type OrchardIslandLayout = {
+  outline: Vec2[];
+  regions: Array<{
+    id: string;
+    kind: 'orchard' | 'homestead' | 'plaza' | 'garden' | 'beach';
+    x: number;
+    z: number;
+    rotationY: number;
+    radiusX: number;
+    radiusZ: number;
+  }>;
+  routeBlocks: Array<{
+    id: string;
+    kind: 'hedge' | 'hill' | 'shrine' | 'woodlot';
+    x: number;
+    z: number;
+    radiusX: number;
+    radiusZ: number;
+  }>;
+  waterSegments: Array<{ id: string; x: number; z: number; sizeX: number; sizeZ: number }>;
+  waterBlocks: Array<{ id: string; x: number; z: number; radiusX: number; radiusZ: number }>;
+  bridges: Array<{ id: string; x: number; z: number; width: number; depth: number }>;
 };
 
-type IslandConnector = {
-  id: string;
-  kind: 'bridge' | 'stairs' | 'ramp';
-  from: Vec2;
-  to: Vec2;
-  width: number;
+type OrchardMapV5 = {
+  // 通用果园字段保持不变。
+  islandLayout?: OrchardIslandLayout;
 };
 ```
 
-`GameSimulation` 只消费由岛屿语义派生出的简化阻挡区、桥面与玩法点位；Three.js 渲染只消费快照和地图语义，不能拥有规则状态。旧 v4 地图继续迁移或走经典渲染，不要求一次性删除。
+`islandLayout` 可选，因此普通果园和旧存档不会被臆造为岛屿。P4a 把标准岛的 16 点海岸轮廓、5 个区域、7 个矩形通路块、3 段水面、5 个水域碰撞块和 2 座桥写入 v5；解析器负责数量上限、类型、尺寸与稳定 ID，克隆器对所有嵌套数组深拷贝。`GameSimulation` 仍只消费现有简化阻挡区与玩法点位，Three.js 渲染也暂不改数值来源，确保本轮没有玩法或画面漂移。P4b 再让编辑器、预览和渲染器直接消费这些语义字段。
+
+本地存储键升级到 `.v5`，读取顺序保留 v4、v3、v2、v1；旧地图解析后写回 v5，但不会自动得到 `islandLayout`。逐格 elevation、stairs/ramp 和真正多层导航仍不在本阶段范围内。
 
 ### 分阶段实施与退出条件
 
@@ -256,6 +252,9 @@ type IslandConnector = {
 
 #### P4：地图 v5、编辑器与生成器
 
+- P4a：先把标准岛已经验证的轮廓、区域、矩形通路块、水系碰撞和桥梁固化为可选 `islandLayout`，完成深克隆、JSON 往返和 v1–v4 存储迁移；不改变当前玩法与画面。
+- P4b：让 2D 编辑器、3D 预览和岛屿渲染统一读取 v5 语义，补海岸/区域/水系/桥梁画笔，以及多投递区添加、移动、删除和稳定排序。
+- P4c：生成器改为区域关系图驱动，并把确定性、可达性、通路宽度和遮挡评分扩展到岛屿语义。
 - 把已经验证的海岸、台地、广场、果园、桥梁和建筑槽位做成语义画笔。
 - 生成器改为“区域关系图 → 岛屿轮廓 → 地标 → 路线 → 装饰”，不再从满矩形地砖开始。
 - 随机候选只基于标准图派生变体，并继续执行确定性、可达性、路线宽度与遮挡评分。
@@ -543,6 +542,20 @@ P3a 已由提交 `a1056ec`（`render: add island region story props`）固化。
 - 画布像素为 entropy `3.26`、edge density `0.203`、contrast `66`、dominant share `0.534`；相对 P3a，边缘密度与明度对比略升，色彩熵略降是统一暖色哑光配置后的预期结果。画布非空，控制台错误和页面错误均为 `0`。
 - 外部素材来源没有变化：本轮只调整已有 Nature/KayKit/程序化表面的运行时材质、灯光和视觉矩阵，没有新的英雄或标志性资产，因此没有调用 3D、图像、UI 或音频生成器。视觉测试仍跳过像素基线，以免快速构图期的有意调色成为脆弱回归；语义/动效诊断、交互、画布 smoke、预算和同机位截图提供当前覆盖。
 
+### P4a 地图 v5 语义结构与兼容迁移
+
+P4a 先建立后续编辑器和生成器共享的数据契约，不改现有地图构图或游戏规则。
+
+#### P4a 实施结果
+
+- `ORCHARD_MAP_VERSION` 从 4 升级到 5，新增可选 `islandLayout`。标准岛写入 16 点海岸轮廓、5 个命名区域、7 个矩形通路块、3 段水面、5 个水域碰撞块和 2 座桥；普通果园不需要该字段。
+- 解析器为区域/通路块类型、尺寸、数量上限和跨类别稳定 ID 提供校验；深克隆覆盖所有嵌套数组。标准岛经过 `JSON.stringify → JSON.parse → parseOrchardMap → cloneOrchardMap` 后保持独立数据，没有共享引用。
+- 本地存储键升级为 `apple-picking.active-map.v5` 与 `apple-picking.map-library.v5`，并按 v4、v3、v2、v1 顺序读取旧键。v4 地图迁移后写回 v5，但不会被凭空补上 `islandLayout`。
+- 往返回归首次暴露旧解析器会把岛岸/水域的细长矩形强制改成普通房屋尺寸，并把 2.1–2.35 宽的岛路放大。现已把 v3+ 路径宽度有效范围扩为 `1.4–15`，建筑型地标半径扩为 `0.25–40 × 0.25–30`，从而无损保留标准岛现有碰撞与视觉数值。
+- `npm run build` 通过；`npx playwright test tests/map-editor.spec.ts --project=desktop-chrome` 为 `8/8`；完整 `npx playwright test --project=desktop-chrome` 为 `44/44`。覆盖 v1/v2/v3/v4 迁移、v5 往返/深克隆、真实键盘、拾取/投递、多投递区、岛屿碰撞/桥梁拓扑、画布和资源回退。
+- 本轮没有可见画面、UI、音频、资产或渲染预算变化，因此不生成新截图、不更新像素基线，也不调用图像/3D/UI/音频生成器。按用户决定，移动端与窄屏验证继续延期到桌面版本完成后。
+- P4b 下一步：让 `IslandWorldView`、2D 编辑器和 3D 预览直接消费 `islandLayout`；先实现轮廓/区域/水系/桥梁的显示与选择，再补语义画笔和多投递区增删排序。P4b 不在本次提交范围内。
+
 ## 第一轮：可玩视觉试验场
 
 入口统一使用主游戏，不做只能旋转观看的静态展台。KayKit 村庄已经成为默认入口，避免只有知道查询参数的人才能看到：
@@ -571,9 +584,9 @@ P3a 已由提交 `a1056ec`（`render: add island region story props`）固化。
 - 本阶段不以移动端资源请求、draw calls、三角面和包体预算限制地图设计；自动诊断继续记录数据，但不作为候选淘汰条件。
 - 性能优化移到世界方向和编辑器工作流稳定之后，再做实例化、LOD、按需加载和移动端降级。
 
-## 地图 v5 预留：多个投递区
+## 地图 v5：岛屿语义与多个投递区
 
-P1.2 已先完成规则验证，但没有强制升级存档版本：当前 v4 兼容桥同时保留单个主字段：
+P1.2 已先完成多点投递规则验证。P4a 正式把地图版本升级为 v5，但继续保留单个主字段作为兼容桥：
 
 ```ts
 deliveryZone: Vec2
@@ -585,7 +598,7 @@ deliveryZone: Vec2
 deliveryZones?: Array<{ id: string; x: number; z: number }>
 ```
 
-没有 `deliveryZones` 的旧地图自动按一个主投递点运行。方向通过试玩后，v5 再把列表改为必填，并允许每个点拥有独立半径：
+没有 `deliveryZones` 的旧地图自动按一个主投递点运行。P4a 不把列表改为必填，也不在 schema 中重复保存全局统一的投递半径；完整编辑器支持后再评估是否需要每点独立半径：
 
 ```ts
 deliveryZones: Array<{
@@ -602,7 +615,7 @@ deliveryZones: Array<{
 - 投递区重叠时先选最近中心，再按 `id` 稳定排序。
 - 苹果位于任意投递区内都保持“已送达”；离开所有投递区才失去该分。
 - 事件携带 `zoneId`，便于 HUD、音效和统计定位。
-- v4 单投递区在解析时自动视为含一个元素的数组，不需要立即重写本地存档。
+- v1–v4 单投递区在运行时自动视为含一个元素的数组；读取后写回 v5，不需要批量离线迁移。
 - 数量由地图尺寸和预设推导，不写死为固定数量；当前标准岛使用 4 个点验证上限，旧地图仍使用 1 个。
 
 ## 编辑器方向（第三、四轮）

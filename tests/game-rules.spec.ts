@@ -299,7 +299,7 @@ test.describe('deterministic apple-picking rules', () => {
   test('homesteads and ponds are solid landmarks that actors must route around', async ({ page }) => {
     await page.evaluate(() => {
       const collisionMap = {
-        version: 4,
+        version: 5,
         id: 'landmark-collision-test',
         name: '地标碰撞测试',
         seed: 17,
@@ -323,7 +323,7 @@ test.describe('deterministic apple-picking rules', () => {
         guardStarts: [{ x: 9, z: 0 }, { x: -25, z: 15 }],
         deliveryZone: { x: 25, z: 20 },
       };
-      localStorage.setItem('apple-picking.active-map.v4', JSON.stringify(collisionMap));
+      localStorage.setItem('apple-picking.active-map.v5', JSON.stringify(collisionMap));
     });
     await page.reload();
     await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));

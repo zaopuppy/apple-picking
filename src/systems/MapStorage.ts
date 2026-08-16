@@ -7,14 +7,16 @@ import {
   validateOrchardMap,
 } from '../game/maps/OrchardMap';
 
-const ACTIVE_MAP_KEY = 'apple-picking.active-map.v4';
-const MAP_LIBRARY_KEY = 'apple-picking.map-library.v4';
+const ACTIVE_MAP_KEY = 'apple-picking.active-map.v5';
+const MAP_LIBRARY_KEY = 'apple-picking.map-library.v5';
 const LEGACY_ACTIVE_MAP_KEYS = [
+  'apple-picking.active-map.v4',
   'apple-picking.active-map.v3',
   'apple-picking.active-map.v2',
   'apple-picking.active-map.v1',
 ] as const;
 const LEGACY_MAP_LIBRARY_KEYS = [
+  'apple-picking.map-library.v4',
   'apple-picking.map-library.v3',
   'apple-picking.map-library.v2',
   'apple-picking.map-library.v1',
