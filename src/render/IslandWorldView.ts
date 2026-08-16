@@ -12,6 +12,15 @@ type WaveStrip = {
   phase: number;
 };
 
+type RectBlockDetail = {
+  x: number;
+  y: number;
+  z: number;
+  sizeX: number;
+  sizeY: number;
+  sizeZ: number;
+};
+
 export type IslandWorldVisual = {
   root: THREE.Group;
   tileInstances: number;
@@ -379,14 +388,6 @@ function createOrchardDetails(materials: IslandMaterials): THREE.Group {
     }
   }
 
-  const fenceParts: Array<{ x: number; z: number; length: number; rotation: number }> = [];
-  for (let x = -29; x <= -13; x += 4) {
-    fenceParts.push({ x, z: -5.3, length: 3.5, rotation: 0 });
-  }
-  fenceParts.push({ x: -31.2, z: -12, length: 13.5, rotation: Math.PI / 2 });
-  group.add(createFenceParts(fenceParts, materials));
-  propInstances += fenceParts.length;
-
   const crates = new THREE.Group();
   crates.position.set(-10.2, 0, -6.4);
   crates.add(
@@ -559,7 +560,7 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
     materials.flowerWhite,
     ISLAND_ROUTE_BLOCKS.length,
   );
-  const hedgeParts: Array<{ x: number; y: number; z: number; scale: number }> = [];
+  const foliageParts: RectBlockDetail[] = [];
   const totemParts: Array<{
     x: number;
     y: number;
@@ -569,7 +570,7 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
     scaleZ: number;
     color: THREE.ColorRepresentation;
   }> = [];
-  const logParts: Array<{ x: number; y: number; z: number; length: number }> = [];
+  const timberParts: RectBlockDetail[] = [];
   const matrix = new THREE.Object3D();
 
   ISLAND_ROUTE_BLOCKS.forEach((block, index) => {
@@ -589,7 +590,7 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
       [block.radiusX * 2 - 0.26, 0.11, block.radiusZ * 2 - 0.26],
     );
     topMesh.setColorAt(index, routeBlockTopColor(block.kind));
-    appendRouteBlockProps(block, height, hedgeParts, totemParts, logParts);
+    appendRouteBlockProps(block, height, foliageParts, totemParts, timberParts);
   });
   baseMesh.name = 'island-route-block-cliff-bases';
   topMesh.name = 'island-route-block-colored-tops';
@@ -601,26 +602,25 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
   if (topMesh.instanceColor) topMesh.instanceColor.needsUpdate = true;
   group.add(baseMesh, topMesh);
 
-  if (hedgeParts.length > 0) {
-    const hedges = new THREE.InstancedMesh(
-      new THREE.DodecahedronGeometry(0.5, 0),
+  if (foliageParts.length > 0) {
+    const foliageBlocks = new THREE.InstancedMesh(
+      blockGeometry,
       materials.foliage,
-      hedgeParts.length,
+      foliageParts.length,
     );
-    hedgeParts.forEach((part, index) => {
+    foliageParts.forEach((part, index) => {
       setInstanceTransform(
-        hedges,
+        foliageBlocks,
         index,
         matrix,
         [part.x, part.y, part.z],
-        [part.scale * 1.15, part.scale * 0.78, part.scale],
-        [0, index * 0.63, 0],
+        [part.sizeX, part.sizeY, part.sizeZ],
       );
     });
-    hedges.name = 'island-route-block-hedges';
-    hedges.castShadow = true;
-    hedges.instanceMatrix.needsUpdate = true;
-    group.add(hedges);
+    foliageBlocks.name = 'island-route-block-rectangular-foliage';
+    foliageBlocks.castShadow = true;
+    foliageBlocks.instanceMatrix.needsUpdate = true;
+    group.add(foliageBlocks);
   }
 
   if (totemParts.length > 0) {
@@ -643,37 +643,36 @@ function createRouteBlocks(materials: IslandMaterials): THREE.Group {
     group.add(totems);
   }
 
-  if (logParts.length > 0) {
-    const logs = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.22, 0.25, 1, 8),
+  if (timberParts.length > 0) {
+    const timber = new THREE.InstancedMesh(
+      blockGeometry,
       materials.wood,
-      logParts.length,
+      timberParts.length,
     );
-    logParts.forEach((part, index) => {
+    timberParts.forEach((part, index) => {
       setInstanceTransform(
-        logs,
+        timber,
         index,
         matrix,
         [part.x, part.y, part.z],
-        [1, part.length, 1],
-        [0, index * 0.07, Math.PI / 2],
+        [part.sizeX, part.sizeY, part.sizeZ],
       );
     });
-    logs.name = 'island-route-block-woodpile';
-    logs.castShadow = true;
-    logs.instanceMatrix.needsUpdate = true;
-    group.add(logs);
+    timber.name = 'island-route-block-rectangular-timber';
+    timber.castShadow = true;
+    timber.instanceMatrix.needsUpdate = true;
+    group.add(timber);
   }
 
   group.userData.propInstances =
-    ISLAND_ROUTE_BLOCKS.length * 2 + hedgeParts.length + totemParts.length + logParts.length;
+    ISLAND_ROUTE_BLOCKS.length * 2 + foliageParts.length + totemParts.length + timberParts.length;
   return group;
 }
 
 function appendRouteBlockProps(
   block: IslandRouteBlock,
   height: number,
-  hedgeParts: Array<{ x: number; y: number; z: number; scale: number }>,
+  foliageParts: RectBlockDetail[],
   totemParts: Array<{
     x: number;
     y: number;
@@ -683,36 +682,57 @@ function appendRouteBlockProps(
     scaleZ: number;
     color: THREE.ColorRepresentation;
   }>,
-  logParts: Array<{ x: number; y: number; z: number; length: number }>,
+  timberParts: RectBlockDetail[],
 ): void {
   if (block.kind === 'hedge') {
-    for (let x = -block.radiusX + 0.6; x <= block.radiusX - 0.6; x += 1.15) {
-      hedgeParts.push(
-        { x: block.x + x, y: height + 0.57, z: block.z - block.radiusZ + 0.38, scale: 0.92 },
-        { x: block.x + x, y: height + 0.57, z: block.z + block.radiusZ - 0.38, scale: 0.92 },
-      );
-    }
-    for (let z = -block.radiusZ + 1.15; z <= block.radiusZ - 1.15; z += 1.15) {
-      hedgeParts.push(
-        { x: block.x - block.radiusX + 0.38, y: height + 0.57, z: block.z + z, scale: 0.92 },
-        { x: block.x + block.radiusX - 0.38, y: height + 0.57, z: block.z + z, scale: 0.92 },
-      );
-    }
+    foliageParts.push(
+      {
+        x: block.x,
+        y: height + 0.42,
+        z: block.z - block.radiusZ * 0.42,
+        sizeX: block.radiusX * 1.65,
+        sizeY: 0.72,
+        sizeZ: 0.62,
+      },
+      {
+        x: block.x,
+        y: height + 0.42,
+        z: block.z + block.radiusZ * 0.42,
+        sizeX: block.radiusX * 1.65,
+        sizeY: 0.72,
+        sizeZ: 0.62,
+      },
+      {
+        x: block.x + block.radiusX * 0.38,
+        y: height + 0.47,
+        z: block.z,
+        sizeX: 0.7,
+        sizeY: 0.82,
+        sizeZ: block.radiusZ * 1.1,
+      },
+    );
     return;
   }
 
   if (block.kind === 'hill') {
-    const offsets: ReadonlyArray<readonly [number, number, number]> = [
-      [-0.55, -0.28, 1.18],
-      [0.1, 0.32, 1.05],
-      [0.62, -0.18, 0.92],
-    ];
-    offsets.forEach(([xFactor, zFactor, scale]) => hedgeParts.push({
-      x: block.x + block.radiusX * xFactor,
-      y: height + 0.55 * scale,
-      z: block.z + block.radiusZ * zFactor,
-      scale,
-    }));
+    foliageParts.push(
+      {
+        x: block.x - block.radiusX * 0.12,
+        y: height + 0.16,
+        z: block.z,
+        sizeX: block.radiusX * 1.42,
+        sizeY: 0.3,
+        sizeZ: block.radiusZ * 1.25,
+      },
+      {
+        x: block.x + block.radiusX * 0.18,
+        y: height + 0.37,
+        z: block.z - block.radiusZ * 0.08,
+        sizeX: block.radiusX * 0.92,
+        sizeY: 0.28,
+        sizeZ: block.radiusZ * 0.82,
+      },
+    );
     return;
   }
 
@@ -751,11 +771,13 @@ function appendRouteBlockProps(
   }
 
   for (let index = -2; index <= 2; index += 1) {
-    logParts.push({
+    timberParts.push({
       x: block.x,
-      y: height + 0.32 + Math.abs(index) * 0.035,
+      y: height + 0.24 + Math.abs(index) * 0.035,
       z: block.z + index * 0.68,
-      length: Math.min(3.2, block.radiusX * 0.9),
+      sizeX: Math.min(3.2, block.radiusX * 0.9),
+      sizeY: 0.32,
+      sizeZ: 0.42,
     });
   }
 }
@@ -804,28 +826,6 @@ function createPlazaDetails(materials: IslandMaterials): THREE.Group {
   ring.position.set(0, 0.17, 3);
   ring.rotation.x = Math.PI / 2;
   group.add(plaza, ring);
-  return group;
-}
-
-function createFenceParts(
-  parts: ReadonlyArray<{ x: number; z: number; length: number; rotation: number }>,
-  materials: IslandMaterials,
-): THREE.Group {
-  const group = new THREE.Group();
-  for (const [index, part] of parts.entries()) {
-    const section = new THREE.Group();
-    section.position.set(part.x, 0, part.z);
-    section.rotation.y = part.rotation;
-    section.add(
-      meshBox([part.length, 0.13, 0.13], materials.wood, [0, 0.45, 0]),
-      meshBox([part.length, 0.13, 0.13], materials.wood, [0, 0.82, 0]),
-      meshBox([0.16, 1.05, 0.16], materials.woodDark, [-part.length / 2, 0.5, 0]),
-      meshBox([0.16, 1.05, 0.16], materials.woodDark, [part.length / 2, 0.5, 0]),
-    );
-    section.name = `island-orchard-fence-${index + 1}`;
-    group.add(section);
-  }
-  markShadows(group);
   return group;
 }
 

@@ -17,6 +17,7 @@ import type {
   OrchardTree,
   TreeVariant,
 } from '../game/maps/OrchardMap';
+import { deliveryZonesForMap } from '../game/maps/OrchardMap';
 import type { AppleSnapshot, GameEvent, GameSnapshot, KidSnapshot } from '../game/types';
 import { VfxSystem } from '../systems/VfxSystem';
 import { disposeObject3D } from '../utils/dispose';
@@ -80,6 +81,7 @@ export type EnvironmentAssetDiagnostics = {
   clearings: number;
   landmarks: number;
   terrainZones: number;
+  deliveryZones: number;
   landmarkMode: 'loading' | 'imported' | 'procedural';
   importedHomesteads: number;
   landmarkMeshes: number;
@@ -172,6 +174,7 @@ export class ArenaView {
     clearings: 0,
     landmarks: 0,
     terrainZones: 0,
+    deliveryZones: 0,
     landmarkMode: 'procedural',
     importedHomesteads: 0,
     landmarkMeshes: 0,
@@ -232,6 +235,7 @@ export class ArenaView {
       clearings: map.clearings.length,
       landmarks: map.landmarks.length,
       terrainZones: map.terrainZones.length,
+      deliveryZones: deliveryZonesForMap(map).length,
       worldPreset: this.worldPreset,
     };
     this.createWorld();
@@ -453,7 +457,7 @@ export class ArenaView {
         worldLastFailure: null,
       };
       this.createForest();
-      this.createDeliveryZone();
+      this.createDeliveryZones();
       return;
     }
     this.proceduralWorldVisuals.name = 'procedural-world-fallback';
@@ -472,7 +476,7 @@ export class ArenaView {
     this.createFence();
     this.createLandmarks();
     this.createForest();
-    this.createDeliveryZone();
+    this.createDeliveryZones();
     if (this.worldPreset) {
       this.environmentDiagnostics = {
         ...this.environmentDiagnostics,
@@ -953,32 +957,38 @@ export class ArenaView {
       this.characterDiagnostics.lastFailures.kid;
   }
 
-  private createDeliveryZone(): void {
-    const fill = new THREE.Mesh(
-      new THREE.CircleGeometry(GAME_CONFIG.deliveryRadius, 48),
-      new THREE.MeshBasicMaterial({
-        color: '#f3d46d',
-        transparent: true,
-        opacity: 0.14,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
+  private createDeliveryZones(): void {
+    const fillGeometry = new THREE.CircleGeometry(GAME_CONFIG.deliveryRadius, 48);
+    const outlineGeometry = new THREE.RingGeometry(
+      GAME_CONFIG.deliveryRadius - 0.12,
+      GAME_CONFIG.deliveryRadius + 0.04,
+      48,
     );
-    const outline = new THREE.Mesh(
-      new THREE.RingGeometry(GAME_CONFIG.deliveryRadius - 0.12, GAME_CONFIG.deliveryRadius + 0.04, 48),
-      new THREE.MeshBasicMaterial({
-        color: '#f3d46d',
-        transparent: true,
-        opacity: 0.78,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    );
-    fill.rotation.x = -Math.PI / 2;
-    outline.rotation.x = -Math.PI / 2;
-    fill.position.set(this.map.deliveryZone.x, 0.021, this.map.deliveryZone.z);
-    outline.position.set(this.map.deliveryZone.x, 0.026, this.map.deliveryZone.z);
-    this.root.add(fill, outline);
+    const fillMaterial = new THREE.MeshBasicMaterial({
+      color: '#f3d46d',
+      transparent: true,
+      opacity: 0.14,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const outlineMaterial = new THREE.MeshBasicMaterial({
+      color: '#f3d46d',
+      transparent: true,
+      opacity: 0.78,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    for (const zone of deliveryZonesForMap(this.map)) {
+      const fill = new THREE.Mesh(fillGeometry, fillMaterial);
+      const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
+      fill.name = `delivery-zone-${zone.id}-fill`;
+      outline.name = `delivery-zone-${zone.id}-outline`;
+      fill.rotation.x = -Math.PI / 2;
+      outline.rotation.x = -Math.PI / 2;
+      fill.position.set(zone.x, 0.021, zone.z);
+      outline.position.set(zone.x, 0.026, zone.z);
+      this.root.add(fill, outline);
+    }
   }
 
   private createApple(id: number): void {

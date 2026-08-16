@@ -7,6 +7,7 @@ import {
 import {
   alignToQuarterTurn,
   cloneOrchardMap,
+  deliveryZonesForMap,
   insideArena,
   KAYKIT_BUILDING_ASSETS,
   KAYKIT_TILE_SHAPES,
@@ -330,6 +331,9 @@ export class MapEditor {
       case 'delivery':
         if (!initial) return;
         this.map.deliveryZone = { ...point };
+        if (this.map.deliveryZones?.[0]) {
+          this.map.deliveryZones[0] = { ...this.map.deliveryZones[0], ...point };
+        }
         this.eraseTrees(point, GAME_CONFIG.deliveryRadius + 1);
         break;
     }
@@ -461,7 +465,7 @@ export class MapEditor {
     return [
       this.map.kidStart,
       ...this.map.guardStarts,
-      this.map.deliveryZone,
+      ...deliveryZonesForMap(this.map),
       ...this.map.appleSpawns,
     ].some((point) => landmarkBlocksPoint(landmark, point, padding));
   }
@@ -474,7 +478,7 @@ export class MapEditor {
     return [
       this.map.kidStart,
       ...this.map.guardStarts,
-      this.map.deliveryZone,
+      ...deliveryZonesForMap(this.map),
       ...this.map.appleSpawns,
     ].some((candidate) => distance(candidate, point) < padding);
   }
@@ -896,14 +900,23 @@ function drawMap(
   drawMarker(context, toScreen(map.kidStart), '#e46438', 'K', detailed);
   drawMarker(context, toScreen(map.guardStarts[0]), '#346ca0', '1', detailed);
   drawMarker(context, toScreen(map.guardStarts[1]), '#477b47', '2', detailed);
-  const delivery = toScreen(map.deliveryZone);
-  context.beginPath();
-  context.arc(delivery.x, delivery.y, GAME_CONFIG.deliveryRadius * transform.scale, 0, Math.PI * 2);
-  context.fillStyle = 'rgba(241, 202, 92, 0.24)';
-  context.fill();
-  context.strokeStyle = '#e5b94d';
-  context.lineWidth = detailed ? 3 : 1.5;
-  context.stroke();
+  for (const [index, zone] of deliveryZonesForMap(map).entries()) {
+    const delivery = toScreen(zone);
+    context.beginPath();
+    context.arc(delivery.x, delivery.y, GAME_CONFIG.deliveryRadius * transform.scale, 0, Math.PI * 2);
+    context.fillStyle = 'rgba(241, 202, 92, 0.24)';
+    context.fill();
+    context.strokeStyle = '#e5b94d';
+    context.lineWidth = detailed ? 3 : 1.5;
+    context.stroke();
+    if (detailed && deliveryZonesForMap(map).length > 1) {
+      context.fillStyle = '#6b4b16';
+      context.font = '700 11px system-ui, sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(String(index + 1), delivery.x, delivery.y);
+    }
+  }
 
   if (pointer && brushSize > 0) {
     const screen = toScreen(pointer);

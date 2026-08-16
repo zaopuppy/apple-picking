@@ -196,6 +196,60 @@ test.describe('deterministic apple-picking rules', () => {
     expect(result.secondThrow.kid.state).toBe('Normal');
   });
 
+  test('Sweet Orchard Island accepts delivery at an alternate drop-off', async ({ page }) => {
+    await page.goto('/?world=island');
+    await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
+    await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
+
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('delivery-alternate');
+      const firstThrow = hooks.step({
+        kid: { moveX: 0, moveZ: 0, actionPressed: false, dropPressed: true },
+      }, 1);
+      const secondThrow = hooks.step({
+        kid: { moveX: 0, moveZ: 0, actionPressed: false, dropPressed: true },
+      }, 1);
+      return {
+        firstThrow,
+        secondThrow,
+        deliveryZones: window.__THREE_GAME_DIAGNOSTICS__?.environment.deliveryZones,
+      };
+    });
+
+    const alternateZone = { x: -20, z: -4.5 };
+    expect(result.deliveryZones).toBe(4);
+    expect(result.firstThrow.delivered).toBe(1);
+    expect(result.secondThrow.delivered).toBe(2);
+    expect(result.secondThrow.kid.carriedAppleIds).toHaveLength(0);
+    expect(result.secondThrow.apples.slice(0, 2).every((apple) =>
+      apple.state === 'Delivered' && distance(apple.position, alternateZone) <= 3.2,
+    )).toBe(true);
+  });
+
+  test('a delivered apple can be picked back up inside the delivery zone', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('pickup-delivered');
+      const before = hooks.getSnapshot();
+      const began = hooks.step({
+        kid: { moveX: 0, moveZ: 0, actionPressed: true, dropPressed: false },
+      }, 1);
+      const completed = hooks.step({}, 23);
+      return { before, began, completed };
+    });
+
+    expect(result.before.delivered).toBe(1);
+    expect(result.before.apples[0].state).toBe('Delivered');
+    expect(result.began.kid.state).toBe('Picking');
+    expect(result.began.kid.pickingTargetId).toBe(0);
+    expect(result.completed.kid.state).toBe('Normal');
+    expect(result.completed.kid.carriedAppleIds).toEqual([0]);
+    expect(result.completed.apples[0].state).toBe('Carried');
+    expect(result.completed.delivered).toBe(0);
+    expect(result.completed.matchState).toBe('Playing');
+  });
+
   test('a scored apple remains physical and stops counting when pushed outside the circle', async ({ page }) => {
     const result = await page.evaluate(() => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;

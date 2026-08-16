@@ -7,8 +7,10 @@ import {
 } from './config';
 import { DEFAULT_ORCHARD_MAP } from './maps/MapGenerator';
 import {
+  deliveryZonesForMap,
   resolveCircleAgainstLandmark,
   treeColliderRadius,
+  type OrchardDeliveryZone,
   type OrchardMap,
   type OrchardTree,
 } from './maps/OrchardMap';
@@ -79,12 +81,14 @@ export class GameSimulation {
   private rng = createSeededRandom(1);
   private dropSerial = 0;
   private readonly movementTuning: MovementTuning;
+  private readonly deliveryZones: readonly OrchardDeliveryZone[];
 
   constructor(
     private readonly map: OrchardMap = DEFAULT_ORCHARD_MAP,
     movementTuning: MovementTuning = DEFAULT_MOVEMENT_TUNING,
   ) {
     this.movementTuning = { ...movementTuning };
+    this.deliveryZones = deliveryZonesForMap(map).map((zone) => ({ ...zone }));
     this.restart(false);
   }
 
@@ -158,9 +162,10 @@ export class GameSimulation {
     this.savePreviousPositions();
 
     const kidCanUseItems = this.kid.state !== 'Hit';
-    const deliveryThrowRequested = kidCanUseItems &&
-      commands.kid.dropPressed &&
-      this.isKidInDeliveryZone();
+    const activeDeliveryZone = kidCanUseItems && commands.kid.dropPressed
+      ? this.deliveryZoneAt(this.kid.position)
+      : null;
+    const deliveryThrowRequested = activeDeliveryZone !== null;
     if (kidCanUseItems && commands.kid.dropPressed && !deliveryThrowRequested) this.dropOneApple();
     if (commands.kid.actionPressed) this.tryStartPicking();
 
@@ -175,7 +180,7 @@ export class GameSimulation {
     this.advanceGuardState(this.guards[1]);
 
     if (!captured && this.matchState === 'Playing' && deliveryThrowRequested) {
-      this.deliverOneApple();
+      this.deliverOneApple(activeDeliveryZone);
     }
 
     this.resolveActorCollisions();
@@ -302,14 +307,26 @@ export class GameSimulation {
         return;
       case 'delivery':
         this.moveGuardsAway();
-        this.kid.position = copy(this.map.deliveryZone);
+        this.kid.position = copy(this.deliveryZones[0]);
         this.kid.previousPosition = copy(this.kid.position);
         this.giveKidApples([0, 1]);
+        return;
+      case 'delivery-alternate':
+        this.moveGuardsAway();
+        this.kid.position = copy(this.deliveryZones[1] ?? this.deliveryZones[0]);
+        this.kid.previousPosition = copy(this.kid.position);
+        this.giveKidApples([0, 1]);
+        return;
+      case 'pickup-delivered':
+        this.moveGuardsAway();
+        this.placeDeliveredApples([0]);
+        this.kid.position = copy(this.apples[0].position);
+        this.kid.previousPosition = copy(this.kid.position);
         return;
       case 'delivery-progress':
         this.moveGuardsAway();
         this.placeDeliveredApples([0, 1, 2]);
-        this.kid.position = copy(this.map.deliveryZone);
+        this.kid.position = copy(this.deliveryZones[0]);
         this.kid.previousPosition = copy(this.kid.position);
         this.giveKidApples([3, 4]);
         return;
@@ -317,8 +334,8 @@ export class GameSimulation {
         this.moveGuardsAway();
         this.placeDeliveredApples([0]);
         this.apples[0].position = {
-          x: this.map.deliveryZone.x + GAME_CONFIG.deliveryRadius - 0.08,
-          z: this.map.deliveryZone.z,
+          x: this.deliveryZones[0].x + GAME_CONFIG.deliveryRadius - 0.08,
+          z: this.deliveryZones[0].z,
         };
         this.guards[0].position = {
           x: this.apples[0].position.x - 0.7,
@@ -330,7 +347,7 @@ export class GameSimulation {
         this.moveGuardsAway();
         this.placeDeliveredApples([0, 1, 2, 3, 4]);
         this.giveKidApples([5]);
-        this.kid.position = copy(this.map.deliveryZone);
+        this.kid.position = copy(this.deliveryZones[0]);
         this.kid.previousPosition = copy(this.kid.position);
         return;
       case 'captured':
@@ -352,10 +369,10 @@ export class GameSimulation {
         this.placeDeliveredApples(this.apples.map((apple) => apple.id));
         this.apples[0].state = 'Carried';
         this.kid.carriedAppleIds = [0];
-        this.kid.position = copy(this.map.deliveryZone);
+        this.kid.position = copy(this.deliveryZones[0]);
         this.kid.previousPosition = copy(this.kid.position);
-        this.guards[0].position = copy(this.map.deliveryZone);
-        this.guards[0].previousPosition = copy(this.map.deliveryZone);
+        this.guards[0].position = copy(this.deliveryZones[0]);
+        this.guards[0].previousPosition = copy(this.deliveryZones[0]);
         this.guards[1].position = { x: -10, z: -7 };
         this.guards[1].previousPosition = copy(this.guards[1].position);
         return;
@@ -532,15 +549,20 @@ export class GameSimulation {
 
   private updateDeliveryZoneMembership(): void {
     if (this.matchState !== 'Playing') return;
-    const deliveryRadiusSquared = GAME_CONFIG.deliveryRadius ** 2;
     for (const apple of this.apples) {
       if (apple.state === 'Carried') continue;
-      const inside = distanceSquared(apple.position, this.map.deliveryZone) <= deliveryRadiusSquared;
-      if (inside && apple.state === 'Ground') {
+      const deliveryZone = this.deliveryZoneAt(apple.position);
+      if (deliveryZone && apple.state === 'Ground') {
         apple.state = 'Delivered';
         const total = this.deliveredAppleCount();
-        this.events.push({ type: 'delivered', appleId: apple.id, count: 1, total });
-      } else if (!inside && apple.state === 'Delivered') {
+        this.events.push({
+          type: 'delivered',
+          appleId: apple.id,
+          count: 1,
+          total,
+          zoneId: deliveryZone.id,
+        });
+      } else if (!deliveryZone && apple.state === 'Delivered') {
         apple.state = 'Ground';
         this.events.push({ type: 'delivery-lost', appleId: apple.id, total: this.deliveredAppleCount() });
       }
@@ -659,8 +681,7 @@ export class GameSimulation {
     const apple = this.apples[targetId];
     if (
       !apple ||
-      apple.state !== 'Ground' ||
-      apple.lockTicks > 0 ||
+      !this.appleCanBePickedUp(apple) ||
       this.kid.carriedAppleIds.length >= GAME_CONFIG.maxCarriedApples
     ) return;
     apple.state = 'Carried';
@@ -682,7 +703,7 @@ export class GameSimulation {
   private tryStartPicking(): void {
     if (this.kid.state !== 'Normal') return;
     const candidates = this.apples
-      .filter((apple) => apple.state === 'Ground' && apple.lockTicks === 0)
+      .filter((apple) => this.appleCanBePickedUp(apple))
       .map((apple) => ({ apple, distanceSq: distanceSquared(this.kid.position, apple.position) }))
       .filter(({ distanceSq }) => distanceSq <= GAME_CONFIG.pickupRadius * GAME_CONFIG.pickupRadius)
       .sort((a, b) => a.distanceSq - b.distanceSq || a.apple.id - b.apple.id);
@@ -694,6 +715,10 @@ export class GameSimulation {
       return;
     }
     this.startPicking(target);
+  }
+
+  private appleCanBePickedUp(apple: AppleModel): boolean {
+    return apple.state !== 'Carried' && apple.lockTicks === 0;
   }
 
   private startPicking(apple: AppleModel): void {
@@ -746,25 +771,39 @@ export class GameSimulation {
     });
   }
 
-  private isKidInDeliveryZone(): boolean {
-    return distanceSquared(this.kid.position, this.map.deliveryZone) <= GAME_CONFIG.deliveryRadius ** 2;
+  private deliveryZoneAt(position: Vec2): OrchardDeliveryZone | null {
+    const deliveryRadiusSquared = GAME_CONFIG.deliveryRadius ** 2;
+    let nearest: OrchardDeliveryZone | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const zone of this.deliveryZones) {
+      const distance = distanceSquared(position, zone);
+      if (distance > deliveryRadiusSquared) continue;
+      if (distance < nearestDistance ||
+        (distance === nearestDistance && nearest !== null && zone.id < nearest.id)) {
+        nearest = zone;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
   }
 
-  private deliverOneApple(): void {
+  private deliverOneApple(deliveryZone: OrchardDeliveryZone): void {
     if (this.kid.carriedAppleIds.length === 0) return;
     const appleId = this.kid.carriedAppleIds.pop();
     if (appleId === undefined) return;
     const apple = this.apples[appleId];
-    const deliveryIndex = this.deliveredAppleCount();
+    const deliveryIndex = this.apples.filter((candidate) =>
+      candidate.state === 'Delivered' && this.deliveryZoneAt(candidate.position)?.id === deliveryZone.id,
+    ).length;
     const offset = DELIVERY_DROP_OFFSETS[deliveryIndex % DELIVERY_DROP_OFFSETS.length];
     apple.position = {
-      x: this.map.deliveryZone.x + offset.x,
-      z: this.map.deliveryZone.z + offset.z,
+      x: deliveryZone.x + offset.x,
+      z: deliveryZone.z + offset.z,
     };
     apple.state = 'Delivered';
     apple.lockTicks = 0;
     const total = this.deliveredAppleCount();
-    this.events.push({ type: 'delivered', appleId, count: 1, total });
+    this.events.push({ type: 'delivered', appleId, count: 1, total, zoneId: deliveryZone.id });
   }
 
   private deliveredAppleCount(): number {
@@ -841,13 +880,14 @@ export class GameSimulation {
   }
 
   private placeDeliveredApples(ids: number[]): void {
+    const deliveryZone = this.deliveryZones[0];
     ids.forEach((id, index) => {
       const apple = this.apples[id];
       const offset = DELIVERY_DROP_OFFSETS[index % DELIVERY_DROP_OFFSETS.length];
       apple.state = 'Delivered';
       apple.position = {
-        x: this.map.deliveryZone.x + offset.x,
-        z: this.map.deliveryZone.z + offset.z,
+        x: deliveryZone.x + offset.x,
+        z: deliveryZone.z + offset.z,
       };
       apple.lockTicks = 0;
     });

@@ -1,5 +1,6 @@
 import {
   cloneOrchardMap,
+  type OrchardDeliveryZone,
   type OrchardLandmark,
   type OrchardMap,
   type OrchardTree,
@@ -120,6 +121,13 @@ export const ISLAND_ROUTE_BLOCKS: readonly IslandRouteBlock[] = [
   },
 ];
 
+export const ISLAND_DELIVERY_ZONES: readonly OrchardDeliveryZone[] = [
+  { id: 'island-delivery-homestead', x: 19, z: -8 },
+  { id: 'island-delivery-orchard-market', x: -20, z: -4.5 },
+  { id: 'island-delivery-beach-dock', x: -24, z: 20 },
+  { id: 'island-delivery-garden', x: 15, z: 15 },
+];
+
 function createTrees(): OrchardTree[] {
   return TREE_SEEDS.map(([x, z, variant, scale = 1], index) => ({
     id: `island-tree-${index + 1}`,
@@ -146,7 +154,7 @@ function createRouteBlockLandmarks(): OrchardLandmark[] {
 export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
   version: 4,
   id: SWEET_ORCHARD_ISLAND_ID,
-  name: '甜日果园岛 · P1.1',
+  name: '甜日果园岛 · P1.2',
   seed: 20260816,
   worldStyle: {
     theme: 'riverside',
@@ -158,6 +166,7 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
       id: 'island-path-west-loop',
       width: 2.35,
       points: [
+        { x: -24, z: 20 },
         { x: -26, z: 16 },
         { x: -23, z: 12 },
         { x: -23, z: 6 },
@@ -198,6 +207,7 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
         { x: 3, z: 10.5 },
         { x: 6, z: 13 },
         { x: 10, z: 13 },
+        { x: 15, z: 15 },
       ],
     },
     {
@@ -215,7 +225,9 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
   clearings: [
     { id: 'island-clearing-plaza', x: 0, z: 3, radius: 4.2 },
     { id: 'island-clearing-orchard', x: -21, z: -12.5, radius: 3.5 },
-    { id: 'island-clearing-beach', x: -23, z: 16, radius: 3.2 },
+    { id: 'island-clearing-orchard-market', x: -20, z: -4.5, radius: 2.4 },
+    { id: 'island-clearing-beach', x: -24, z: 19, radius: 4 },
+    { id: 'island-clearing-garden-delivery', x: 15, z: 15, radius: 2.6 },
     { id: 'island-clearing-delivery', x: 19, z: -8, radius: 2.5 },
   ],
   landmarks: [
@@ -327,7 +339,8 @@ export const SWEET_ORCHARD_ISLAND_MAP: OrchardMap = {
     { x: -8, z: 1 },
     { x: 9, z: 2 },
   ],
-  deliveryZone: { x: 19, z: -8 },
+  deliveryZone: { x: ISLAND_DELIVERY_ZONES[0].x, z: ISLAND_DELIVERY_ZONES[0].z },
+  deliveryZones: ISLAND_DELIVERY_ZONES.map((zone) => ({ ...zone })),
 };
 
 export function resolveIslandTourMap(search = window.location.search): OrchardMap | null {

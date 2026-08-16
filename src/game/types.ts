@@ -76,7 +76,7 @@ export type GameEvent =
   | { type: 'picked'; appleId: number }
   | { type: 'dropped'; appleId: number; reason: 'manual' | 'capture' }
   | { type: 'captured'; catches: number }
-  | { type: 'delivered'; appleId: number; count: number; total: number }
+  | { type: 'delivered'; appleId: number; count: number; total: number; zoneId: string }
   | { type: 'delivery-lost'; appleId: number; total: number }
   | { type: 'match-ended'; winner: 'kid' | 'guards' };
 

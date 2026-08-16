@@ -8,6 +8,7 @@ export const MAX_MAP_APPLES = 12;
 export const MAX_MAP_TREES = 2000;
 export const MAX_MAP_LANDMARKS = 48;
 export const MAX_TERRAIN_ZONES = 64;
+export const MAX_DELIVERY_ZONES = 4;
 export const TREE_COLLIDER_RADIUS = 0.31;
 
 export const TREE_VARIANTS = ['stump', 'broadleaf', 'pine', 'cherry'] as const;
@@ -77,6 +78,10 @@ export type OrchardTerrainZone = Vec2 & {
   radiusZ: number;
 };
 
+export type OrchardDeliveryZone = Vec2 & {
+  id: string;
+};
+
 export type OrchardMap = {
   version: typeof ORCHARD_MAP_VERSION;
   id: string;
@@ -92,6 +97,7 @@ export type OrchardMap = {
   kidStart: Vec2;
   guardStarts: [Vec2, Vec2];
   deliveryZone: Vec2;
+  deliveryZones?: OrchardDeliveryZone[];
 };
 
 export type MapValidation = {
@@ -133,6 +139,9 @@ export function cloneOrchardMap(map: OrchardMap): OrchardMap {
     kidStart: { ...map.kidStart },
     guardStarts: [{ ...map.guardStarts[0] }, { ...map.guardStarts[1] }],
     deliveryZone: { ...map.deliveryZone },
+    ...(map.deliveryZones
+      ? { deliveryZones: map.deliveryZones.map((zone) => ({ ...zone })) }
+      : {}),
   };
 }
 
@@ -151,9 +160,13 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
   const appleSpawns = parseArray(value.appleSpawns, parseVec2);
   const kidStart = parseVec2(value.kidStart, 0);
   const deliveryZone = parseVec2(value.deliveryZone, 0);
+  const deliveryZones = value.deliveryZones === undefined
+    ? undefined
+    : parseArray(value.deliveryZones, parseDeliveryZone);
   if (!trees || !paths || !clearings || !landmarks || !terrainZones || !appleSpawns || !kidStart || !deliveryZone) {
     return null;
   }
+  if (value.deliveryZones !== undefined && !deliveryZones) return null;
   if (!Array.isArray(value.guardStarts) || value.guardStarts.length !== 2) return null;
   const guard1 = parseVec2(value.guardStarts[0], 0);
   const guard2 = parseVec2(value.guardStarts[1], 1);
@@ -173,7 +186,12 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
     appleSpawns: appleSpawns.slice(0, MAX_MAP_APPLES),
     kidStart,
     guardStarts: [guard1, guard2],
-    deliveryZone,
+    deliveryZone: deliveryZones?.[0]
+      ? { x: deliveryZones[0].x, z: deliveryZones[0].z }
+      : deliveryZone,
+    ...(deliveryZones?.length
+      ? { deliveryZones: deliveryZones.slice(0, MAX_DELIVERY_ZONES) }
+      : {}),
   };
   if (sourceVersion === 1) return migrateVersionOneMap(parsed);
   if (sourceVersion === 2) return migrateVersionTwoMap(parsed);
@@ -183,6 +201,7 @@ export function parseOrchardMap(value: unknown): OrchardMap | null {
 export function validateOrchardMap(map: OrchardMap): MapValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const deliveryZones = deliveryZonesForMap(map);
   if (map.appleSpawns.length < MIN_MAP_APPLES) {
     errors.push(`至少需要 ${MIN_MAP_APPLES} 个果实出生点。`);
   }
@@ -198,12 +217,18 @@ export function validateOrchardMap(map: OrchardMap): MapValidation {
   if (map.terrainZones.length > MAX_TERRAIN_ZONES) {
     errors.push(`地表区域不能超过 ${MAX_TERRAIN_ZONES} 个。`);
   }
+  if (deliveryZones.length > MAX_DELIVERY_ZONES) {
+    errors.push(`投递区不能超过 ${MAX_DELIVERY_ZONES} 个。`);
+  }
+  if (new Set(deliveryZones.map((zone) => zone.id)).size !== deliveryZones.length) {
+    errors.push('投递区 ID 不能重复。');
+  }
   if (map.trees.length > 360) warnings.push('树木较多，可能切碎开放地形并遮挡角色。');
 
   const importantPoints = [
     map.kidStart,
     ...map.guardStarts,
-    map.deliveryZone,
+    ...deliveryZones,
     ...map.appleSpawns,
   ];
   if (importantPoints.some((point) => !insideArena(point, 0.65))) {
@@ -267,6 +292,11 @@ export function insideArena(point: Vec2, padding = 0): boolean {
 
 export function treeColliderRadius(tree: OrchardTree): number {
   return TREE_COLLIDER_RADII[tree.variant] * tree.scale;
+}
+
+export function deliveryZonesForMap(map: OrchardMap): readonly OrchardDeliveryZone[] {
+  if (map.deliveryZones && map.deliveryZones.length > 0) return map.deliveryZones;
+  return [{ id: 'delivery-primary', ...map.deliveryZone }];
 }
 
 export function landmarkBlocksPoint(
@@ -378,7 +408,7 @@ function measureReachability(
     }
   }
 
-  const targets = [map.deliveryZone, ...map.appleSpawns, ...map.guardStarts];
+  const targets = [...deliveryZonesForMap(map), ...map.appleSpawns, ...map.guardStarts];
   const reachableTargets = targets.filter((target) => {
     const [column, row] = nearestCell(target);
     return visited[key(column, row)] === 1;
@@ -548,6 +578,16 @@ function parseTerrainZone(value: unknown, index: number): OrchardTerrainZone | n
   };
 }
 
+function parseDeliveryZone(value: unknown, index: number): OrchardDeliveryZone | null {
+  if (!isRecord(value)) return null;
+  const point = parseVec2(value, index);
+  if (!point) return null;
+  return {
+    ...point,
+    id: text(value.id, `delivery-${index + 1}`),
+  };
+}
+
 function parseVec2(value: unknown, _index: number): Vec2 | null {
   if (!isRecord(value)) return null;
   if (!Number.isFinite(value.x) || !Number.isFinite(value.z)) return null;
@@ -628,6 +668,9 @@ function migrateVersionOneMap(map: OrchardMap): OrchardMap {
     kidStart: scalePoint(map.kidStart),
     guardStarts: [scalePoint(map.guardStarts[0]), scalePoint(map.guardStarts[1])],
     deliveryZone: scalePoint(map.deliveryZone),
+    ...(map.deliveryZones
+      ? { deliveryZones: map.deliveryZones.map((zone) => ({ ...zone, ...scalePoint(zone) })) }
+      : {}),
   };
   return fillExpandedLegacyMap(migrated);
 }
@@ -657,6 +700,9 @@ function migrateVersionTwoMap(map: OrchardMap): OrchardMap {
     kidStart: scalePoint(map.kidStart),
     guardStarts: [scalePoint(map.guardStarts[0]), scalePoint(map.guardStarts[1])],
     deliveryZone: scalePoint(map.deliveryZone),
+    ...(map.deliveryZones
+      ? { deliveryZones: map.deliveryZones.map((zone) => ({ ...zone, ...scalePoint(zone) })) }
+      : {}),
   };
   return fillExpandedLegacyMap({
     ...scaled,
@@ -667,7 +713,7 @@ function migrateVersionTwoMap(map: OrchardMap): OrchardMap {
 function thinTreesForCompactMap(map: OrchardMap): OrchardTree[] {
   const selected: OrchardTree[] = [];
   const treeIndex = createTreeSpatialIndex(selected);
-  const importantPoints = [map.kidStart, ...map.guardStarts, map.deliveryZone, ...map.appleSpawns];
+  const importantPoints = [map.kidStart, ...map.guardStarts, ...deliveryZonesForMap(map), ...map.appleSpawns];
   const ordered = [
     ...map.trees.filter((tree) => tree.variant !== 'stump'),
     ...map.trees.filter((tree) => tree.variant === 'stump'),
@@ -693,7 +739,7 @@ function fillExpandedLegacyMap(map: OrchardMap): OrchardMap {
   const trees = map.trees.map((tree) => ({ ...tree }));
   const treeIndex = createTreeSpatialIndex(trees);
   const random = createSeededRandom(map.seed ^ 0x5f3759df);
-  const importantPoints = [map.kidStart, ...map.guardStarts, map.deliveryZone, ...map.appleSpawns];
+  const importantPoints = [map.kidStart, ...map.guardStarts, ...deliveryZonesForMap(map), ...map.appleSpawns];
   const spacing = 2.15;
   let serial = 0;
 

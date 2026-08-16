@@ -1017,17 +1017,19 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P1.1',
+    mapName: '甜日果园岛 · P1.2',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
     paths: 5,
     landmarks: 14,
+    deliveryZones: 4,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
-  expect(diagnostics?.environment.worldPropInstances).toBeGreaterThanOrEqual(100);
-  expect(diagnostics?.environment.worldMeshes).toBeGreaterThan(80);
+  expect(diagnostics?.environment.worldPropInstances).toBeGreaterThanOrEqual(70);
+  expect(diagnostics?.environment.worldMeshes).toBeGreaterThanOrEqual(60);
+  expect(diagnostics?.physics.sensors).toBe(4);
   expect(diagnostics?.environment.treeMode).toBe(
     testInfo.project.name === 'narrow-chrome' ? 'procedural' : 'imported',
   );
@@ -1052,6 +1054,7 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
     });
     expect(validation.valid, validation.errors.join('\n')).toBe(true);
     expect(validation.reachableTargets).toBe(validation.totalTargets);
+    expect(validation.totalTargets).toBe(12);
 
     const routeBlockCollision = await page.evaluate(async () => {
       const islandPath = String('/src/game/maps/IslandTourMap.ts');

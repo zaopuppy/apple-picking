@@ -63,6 +63,7 @@ declare global {
       clearings: number;
       landmarks: number;
       terrainZones: number;
+      deliveryZones: number;
       landmarkMode: 'loading' | 'imported' | 'procedural';
       importedHomesteads: number;
       landmarkMeshes: number;

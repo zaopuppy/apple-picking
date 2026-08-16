@@ -22,7 +22,7 @@ import {
   type MedievalWorldPreset,
 } from './maps/MedievalWorldExperiments';
 import { resolveIslandTourMap } from './maps/IslandTourMap';
-import type { OrchardMap } from './maps/OrchardMap';
+import { deliveryZonesForMap, type OrchardMap } from './maps/OrchardMap';
 import {
   commandsWithoutEdges,
   createEmptyCommands,
@@ -619,7 +619,7 @@ export class Game {
         timestep: FIXED_DELTA_SECONDS,
         bodies: 3 + looseAppleCount,
         colliders: 4 + this.map.trees.length + this.map.landmarks.length + looseAppleCount,
-        sensors: 1,
+        sensors: deliveryZonesForMap(this.map).length,
         ccdBodies: 0,
       },
       movement: this.simulation.getMovementTuning(),

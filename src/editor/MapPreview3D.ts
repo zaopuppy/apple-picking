@@ -3,7 +3,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createMedievalWorldVisual } from '../assets/MedievalWorldAssets';
 import { loadNaturePackTreeVisuals } from '../assets/NaturePackAssets';
 import { GAME_CONFIG } from '../game/config';
-import { cloneOrchardMap, type OrchardMap } from '../game/maps/OrchardMap';
+import {
+  cloneOrchardMap,
+  deliveryZonesForMap,
+  type OrchardMap,
+} from '../game/maps/OrchardMap';
 import type { Vec2 } from '../game/types';
 import { createRenderer, resizeRenderer } from '../core/Renderer';
 
@@ -191,24 +195,25 @@ function createPreviewMarkers(map: OrchardMap): THREE.Group {
   apples.instanceMatrix.needsUpdate = true;
   root.add(apples);
 
-  const delivery = new THREE.Mesh(
-    new THREE.RingGeometry(
-      GAME_CONFIG.deliveryRadius - 0.22,
-      GAME_CONFIG.deliveryRadius,
-      48,
-    ),
-    new THREE.MeshBasicMaterial({
-      color: '#f1bf49',
-      transparent: true,
-      opacity: 0.86,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    }),
+  const deliveryGeometry = new THREE.RingGeometry(
+    GAME_CONFIG.deliveryRadius - 0.22,
+    GAME_CONFIG.deliveryRadius,
+    48,
   );
-  delivery.name = 'map-editor-preview-delivery';
-  delivery.rotation.x = -Math.PI / 2;
-  delivery.position.set(map.deliveryZone.x, 0.12, map.deliveryZone.z);
-  root.add(delivery);
+  const deliveryMaterial = new THREE.MeshBasicMaterial({
+    color: '#f1bf49',
+    transparent: true,
+    opacity: 0.86,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  for (const zone of deliveryZonesForMap(map)) {
+    const delivery = new THREE.Mesh(deliveryGeometry, deliveryMaterial);
+    delivery.name = `map-editor-preview-delivery-${zone.id}`;
+    delivery.rotation.x = -Math.PI / 2;
+    delivery.position.set(zone.x, 0.12, zone.z);
+    root.add(delivery);
+  }
   return root;
 }
 
