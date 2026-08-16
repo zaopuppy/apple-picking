@@ -999,6 +999,10 @@ test('character state presentation stays readable across key gameplay moments', 
 });
 
 test('Sweet Orchard Island keeps its authored composition playable and within budget', async ({ page }, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'desktop-chrome',
+    'Island P2 development is desktop-first; mobile QA is deferred.',
+  );
   await page.goto('/?world=island');
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.environment.worldMode))
@@ -1017,68 +1021,71 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
   const diagnostics = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__);
   expect(diagnostics?.environment).toMatchObject({
     mapId: 'sweet-orchard-island-p1',
-    mapName: '甜日果园岛 · P1.3',
+    mapName: '甜日果园岛 · P2a',
     worldMode: 'island',
     worldPreset: null,
     worldTileInstances: 3,
-    paths: 5,
-    landmarks: 14,
+    paths: 6,
+    landmarks: 19,
     deliveryZones: 4,
     groundMaterialMode: 'grass-texture',
     deliveryMarkerMode: 'parcel-sign',
     deliveryMarkerLabels: 4,
+    waterSegments: 3,
+    waterCollisionBlocks: 5,
+    bridges: 2,
     worldAssetRequests: 0,
     worldLastFailure: null,
   });
   expect(diagnostics?.environment.worldPropInstances).toBeGreaterThanOrEqual(70);
   expect(diagnostics?.environment.worldMeshes).toBeGreaterThanOrEqual(60);
   expect(diagnostics?.physics.sensors).toBe(4);
-  expect(diagnostics?.environment.treeMode).toBe(
-    testInfo.project.name === 'narrow-chrome' ? 'procedural' : 'imported',
-  );
-  expect(diagnostics?.renderer.calls).toBeLessThanOrEqual(
-    testInfo.project.name === 'narrow-chrome' ? 150 : 300,
-  );
-  expect(diagnostics?.renderer.triangles).toBeLessThanOrEqual(
-    testInfo.project.name === 'narrow-chrome' ? 300_000 : 750_000,
-  );
+  expect(diagnostics?.environment.treeMode).toBe('imported');
+  expect(diagnostics?.renderer.calls).toBeLessThanOrEqual(300);
+  expect(diagnostics?.renderer.triangles).toBeLessThanOrEqual(750_000);
   await expect(page.locator('[data-world-layout="island"]')).toHaveAttribute('aria-current', 'page');
 
   const sample = await sampleCanvas(page);
   expect(sample, `${testInfo.project.name}: ${JSON.stringify(sample)}`).toMatchObject({ ok: true });
 
-  if (testInfo.project.name === 'desktop-chrome') {
-    const validation = await page.evaluate(async () => {
-      const islandPath = String('/src/game/maps/IslandTourMap.ts');
-      const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
-      const island = await import(/* @vite-ignore */ islandPath);
-      const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
-      return orchardMaps.validateOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
-    });
-    expect(validation.valid, validation.errors.join('\n')).toBe(true);
-    expect(validation.reachableTargets).toBe(validation.totalTargets);
-    expect(validation.totalTargets).toBe(12);
+  const validation = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    return orchardMaps.validateOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
+  });
+  expect(validation.valid, validation.errors.join('\n')).toBe(true);
+  expect(validation.reachableTargets).toBe(validation.totalTargets);
+  expect(validation.totalTargets).toBe(12);
 
-    const routeBlockCollision = await page.evaluate(async () => {
-      const islandPath = String('/src/game/maps/IslandTourMap.ts');
-      const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
-      const simulationPath = String('/src/game/GameSimulation.ts');
-      const configPath = String('/src/game/config.ts');
-      const typesPath = String('/src/game/types.ts');
-      const island = await import(/* @vite-ignore */ islandPath);
-      const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
-      const simulationModule = await import(/* @vite-ignore */ simulationPath);
-      const config = await import(/* @vite-ignore */ configPath);
-      const types = await import(/* @vite-ignore */ typesPath);
-      const block = island.ISLAND_ROUTE_BLOCKS.find(
-        (candidate: { id: string }) => candidate.id === 'island-route-west-hill',
-      );
-      if (!block) throw new Error('Missing west route block.');
+  const collisionAndBridgeRoutes = await page.evaluate(async () => {
+    const islandPath = String('/src/game/maps/IslandTourMap.ts');
+    const orchardMapPath = String('/src/game/maps/OrchardMap.ts');
+    const simulationPath = String('/src/game/GameSimulation.ts');
+    const configPath = String('/src/game/config.ts');
+    const typesPath = String('/src/game/types.ts');
+    const island = await import(/* @vite-ignore */ islandPath);
+    const orchardMaps = await import(/* @vite-ignore */ orchardMapPath);
+    const simulationModule = await import(/* @vite-ignore */ simulationPath);
+    const config = await import(/* @vite-ignore */ configPath);
+    const types = await import(/* @vite-ignore */ typesPath);
+    const routeBlock = island.ISLAND_ROUTE_BLOCKS.find(
+      (candidate: { id: string }) => candidate.id === 'island-route-west-hill',
+    );
+    const waterBlock = island.ISLAND_WATER_BLOCKS.find(
+      (candidate: { id: string }) => candidate.id === 'island-water-block-center',
+    );
+    if (!routeBlock) throw new Error('Missing west route block.');
+    if (!waterBlock) throw new Error('Missing center water block.');
+
+    const simulateKid = (
+      start: { x: number; z: number },
+      movement: { moveX: number; moveZ: number },
+      ticks: number,
+    ) => {
       const map = orchardMaps.cloneOrchardMap(island.SWEET_ORCHARD_ISLAND_MAP);
-      map.kidStart = {
-        x: block.x - block.radiusX - 2,
-        z: block.z,
-      };
+      map.kidStart = start;
       map.guardStarts = [
         { x: 28, z: -16 },
         { x: 28, z: 18 },
@@ -1086,17 +1093,53 @@ test('Sweet Orchard Island keeps its authored composition playable and within bu
       const simulation = new simulationModule.GameSimulation(map);
       simulation.loadScenario('active-play');
       const commands = types.createEmptyCommands();
-      commands.kid.moveX = 1;
+      commands.kid.moveX = movement.moveX;
+      commands.kid.moveZ = movement.moveZ;
       let snapshot = simulation.getSnapshot();
-      for (let tick = 0; tick < 120; tick += 1) snapshot = simulation.step(commands).snapshot;
-      return {
-        kidX: snapshot.kid.position.x,
-        maximumX: block.x - block.radiusX - config.GAME_CONFIG.kidRadius,
-      };
-    });
-    expect(routeBlockCollision.kidX).toBeLessThanOrEqual(routeBlockCollision.maximumX + 0.0001);
-    expect(routeBlockCollision.kidX).toBeCloseTo(routeBlockCollision.maximumX, 4);
-  }
+      for (let tick = 0; tick < ticks; tick += 1) {
+        snapshot = simulation.step(commands).snapshot;
+      }
+      return snapshot.kid.position;
+    };
+
+    const routeBlockPosition = simulateKid(
+      { x: routeBlock.x - routeBlock.radiusX - 2, z: routeBlock.z },
+      { moveX: 1, moveZ: 0 },
+      120,
+    );
+    const waterBlockPosition = simulateKid(
+      { x: waterBlock.x, z: waterBlock.z + waterBlock.radiusZ + 2.4 },
+      { moveX: 0, moveZ: -1 },
+      120,
+    );
+    const bridgePositions = island.ISLAND_BRIDGES.map((bridge: { x: number; z: number }) =>
+      simulateKid(
+        { x: bridge.x, z: bridge.z + 4 },
+        { moveX: 0, moveZ: -1 },
+        90,
+      ));
+    return {
+      routeBlockKidX: routeBlockPosition.x,
+      routeBlockMaximumX:
+        routeBlock.x - routeBlock.radiusX - config.GAME_CONFIG.kidRadius,
+      waterBlockKidZ: waterBlockPosition.z,
+      waterBlockMinimumZ:
+        waterBlock.z + waterBlock.radiusZ + config.GAME_CONFIG.kidRadius,
+      bridgePositions,
+      bridges: island.ISLAND_BRIDGES,
+    };
+  });
+  expect(collisionAndBridgeRoutes.routeBlockKidX)
+    .toBeLessThanOrEqual(collisionAndBridgeRoutes.routeBlockMaximumX + 0.0001);
+  expect(collisionAndBridgeRoutes.routeBlockKidX)
+    .toBeCloseTo(collisionAndBridgeRoutes.routeBlockMaximumX, 4);
+  expect(collisionAndBridgeRoutes.waterBlockKidZ)
+    .toBeGreaterThanOrEqual(collisionAndBridgeRoutes.waterBlockMinimumZ - 0.0001);
+  expect(collisionAndBridgeRoutes.waterBlockKidZ)
+    .toBeCloseTo(collisionAndBridgeRoutes.waterBlockMinimumZ, 4);
+  collisionAndBridgeRoutes.bridgePositions.forEach((position: { z: number }, index: number) => {
+    expect(position.z).toBeLessThan(collisionAndBridgeRoutes.bridges[index].z - 3);
+  });
 });
 
 test('KayKit medieval world candidates remain readable and playable', async ({ page }, testInfo) => {

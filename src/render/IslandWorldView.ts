@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import {
+  ISLAND_BRIDGES,
   ISLAND_ROUTE_BLOCKS,
+  ISLAND_WATER_BLOCKS,
+  ISLAND_WATER_SEGMENTS,
+  type IslandBridge,
   type IslandRouteBlock,
 } from '../game/maps/IslandTourMap';
 import type { OrchardMap, OrchardPath } from '../game/maps/OrchardMap';
@@ -29,6 +33,9 @@ export type IslandWorldVisual = {
   triangles: number;
   materials: number;
   textures: number;
+  waterSegments: number;
+  waterCollisionBlocks: number;
+  bridges: number;
   update(time: number, reducedMotion: boolean): void;
 };
 
@@ -71,6 +78,9 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
   root.add(createHouseTerrace(materials));
   root.add(createTerrainPatches(map, materials));
   root.add(createPaths(map.paths, materials));
+  const waterway = createWaterway(materials);
+  propInstances += waterway.userData.propInstances as number;
+  root.add(waterway);
   root.add(createPond(materials));
   root.add(createCottage(materials));
 
@@ -101,6 +111,9 @@ export function createIslandWorldVisual(map: OrchardMap): IslandWorldVisual {
     root,
     tileInstances: 3,
     propInstances,
+    waterSegments: ISLAND_WATER_SEGMENTS.length,
+    waterCollisionBlocks: ISLAND_WATER_BLOCKS.length,
+    bridges: ISLAND_BRIDGES.length,
     ...stats,
     update(time: number, reducedMotion: boolean): void {
       for (const wave of waves) {
@@ -139,6 +152,132 @@ function createOcean(materials: IslandMaterials, waves: WaveStrip[]): THREE.Grou
     group.add(strip);
   }
   return group;
+}
+
+function createWaterway(materials: IslandMaterials): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'island-stepped-waterway-and-bridges';
+  const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+  const bankMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.cliffDark,
+    ISLAND_WATER_SEGMENTS.length,
+  );
+  const waterMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.water,
+    ISLAND_WATER_SEGMENTS.length,
+  );
+  const foamMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.waterLight,
+    ISLAND_WATER_SEGMENTS.length * 2,
+  );
+  const matrix = new THREE.Object3D();
+
+  ISLAND_WATER_SEGMENTS.forEach((segment, index) => {
+    setInstanceTransform(
+      bankMesh,
+      index,
+      matrix,
+      [segment.x, 0.035, segment.z],
+      [segment.sizeX + 0.5, 0.12, segment.sizeZ + 0.5],
+    );
+    setInstanceTransform(
+      waterMesh,
+      index,
+      matrix,
+      [segment.x, 0.105, segment.z],
+      [segment.sizeX, 0.08, segment.sizeZ],
+    );
+    for (const side of [-1, 1]) {
+      setInstanceTransform(
+        foamMesh,
+        index * 2 + (side > 0 ? 1 : 0),
+        matrix,
+        [segment.x, 0.155, segment.z + side * (segment.sizeZ / 2 - 0.12)],
+        [segment.sizeX - 0.25, 0.025, 0.18],
+      );
+    }
+  });
+  bankMesh.name = 'island-waterway-dark-rectangular-banks';
+  waterMesh.name = 'island-waterway-blue-rectangular-water';
+  foamMesh.name = 'island-waterway-light-bank-lines';
+  bankMesh.receiveShadow = true;
+  waterMesh.receiveShadow = true;
+  bankMesh.instanceMatrix.needsUpdate = true;
+  waterMesh.instanceMatrix.needsUpdate = true;
+  foamMesh.instanceMatrix.needsUpdate = true;
+  group.add(bankMesh, waterMesh, foamMesh);
+
+  const bridges = createWaterwayBridges(materials, blockGeometry, matrix);
+  group.add(bridges);
+  group.userData.propInstances =
+    ISLAND_WATER_SEGMENTS.length * 4 + bridges.userData.propInstances as number;
+  return group;
+}
+
+function createWaterwayBridges(
+  materials: IslandMaterials,
+  blockGeometry: THREE.BoxGeometry,
+  matrix: THREE.Object3D,
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'island-traversable-double-bridges';
+  const plankCountPerBridge = 10;
+  const plankMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.wood,
+    ISLAND_BRIDGES.length * plankCountPerBridge,
+  );
+  const supportMesh = new THREE.InstancedMesh(
+    blockGeometry,
+    materials.woodDark,
+    ISLAND_BRIDGES.length * 2,
+  );
+
+  ISLAND_BRIDGES.forEach((bridge, bridgeIndex) => {
+    appendBridgePlanks(plankMesh, bridge, bridgeIndex, plankCountPerBridge, matrix);
+    for (const side of [-1, 1]) {
+      setInstanceTransform(
+        supportMesh,
+        bridgeIndex * 2 + (side > 0 ? 1 : 0),
+        matrix,
+        [bridge.x + side * (bridge.width / 2 - 0.24), 0.205, bridge.z],
+        [0.28, 0.16, bridge.depth],
+      );
+    }
+  });
+  plankMesh.name = 'island-bridge-wooden-planks';
+  supportMesh.name = 'island-bridge-dark-support-beams';
+  plankMesh.castShadow = true;
+  plankMesh.receiveShadow = true;
+  supportMesh.castShadow = true;
+  plankMesh.instanceMatrix.needsUpdate = true;
+  supportMesh.instanceMatrix.needsUpdate = true;
+  group.add(supportMesh, plankMesh);
+  group.userData.propInstances = plankMesh.count + supportMesh.count;
+  return group;
+}
+
+function appendBridgePlanks(
+  plankMesh: THREE.InstancedMesh,
+  bridge: IslandBridge,
+  bridgeIndex: number,
+  plankCount: number,
+  matrix: THREE.Object3D,
+): void {
+  const plankDepth = bridge.depth / plankCount * 0.84;
+  for (let index = 0; index < plankCount; index += 1) {
+    const offset = (index + 0.5) / plankCount - 0.5;
+    setInstanceTransform(
+      plankMesh,
+      bridgeIndex * plankCount + index,
+      matrix,
+      [bridge.x, 0.32 + (index % 2) * 0.018, bridge.z + offset * bridge.depth],
+      [bridge.width - 0.18, 0.16, plankDepth],
+    );
+  }
 }
 
 function createIslandBody(materials: IslandMaterials): THREE.Mesh {
@@ -384,7 +523,7 @@ function createOrchardDetails(materials: IslandMaterials): THREE.Group {
   }
 
   const crates = new THREE.Group();
-  crates.position.set(-10.2, 0, -6.4);
+  crates.position.set(-10.2, 0, -2.7);
   crates.add(
     meshBox([1.5, 0.9, 1.25], materials.wood, [0, 0.45, 0]),
     meshBox([1.2, 0.75, 1.05], materials.woodDark, [1.25, 0.38, 0.25]),

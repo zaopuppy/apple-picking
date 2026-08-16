@@ -116,6 +116,9 @@ export type EnvironmentAssetDiagnostics = {
   groundMaterialMode: 'flat-color' | 'grass-texture';
   deliveryMarkerMode: 'ring' | 'parcel-sign';
   deliveryMarkerLabels: number;
+  waterSegments: number;
+  waterCollisionBlocks: number;
+  bridges: number;
   arenaWidth: number;
   arenaDepth: number;
   lastFailure: string | null;
@@ -209,6 +212,9 @@ export class ArenaView {
     groundMaterialMode: 'flat-color',
     deliveryMarkerMode: 'ring',
     deliveryMarkerLabels: 0,
+    waterSegments: 0,
+    waterCollisionBlocks: 0,
+    bridges: 0,
     arenaWidth: GAME_CONFIG.arenaHalfWidth * 2,
     arenaDepth: GAME_CONFIG.arenaHalfDepth * 2,
     lastFailure: null,
@@ -469,6 +475,9 @@ export class ArenaView {
         worldTileShape: null,
         worldLastFailure: null,
         groundMaterialMode: 'grass-texture',
+        waterSegments: island.waterSegments,
+        waterCollisionBlocks: island.waterCollisionBlocks,
+        bridges: island.bridges,
       };
       this.createForest();
       this.createDeliveryZones();

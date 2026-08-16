@@ -93,6 +93,9 @@ declare global {
       groundMaterialMode: 'flat-color' | 'grass-texture';
       deliveryMarkerMode: 'ring' | 'parcel-sign';
       deliveryMarkerLabels: number;
+      waterSegments: number;
+      waterCollisionBlocks: number;
+      bridges: number;
       arenaWidth: number;
       arenaDepth: number;
       lastFailure: string | null;

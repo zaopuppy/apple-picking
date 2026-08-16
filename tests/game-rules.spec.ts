@@ -201,7 +201,9 @@ test.describe('deterministic apple-picking rules', () => {
     await page.waitForFunction(() => Boolean(window.__THREE_GAME_TEST_HOOKS__));
     await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
 
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
+      const islandPath = String('/src/game/maps/IslandTourMap.ts');
+      const island = await import(/* @vite-ignore */ islandPath);
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;
       hooks.scenario('delivery-alternate');
       const firstThrow = hooks.step({
@@ -214,16 +216,16 @@ test.describe('deterministic apple-picking rules', () => {
         firstThrow,
         secondThrow,
         deliveryZones: window.__THREE_GAME_DIAGNOSTICS__?.environment.deliveryZones,
+        alternateZone: island.ISLAND_DELIVERY_ZONES[1],
       };
     });
 
-    const alternateZone = { x: -20, z: -4.5 };
     expect(result.deliveryZones).toBe(4);
     expect(result.firstThrow.delivered).toBe(1);
     expect(result.secondThrow.delivered).toBe(2);
     expect(result.secondThrow.kid.carriedAppleIds).toHaveLength(0);
     expect(result.secondThrow.apples.slice(0, 2).every((apple) =>
-      apple.state === 'Delivered' && distance(apple.position, alternateZone) <= 3.2,
+      apple.state === 'Delivered' && distance(apple.position, result.alternateZone) <= 3.2,
     )).toBe(true);
   });
 
