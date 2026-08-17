@@ -1,4 +1,5 @@
 export class Loop {
+  private static readonly FRAME_INTERVAL_TOLERANCE_MS = 0.5;
   private frameId = 0;
   private lastAnimationTime = 0;
   private lastRenderedTime = 0;
@@ -44,12 +45,12 @@ export class Loop {
     this.lastAnimationTime = time;
     this.pendingFrameTime += animationDelta;
 
-    if (this.pendingFrameTime < this.frameIntervalMs) {
+    if (this.pendingFrameTime + Loop.FRAME_INTERVAL_TOLERANCE_MS < this.frameIntervalMs) {
       this.frameId = requestAnimationFrame(this.tick);
       return;
     }
 
-    this.pendingFrameTime %= this.frameIntervalMs;
+    this.pendingFrameTime = Math.max(0, this.pendingFrameTime - this.frameIntervalMs);
     const deltaSeconds = Math.min((time - this.lastRenderedTime) / 1000, 0.05);
     this.lastRenderedTime = time;
     this.measureFrameRate(time);

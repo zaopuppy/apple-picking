@@ -3,6 +3,7 @@ import { GameSimulation } from '../src/game/GameSimulation';
 import { TICKS_PER_SECOND } from '../src/game/config';
 import { cloneOrchardMap, type OrchardMap } from '../src/game/maps/OrchardMap';
 import {
+  commandsWithoutEdges,
   createEmptyCommands,
   type ActorCommand,
   type GameCommands,
@@ -65,6 +66,7 @@ export class AuthoritativeGameRoom {
   private accumulatorMs = 0;
   private lastActivityMs = Date.now();
   private eventSerial = 0;
+  private lastAppliedCommands = createEmptyCommands();
   private disposed = false;
 
   constructor(
@@ -253,7 +255,9 @@ export class AuthoritativeGameRoom {
   }
 
   private advanceOneTick(): void {
-    const step = this.simulation.step(this.buildCommands());
+    const commands = this.buildCommands();
+    const step = this.simulation.step(commands);
+    this.lastAppliedCommands = commandsWithoutEdges(commands);
     for (const event of step.events) this.pendingEvents.push(this.networkEvent(event, step.snapshot.tick));
 
     const nextPhase = step.snapshot.matchState === 'Countdown'
@@ -304,6 +308,7 @@ export class AuthoritativeGameRoom {
     this.resumePhase = 'countdown';
     this.pendingEvents.length = 0;
     this.eventSerial = 0;
+    this.lastAppliedCommands = createEmptyCommands();
     this.accumulatorMs = 0;
     this.previousPumpMs = performance.now();
     for (const player of this.players.values()) {
@@ -351,6 +356,8 @@ export class AuthoritativeGameRoom {
       lastAppliedClientTickByPlayer: Object.fromEntries(
         [...this.players.values()].map((player) => [player.playerId, player.lastAppliedClientTick]),
       ),
+      appliedCommands: cloneCommands(this.lastAppliedCommands),
+      checkpoint: this.simulation.createCheckpoint(),
       snapshot,
       events,
     };
@@ -434,4 +441,13 @@ export class AuthoritativeGameRoom {
   private error(code: 'ROOM_FULL' | 'SEAT_TAKEN' | 'ROOM_CLOSED', message: string): RoomActionResponse {
     return { ok: false, error: { code, message } };
   }
+}
+
+function cloneCommands(commands: GameCommands): GameCommands {
+  return {
+    guard1: { ...commands.guard1 },
+    guard2: { ...commands.guard2 },
+    kid: { ...commands.kid },
+    restartPressed: commands.restartPressed,
+  };
 }

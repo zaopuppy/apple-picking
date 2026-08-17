@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { GameSimulation } from '../src/game/GameSimulation';
 import { SWEET_ORCHARD_ISLAND_MAP } from '../src/game/maps/IslandTourMap';
+import { cloneOrchardMap } from '../src/game/maps/OrchardMap';
 import { createEmptyCommands, type GameCommands, type GameSnapshot } from '../src/game/types';
 import { PROTOCOL_VERSION, parseClientInputFrame } from '../src/net/protocol';
 
@@ -51,6 +52,47 @@ test.describe('Node-compatible authoritative simulation', () => {
     expect(parsed).not.toBeNull();
     expect(Math.hypot(parsed?.actors.guard1?.moveX ?? 0, parsed?.actors.guard1?.moveZ ?? 0))
       .toBeCloseTo(1, 8);
+  });
+
+  test('a simulation checkpoint restores every deterministic rule state', () => {
+    const authority = new GameSimulation(SWEET_ORCHARD_ISLAND_MAP);
+    authority.seed(20260817);
+    authority.loadScenario('carrying');
+    const initialDrop = createEmptyCommands();
+    initialDrop.kid.dropPressed = true;
+    authority.step(initialDrop);
+    for (let tick = 0; tick < 17; tick += 1) {
+      const commands = createEmptyCommands();
+      commands.guard1.moveX = 1;
+      if (tick === 3) commands.guard1.actionPressed = true;
+      authority.step(commands);
+    }
+
+    const checkpoint = authority.createCheckpoint();
+    const replay = new GameSimulation(SWEET_ORCHARD_ISLAND_MAP);
+    replay.restoreCheckpoint(checkpoint);
+    expect(replay.getSnapshot()).toEqual(authority.getSnapshot());
+
+    for (let tick = 0; tick < 120; tick += 1) {
+      const commands = createEmptyCommands();
+      commands.guard2.moveZ = tick < 80 ? -1 : 0;
+      commands.kid.moveX = tick % 40 < 20 ? 1 : -1;
+      if (tick === 12 || tick === 48) commands.kid.dropPressed = true;
+      if (tick === 30) commands.guard2.actionPressed = true;
+      const expected = authority.step(commands);
+      const actual = replay.step(commands);
+      expect(actual).toEqual(expected);
+      expect(replay.createCheckpoint()).toEqual(authority.createCheckpoint());
+    }
+  });
+
+  test('checkpoint restore rejects a different authoritative map', () => {
+    const authority = new GameSimulation(SWEET_ORCHARD_ISLAND_MAP);
+    const otherMap = cloneOrchardMap(SWEET_ORCHARD_ISLAND_MAP);
+    otherMap.id = `${otherMap.id}-different`;
+    const replay = new GameSimulation(otherMap);
+    expect(() => replay.restoreCheckpoint(authority.createCheckpoint()))
+      .toThrow(/checkpoint map mismatch/i);
   });
 });
 

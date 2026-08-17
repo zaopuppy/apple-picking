@@ -1,13 +1,15 @@
 import { DEFAULT_MOVEMENT_TUNING, type MovementTuning } from '../game/config';
 import type { OrchardMap } from '../game/maps/OrchardMap';
+import type { SimulationCheckpoint } from '../game/SimulationCheckpoint';
 import type {
   ActorCommand,
+  GameCommands,
   GameEvent,
   GameSnapshot,
 } from '../game/types';
 
-export const PROTOCOL_VERSION = 2;
-export const BUILD_VERSION = '0.3.0-smooth-online-demo';
+export const PROTOCOL_VERSION = 3;
+export const BUILD_VERSION = '0.4.0-checkpoint-online-demo';
 export const INPUT_STALE_MS = 250;
 export const RECONNECT_GRACE_MS = 15_000;
 
@@ -54,6 +56,8 @@ export type ServerStateFrame = {
   sentAtMs: number;
   lastProcessedInputSeqByPlayer: Record<string, number>;
   lastAppliedClientTickByPlayer: Record<string, number>;
+  appliedCommands: GameCommands;
+  checkpoint: SimulationCheckpoint;
   snapshot: GameSnapshot;
   events: NetworkGameEvent[];
 };

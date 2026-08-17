@@ -195,6 +195,7 @@ test('render loop adapts to the available refresh rate and caps at 60 FPS', asyn
 
     return {
       highRefresh: runAtRefreshRate(120, 240),
+      nativeRefresh: runAtRefreshRate(60, 120),
       lowRefresh: runAtRefreshRate(30, 60),
     };
   });
@@ -203,6 +204,10 @@ test('render loop adapts to the available refresh rate and caps at 60 FPS', asyn
   expect(samples.highRefresh.updates).toBeLessThanOrEqual(121);
   expect(samples.highRefresh.renders).toBe(samples.highRefresh.updates);
   expect(samples.highRefresh.fps).toBe(60);
+  expect(samples.nativeRefresh.updates).toBeGreaterThanOrEqual(119);
+  expect(samples.nativeRefresh.updates).toBeLessThanOrEqual(120);
+  expect(samples.nativeRefresh.renders).toBe(samples.nativeRefresh.updates);
+  expect(samples.nativeRefresh.fps).toBe(60);
   expect(samples.lowRefresh.updates).toBe(60);
   expect(samples.lowRefresh.renders).toBe(60);
   expect(samples.lowRefresh.fps).toBeGreaterThanOrEqual(29);

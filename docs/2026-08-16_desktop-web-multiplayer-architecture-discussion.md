@@ -219,7 +219,7 @@ Creating -> Lobby -> Countdown -> Playing -> Finished -> RematchLobby
 
 ```ts
 type ClientInputFrame = {
-  protocolVersion: 1;
+  protocolVersion: 3;
   matchId: string;
   seq: number;
   clientTick: number;
@@ -247,20 +247,22 @@ type ClientInputFrame = {
 
 ```ts
 type ServerStateFrame = {
-  protocolVersion: 1;
+  protocolVersion: 3;
   buildVersion: string;
   matchId: string;
   serverTick: number;
   sentAtMs: number;
   lastProcessedInputSeqByPlayer: Record<string, number>;
+  lastAppliedClientTickByPlayer: Record<string, number>;
+  appliedCommands: GameCommands;
+  checkpoint: SimulationCheckpoint;
   snapshot: GameSnapshot;
-  checkpoint?: SimulationCheckpoint; // Phase 2 的预测回放载荷
   events: Array<GameEvent & { eventId: string; tick: number }>;
 };
 ```
 
 - 快照是可覆盖数据：旧快照到达后直接丢弃，短暂漏一帧由下一全量快照修复，不做数据库级补发。
-- `checkpoint` 不是 Phase 1 渲染同步的前置条件；只有启用完整客户端预测时才发送，并带自己的格式版本。不能拿 `GameSnapshot` 代替它。
+- `checkpoint` 从协议 v3 起是完整客户端预测的必选载荷，带独立格式版本；不能拿 `GameSnapshot` 反向拼装。`appliedCommands` 提供 checkpoint 时刻服务端仍持有的输入，供客户端外推未拥有角色。
 - 一次性事件按 `eventId` 去重；音效/VFX 只在事件第一次越过渲染时间线时触发。
 - 房间加入、座位变更、准备、开始、放弃和再来一局属于控制消息，需要 ack、明确错误码和幂等请求 ID。
 - 重连恢复失败时，客户端请求一份 `RoomState + 最新全量快照`，清空插值与事件缓冲后重新建立时间线。
@@ -268,15 +270,16 @@ type ServerStateFrame = {
 
 ### 6.4 插值、预测与校正
 
-分两步交付可以降低首次联机风险：
+同步表现按三步交付：
 
 1. **正确性竖切（已完成）**：所有角色直接渲染 20 Hz 权威快照，不做预测。它证明了房间、输入和规则没有分叉，但产生约 0.42–0.48 世界单位的可见位置跳步。
 2. **可玩性竖切（已完成）**：本地拥有的角色立即预测，远端角色在 100 ms 缓冲时间线上插值；权威快照到来后，从服务器已处理的客户端 tick 重放未确认输入，并平滑视觉误差。
+3. **完整规则回放（已完成）**：`GameSimulation` 导出/恢复带版本的 checkpoint，包含内部动作时点、前一位置、苹果、RNG 与 `dropSerial`；客户端恢复权威状态后，用服务端持有输入外推远端并重放本地未确认输入。
 
 不要在第一步还没收敛时直接做复杂预测。预测需要先选择一种策略：
 
-- 推荐长期方案：为 `GameSimulation` 增加有版本的 `SimulationCheckpoint` 导出/导入，在客户端恢复权威 checkpoint 后重放未确认输入。当前世界很小，完整预测成本可控。
-- 本期实现：只预测本地拥有角色的表现位置和守卫飞扑状态，复用地图边界、树木与地标碰撞；角色间碰撞、拾取、投递、抓捕和胜负不预测。最终显示位置限制为“角色速度 + 2 世界单位/秒校正”，任何普通权威帧都不能造成瞬移。
+- 当前实现采用完整 `SimulationCheckpoint` 回放，角色间碰撞、苹果碰撞、拾取、投递、抓捕与状态机都参与预测；只把本地拥有角色的预测结果覆盖到画面，权威事件仍是计分、音效、VFX 与胜负的唯一提交入口。
+- checkpoint 纠偏以最多 2 世界单位/秒逐步消除视觉偏移，普通权威帧不会直接把本地角色瞬移到新位置。
 - 远端插值时钟允许 0.85×–1.15× 的轻微播放速率调整来吸收抖动，且 render tick 单调不倒退；短时缺帧最多外推 2 tick。
 
 无论哪种方案，音效、计分、抓捕、拾取和胜负都不能由预测直接提交；预测只改善表现，权威事件才能确认结果。
@@ -340,7 +343,7 @@ type ServerStateFrame = {
 ### 10.1 MVP 部署
 
 - Vite 静态资源可以由现有静态站点或同一个 Node 服务提供。
-- Socket.IO 服务运行在支持长连接的 Node 进程中；本演示直接监听 `0.0.0.0:5190`，由 Vite 同源代理 `/socket.io`。
+- Socket.IO 服务运行在支持长连接的 Node 进程中；本演示默认监听 `0.0.0.0:5190`，可用 `APPLE_PICKING_SERVER_HOST` / `APPLE_PICKING_SERVER_PORT` 覆盖，由 Vite 同源代理 `/socket.io`。
 - 本地开发由 Vite 把 `/socket.io` 代理到独立端口，保持浏览器同源体验。
 - 首版单实例、内存房间即可；进程重启会结束进行中的房间，这是可接受且应在 UI 中明确提示的 MVP 限制。
 - 提供 `/healthz`、活动房间数、玩家数、tick lag、消息速率、快照字节数、RTT 和重连次数指标。
@@ -367,8 +370,13 @@ type ServerStateFrame = {
 
 ### Phase 2：玩家可用的同步表现（演示范围已完成）
 
-工作：远端插值、本地预测/校正、事件去重、RTT 与修正量诊断、人工延迟/抖动测试。  
+工作：远端插值、完整 checkpoint 预测/回放、事件去重、RTT 与修正量诊断、人工延迟/抖动测试。
 退出条件：本期已通过 120 ms 状态下行延迟 + 30 ms 确定性抖动自动化；完整公网 RTT/丢包整局试玩仍属于未来部署验证。没有重复音效和重复计分；普通位置修正不允许瞬移。
+
+### Phase 2.1：渲染节拍修复（已完成）
+
+工作：修复 60 Hz `requestAnimationFrame` 回调因 16.6 ms 与 16.667 ms 浮点边界比较而被隔帧跳过的问题，并对本地预测状态做亚 tick 插值。
+退出条件：实际渲染状态在 120 ms 状态延迟 + 30 ms 抖动下连续采样无重复位置；远端与本地 p95 表观速度保持在角色速度和 2 单位/秒纠偏预算内。
 
 ### Phase 3：房间产品闭环（演示范围已完成）
 
@@ -440,7 +448,7 @@ type ServerStateFrame = {
 | D4 地图范围 | 仅服务端发布地图 | 自定义地图需要上传、校验、限额、hash 和安全边界 |
 | D5 身份与入口 | 匿名房间码 + 私有 rejoin token | 账号/公开匹配会引入数据库、认证、隐私和运营需求 |
 
-本期按以上默认值完成 Phase 0–2，并一并完成演示所需的创建/加入房间、准备、断线暂停、15 秒原席位重连、退出和再来一局。Phase 2 采用表现层预测而不是完整模拟 checkpoint；公网部署不在本项目范围。
+本期按以上默认值完成 Phase 0–3，并补齐完整模拟 checkpoint 预测回放与 60 FPS 渲染节拍修复；公网部署不在本项目范围。
 
 ## 15. 实施结果
 
@@ -448,8 +456,8 @@ type ServerStateFrame = {
 
 - `/`：保留原有同键盘单机模式和浏览器本地地图。
 - `/online.html`：2 个桌面浏览器客户端，`guards` 席位拥有两名守卫，`kid` 席位拥有小孩。
-- `npm run dev`：同时启动 Vite `127.0.0.1:5188` 与房间服务 `0.0.0.0:5190`。
-- `npm run preview`：同时启动构建预览 `127.0.0.1:4188` 与同一房间服务。
+- `npm run dev`：同时启动默认监听 `0.0.0.0:5188` 的 Vite 与 `0.0.0.0:5190` 的房间服务；浏览器仍可用 `127.0.0.1` 访问。
+- `npm run preview`：同时启动默认监听 `0.0.0.0:4188` 的构建预览与同一房间服务。
 - `/healthz`：房间服务健康状态与内存房间诊断。
 
 ### 15.2 已实现边界
@@ -459,20 +467,20 @@ type ServerStateFrame = {
 - 服务端校验协议/构建版本、有限数值、移动归一化、输入序号和角色所有权；客户端不能提交位置、计分、命中或胜负。
 - 在线房间固定使用服务端发布的 Sweet Orchard Island 地图与内容 hash，不读取客户端 `localStorage` 地图。
 - 意外断线立即暂停；15 秒内使用私有 token 恢复原座位和权威快照。主动离开不进入等待。
-- 远端采用 6 tick（约 100 ms）缓冲插值；本地拥有角色重放服务端尚未确认的输入 tick，并以最大 2 世界单位/秒吸收校正。
-- 本期没有完整客户端模拟 checkpoint、角色间预测碰撞、账号、公开匹配、持久化或多实例扩容；Node 进程重启会丢失内存房间。
+- 远端采用 6 tick（约 100 ms）缓冲插值；本地从完整 checkpoint 恢复规则模拟，重放服务端尚未确认的输入 tick，并以最大 2 世界单位/秒吸收校正。
+- 本期没有账号、公开匹配、持久化或多实例扩容；Node 进程重启会丢失内存房间。
 
 ### 15.3 验证记录
 
 - `npm run build`：严格 TypeScript 与 Vite 生产构建通过。
-- `npm test`：61 项通过，53 项按项目/视口条件跳过；包含既有单机规则、真实键盘、编辑器、视觉检查以及双标签联机、断线重连和网络平滑度测试。
+- `npm test`：63 项通过，55 项按项目/视口条件跳过；包含既有单机规则、真实键盘、编辑器、视觉检查以及双标签联机、断线重连、checkpoint 和网络平滑度测试。
 - `npm run preview`：`/online.html` 返回 200，房间服务 `/healthz` 返回健康状态；预览入口和无 SSL 服务可同时启动。
 - `npm audit --json`：生产与开发依赖均无已知漏洞。
 - `npm run inspect:canvas`：画布非空、无控制台或页面错误；163 draw calls、100,840 triangles、130 geometries、14 textures，均在当前桌面预算内。
-- `tests/server-simulation.spec.ts`：同地图、种子和命令带在 Node 运行两次得到一致结果；非法 `NaN` 输入被拒绝，超范围移动被规范化。
+- `tests/server-simulation.spec.ts`：同地图、种子和命令带在 Node 运行两次得到一致结果；checkpoint 恢复后逐 tick 快照、事件、RNG 与内部规则状态一致；错误地图被拒绝。
 - `tests/multiplayer.spec.ts`：验证权威移动收敛、未拥有角色输入被拒绝、短断线暂停与同席位恢复。
-- `tests/network-smoothing.spec.ts`：验证 20 Hz 快照之间生成连续中间位置，以及本地角色重放未确认输入。
-- 120 ms 状态下行延迟 + 30 ms 抖动三次重复结果：远端与本地重复位置比例均接近 0；远端 p95 表观速度约 9.62–10.13，本地约 10.76–11.19；输入可见响应约 3.7–18 ms。
+- `tests/network-smoothing.spec.ts`：验证 20 Hz 快照之间生成连续中间位置，以及从完整 checkpoint 重放未确认输入。
+- 120 ms 状态下行延迟 + 30 ms 抖动三次重复结果：远端与本地重复位置比例均为 0；远端 p95 表观速度约 9.83–10.07，本地约 10.41–10.42；输入可见响应约 5.4–24.8 ms。
 - 联机大厅与权威对局截图已人工检查：席位、准备、房间码、网络状态和 HUD 在 1280 × 720 桌面视口无明显遮挡。
 
 ## 16. 参考资料

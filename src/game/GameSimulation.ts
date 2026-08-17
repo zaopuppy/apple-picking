@@ -13,6 +13,10 @@ import {
 } from './maps/OrchardMap';
 import { constrainCircleToMap } from './MovementCollision';
 import {
+  SIMULATION_CHECKPOINT_VERSION,
+  type SimulationCheckpoint,
+} from './SimulationCheckpoint';
+import {
   createEmptyCommands,
   type ActorCommand,
   type AppleSnapshot,
@@ -210,6 +214,71 @@ export class GameSimulation {
     };
   }
 
+  createCheckpoint(): SimulationCheckpoint {
+    return {
+      version: SIMULATION_CHECKPOINT_VERSION,
+      mapId: this.map.id,
+      mapVersion: this.map.version,
+      tick: this.tick,
+      playTicks: this.playTicks,
+      matchState: this.matchState,
+      countdownTicks: this.countdownTicks,
+      catches: this.catches,
+      rngState: this.rng.getState(),
+      dropSerial: this.dropSerial,
+      movementTuning: { ...this.movementTuning },
+      guards: this.guards.map((guard) => ({
+        ...guard,
+        position: copy(guard.position),
+        previousPosition: copy(guard.previousPosition),
+        facing: copy(guard.facing),
+      })) as SimulationCheckpoint['guards'],
+      kid: {
+        ...this.kid,
+        position: copy(this.kid.position),
+        previousPosition: copy(this.kid.previousPosition),
+        facing: copy(this.kid.facing),
+        carriedAppleIds: [...this.kid.carriedAppleIds],
+      },
+      apples: this.apples.map((apple) => ({
+        ...apple,
+        position: copy(apple.position),
+      })),
+    };
+  }
+
+  restoreCheckpoint(checkpoint: SimulationCheckpoint): void {
+    this.assertCompatibleCheckpoint(checkpoint);
+    this.tick = checkpoint.tick;
+    this.playTicks = checkpoint.playTicks;
+    this.matchState = checkpoint.matchState;
+    this.countdownTicks = checkpoint.countdownTicks;
+    this.catches = checkpoint.catches;
+    this.dropSerial = checkpoint.dropSerial;
+    this.movementTuning.baseSpeed = checkpoint.movementTuning.baseSpeed;
+    this.movementTuning.guardSpeedMultiplier = checkpoint.movementTuning.guardSpeedMultiplier;
+    this.movementTuning.kidSpeedMultiplier = checkpoint.movementTuning.kidSpeedMultiplier;
+    this.guards = checkpoint.guards.map((guard) => ({
+      ...guard,
+      position: copy(guard.position),
+      previousPosition: copy(guard.previousPosition),
+      facing: copy(guard.facing),
+    })) as [GuardModel, GuardModel];
+    this.kid = {
+      ...checkpoint.kid,
+      position: copy(checkpoint.kid.position),
+      previousPosition: copy(checkpoint.kid.previousPosition),
+      facing: copy(checkpoint.kid.facing),
+      carriedAppleIds: [...checkpoint.kid.carriedAppleIds],
+    };
+    this.apples = checkpoint.apples.map((apple) => ({
+      ...apple,
+      position: copy(apple.position),
+    }));
+    this.rng.setState(checkpoint.rngState);
+    this.events = [];
+  }
+
   loadScenario(name: string): void {
     this.restart(true);
     switch (name) {
@@ -399,6 +468,24 @@ export class GameSimulation {
       cooldownTicks: 0,
       pounceStartedTick: -1000,
     };
+  }
+
+  private assertCompatibleCheckpoint(checkpoint: SimulationCheckpoint): void {
+    if (checkpoint.version !== SIMULATION_CHECKPOINT_VERSION) {
+      throw new Error(`Unsupported simulation checkpoint version: ${checkpoint.version}`);
+    }
+    if (checkpoint.mapId !== this.map.id || checkpoint.mapVersion !== this.map.version) {
+      throw new Error(
+        `Simulation checkpoint map mismatch: ${checkpoint.mapId}@${checkpoint.mapVersion}`,
+      );
+    }
+    if (checkpoint.guards[0]?.id !== 'guard1' || checkpoint.guards[1]?.id !== 'guard2') {
+      throw new Error('Simulation checkpoint guard roster is invalid.');
+    }
+    if (checkpoint.apples.length !== this.map.appleSpawns.length ||
+      checkpoint.apples.some((apple, index) => apple.id !== index)) {
+      throw new Error('Simulation checkpoint apple roster is invalid.');
+    }
   }
 
   private result(): SimulationStep {

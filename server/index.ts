@@ -10,6 +10,8 @@ import { RoomManager } from './RoomManager';
 
 const requestedPort = Number(process.env.APPLE_PICKING_SERVER_PORT ?? 5190);
 const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 5190;
+const requestedHost = process.env.APPLE_PICKING_SERVER_HOST?.trim();
+const host = requestedHost || '0.0.0.0';
 
 const httpServer = createServer((request, response) => {
   if (request.url === '/healthz') {
@@ -32,8 +34,8 @@ const io = new Server<
 });
 const roomManager = new RoomManager(io);
 
-httpServer.listen(port, '0.0.0.0', () => {
-  console.log(`[multiplayer] HTTP + WebSocket demo server listening on http://127.0.0.1:${port}`);
+httpServer.listen(port, host, () => {
+  console.log(`[multiplayer] HTTP + WebSocket demo server listening on ${host}:${port}`);
 });
 
 const shutdown = (): void => {

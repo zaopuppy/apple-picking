@@ -1,8 +1,7 @@
 import type { Socket } from 'socket.io-client';
 import type { GameDriver } from '../game/GameDriver';
-import { GAME_CONFIG } from '../game/config';
+import { GameSimulation } from '../game/GameSimulation';
 import type { MovementTuning } from '../game/config';
-import type { OrchardMap } from '../game/maps/OrchardMap';
 import {
   createEmptyCommands,
   type ActorCommand,
@@ -12,9 +11,12 @@ import {
   type Vec2,
 } from '../game/types';
 import {
-  applyLocalActorPrediction,
+  applyOwnedPrediction,
+  createPredictionSimulation,
+  predictionCommands,
+  replayFromAuthoritativeFrame,
   type LocalInputSample,
-} from './LocalActorPrediction';
+} from './CheckpointPrediction';
 import {
   actorsForSeat,
   defaultMovementTuning,
@@ -36,6 +38,7 @@ import {
 type OnlineSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 export type OnlineDriverDiagnostics = {
+  predictionMode: 'checkpoint-replay';
   roomCode: string;
   matchId: string;
   seat: SeatId;
@@ -49,6 +52,7 @@ export type OnlineDriverDiagnostics = {
   bufferedStateFrames: number;
   interpolationAlpha: number;
   predictionReplayTicks: number;
+  predictionTick: number;
   lastCorrectionDistance: number;
   maxCorrectionDistance: number;
   simulatedStateLatencyMs: number;
@@ -70,7 +74,10 @@ export class OnlineGameDriver implements GameDriver {
   private matchId: string;
   private seat: SeatId;
   private playerId: string;
-  private map: OrchardMap;
+  private predictionSimulation: GameSimulation;
+  private predictedSnapshot: GameSnapshot;
+  private previousPredictedSnapshot: GameSnapshot;
+  private lastAppliedCommands: GameCommands;
   private authoritativeSnapshot: GameSnapshot;
   private renderSnapshot: GameSnapshot;
   private readonly now: () => number;
@@ -91,7 +98,11 @@ export class OnlineGameDriver implements GameDriver {
   private simulatedStateJitterMs = 0;
   private delayedFrameSerial = 0;
   private lastSnapshotAtMs: number;
-  private reconcileOnNextSnapshot = false;
+  private readonly predictionCorrectionOffsets: Record<ActorId, Vec2> = {
+    guard1: { x: 0, z: 0 },
+    guard2: { x: 0, z: 0 },
+    kid: { x: 0, z: 0 },
+  };
   private readonly pendingSteps: SimulationStep[] = [];
   private readonly seenEventIds = new Set<string>();
   private readonly inputHistory: LocalInputSample[] = [];
@@ -108,7 +119,10 @@ export class OnlineGameDriver implements GameDriver {
     this.matchId = session.frame.matchId;
     this.seat = session.seat;
     this.playerId = session.playerId;
-    this.map = session.map;
+    this.predictionSimulation = createPredictionSimulation(session.map, session.frame);
+    this.predictedSnapshot = this.predictionSimulation.getSnapshot();
+    this.previousPredictedSnapshot = cloneSnapshot(this.predictedSnapshot);
+    this.lastAppliedCommands = cloneCommands(session.frame.appliedCommands);
     this.authoritativeSnapshot = cloneSnapshot(session.frame.snapshot);
     this.renderSnapshot = cloneSnapshot(session.frame.snapshot);
     this.lastSnapshotAtMs = this.now();
@@ -123,39 +137,40 @@ export class OnlineGameDriver implements GameDriver {
   tick(commands: GameCommands): readonly SimulationStep[] {
     this.clientTick += 1;
     const actors = this.commandsForOwnedActors(commands);
-    this.inputHistory.push({
-      clientTick: this.clientTick,
-      actors: cloneActors(actors, true),
-    });
-    if (this.inputHistory.length > MAX_INPUT_HISTORY_TICKS) this.inputHistory.shift();
-    if (this.shouldSend(actors)) this.sendInputFrame(actors);
+    if (this.socket.connected) {
+      this.inputHistory.push({
+        clientTick: this.clientTick,
+        actors: cloneActors(actors, true),
+      });
+      if (this.inputHistory.length > MAX_INPUT_HISTORY_TICKS) this.inputHistory.shift();
+      if (this.predictedSnapshot.matchState === 'Playing') {
+        this.previousPredictedSnapshot = this.predictedSnapshot;
+        this.predictedSnapshot = this.predictionSimulation.step(
+          predictionCommands(this.lastAppliedCommands, this.seat, actors),
+        ).snapshot;
+      }
+      this.predictionReplayTicks = this.inputHistory.length;
+      if (this.shouldSend(actors)) this.sendInputFrame(actors);
+    }
     if (this.pendingSteps.length === 0) return [];
     return this.pendingSteps.splice(0, this.pendingSteps.length);
   }
 
-  getSnapshot(): GameSnapshot {
+  getSnapshot(interpolationAlpha = 1): GameSnapshot {
     const nowMs = this.now();
     const sample = this.timeline.sample(nowMs);
-    const nextSnapshot = sample.snapshot;
-    const prediction = applyLocalActorPrediction(
-      nextSnapshot,
-      this.authoritativeSnapshot,
+    const nextSnapshot = applyOwnedPrediction(
+      sample.snapshot,
+      this.predictedSnapshot,
       this.seat,
-      this.map,
-      defaultMovementTuning(),
-      this.inputHistory,
-      this.lastAppliedClientTick,
+      this.previousPredictedSnapshot,
+      interpolationAlpha,
     );
     this.renderTick = sample.renderTick;
     this.bufferedStateFrames = sample.bufferedFrames;
     this.interpolationAlpha = sample.interpolationAlpha;
-    this.predictionReplayTicks = prediction.replayedTicks;
 
-    if (this.reconcileOnNextSnapshot) {
-      this.measureCorrectionDistance(nextSnapshot);
-      this.reconcileOnNextSnapshot = false;
-    }
-    this.stabilizeOwnedPositions(nextSnapshot, nowMs);
+    this.applyPredictionCorrection(nextSnapshot, nowMs);
     this.renderSnapshot = nextSnapshot;
     this.lastSnapshotAtMs = nowMs;
     return this.renderSnapshot;
@@ -180,7 +195,10 @@ export class OnlineGameDriver implements GameDriver {
     this.matchId = session.frame.matchId;
     this.seat = session.seat;
     this.playerId = session.playerId;
-    this.map = session.map;
+    this.predictionSimulation = createPredictionSimulation(session.map, session.frame);
+    this.predictedSnapshot = this.predictionSimulation.getSnapshot();
+    this.previousPredictedSnapshot = cloneSnapshot(this.predictedSnapshot);
+    this.lastAppliedCommands = cloneCommands(session.frame.appliedCommands);
     this.authoritativeSnapshot = cloneSnapshot(session.frame.snapshot);
     this.renderSnapshot = cloneSnapshot(session.frame.snapshot);
     this.lastProcessedInputSeq = session.frame.lastProcessedInputSeqByPlayer[this.playerId] ?? 0;
@@ -194,7 +212,7 @@ export class OnlineGameDriver implements GameDriver {
     this.clearDelayedFrames();
     this.lastCorrectionDistance = 0;
     this.maxCorrectionDistance = 0;
-    this.reconcileOnNextSnapshot = false;
+    this.clearPredictionCorrection();
     this.lastSnapshotAtMs = this.now();
     this.timeline.reset(session.frame.snapshot, this.lastSnapshotAtMs);
   }
@@ -205,6 +223,7 @@ export class OnlineGameDriver implements GameDriver {
 
   getDiagnostics(): OnlineDriverDiagnostics {
     return {
+      predictionMode: 'checkpoint-replay',
       roomCode: this.roomCode,
       matchId: this.matchId,
       seat: this.seat,
@@ -218,6 +237,7 @@ export class OnlineGameDriver implements GameDriver {
       bufferedStateFrames: this.bufferedStateFrames,
       interpolationAlpha: this.interpolationAlpha,
       predictionReplayTicks: this.predictionReplayTicks,
+      predictionTick: this.predictedSnapshot.tick,
       lastCorrectionDistance: this.lastCorrectionDistance,
       maxCorrectionDistance: this.maxCorrectionDistance,
       simulatedStateLatencyMs: this.simulatedStateLatencyMs,
@@ -260,8 +280,10 @@ export class OnlineGameDriver implements GameDriver {
 
   private processStateFrame(frame: ServerStateFrame): void {
     if (frame.roomCode !== this.roomCode) return;
+    if (frame.checkpoint.tick !== frame.serverTick || frame.snapshot.tick !== frame.serverTick) return;
     const receivedAtMs = this.now();
-    if (frame.matchId !== this.matchId) {
+    const matchChanged = frame.matchId !== this.matchId;
+    if (matchChanged) {
       this.matchId = frame.matchId;
       this.seenEventIds.clear();
       this.pendingSteps.length = 0;
@@ -269,24 +291,35 @@ export class OnlineGameDriver implements GameDriver {
       this.authoritativeSnapshot = cloneSnapshot(frame.snapshot);
       this.renderSnapshot = cloneSnapshot(frame.snapshot);
       this.timeline.reset(frame.snapshot, receivedAtMs);
-      this.reconcileOnNextSnapshot = false;
+      this.clearPredictionCorrection();
     } else if (frame.serverTick <= this.authoritativeSnapshot.tick) {
       return;
     } else {
       this.authoritativeSnapshot = cloneSnapshot(frame.snapshot);
       this.timeline.push(frame.snapshot, receivedAtMs);
-      this.reconcileOnNextSnapshot = true;
     }
 
     this.receivedStateFrames += 1;
     this.lastProcessedInputSeq = frame.lastProcessedInputSeqByPlayer[this.playerId] ?? 0;
     this.lastAppliedClientTick = frame.lastAppliedClientTickByPlayer[this.playerId] ?? 0;
+    this.lastAppliedCommands = cloneCommands(frame.appliedCommands);
     while (
       this.inputHistory.length > 0 &&
       this.inputHistory[0].clientTick <= this.lastAppliedClientTick
     ) {
       this.inputHistory.shift();
     }
+    const prediction = replayFromAuthoritativeFrame(
+      this.predictionSimulation,
+      frame,
+      this.seat,
+      this.inputHistory,
+      this.lastAppliedClientTick,
+    );
+    if (!matchChanged) this.recordPredictionCorrection(this.predictedSnapshot, prediction.snapshot);
+    this.predictedSnapshot = prediction.snapshot;
+    if (matchChanged) this.previousPredictedSnapshot = cloneSnapshot(prediction.snapshot);
+    this.predictionReplayTicks = prediction.replayedTicks;
     const events = frame.events.filter((event) => {
       if (this.seenEventIds.has(event.eventId)) return false;
       this.seenEventIds.add(event.eventId);
@@ -300,31 +333,49 @@ export class OnlineGameDriver implements GameDriver {
     this.delayedFrameTimers.clear();
   }
 
-  private measureCorrectionDistance(targetSnapshot: GameSnapshot): void {
+  private recordPredictionCorrection(
+    previousPrediction: GameSnapshot,
+    nextPrediction: GameSnapshot,
+  ): void {
     this.lastCorrectionDistance = 0;
     for (const actorId of actorsForSeat(this.seat)) {
-      const current = actorPosition(this.renderSnapshot, actorId);
-      const target = actorPosition(targetSnapshot, actorId);
-      const distance = Math.hypot(current.x - target.x, current.z - target.z);
+      const previous = actorPosition(previousPrediction, actorId);
+      const next = actorPosition(nextPrediction, actorId);
+      const deltaX = previous.x - next.x;
+      const deltaZ = previous.z - next.z;
+      const distance = Math.hypot(deltaX, deltaZ);
+      const offset = this.predictionCorrectionOffsets[actorId];
+      offset.x += deltaX;
+      offset.z += deltaZ;
       this.lastCorrectionDistance = Math.max(this.lastCorrectionDistance, distance);
       this.maxCorrectionDistance = Math.max(this.maxCorrectionDistance, distance);
     }
   }
 
-  private stabilizeOwnedPositions(snapshot: GameSnapshot, nowMs: number): void {
+  private applyPredictionCorrection(snapshot: GameSnapshot, nowMs: number): void {
     const deltaSeconds = Math.max(0, nowMs - this.lastSnapshotAtMs) / 1000;
     for (const actorId of actorsForSeat(this.seat)) {
-      const current = actorPosition(this.renderSnapshot, actorId);
-      const target = actorPosition(snapshot, actorId);
-      const deltaX = target.x - current.x;
-      const deltaZ = target.z - current.z;
-      const distance = Math.hypot(deltaX, deltaZ);
-      const movementSpeed = predictedMovementSpeed(snapshot, actorId);
-      const maximumDistance = (movementSpeed + MAX_CORRECTION_SPEED) * deltaSeconds;
-      if (distance <= maximumDistance || distance <= 0.000001) continue;
-      const scale = maximumDistance / distance;
-      target.x = current.x + deltaX * scale;
-      target.z = current.z + deltaZ * scale;
+      const offset = this.predictionCorrectionOffsets[actorId];
+      const offsetLength = Math.hypot(offset.x, offset.z);
+      if (offsetLength > 0.000001) {
+        const remaining = Math.max(0, offsetLength - MAX_CORRECTION_SPEED * deltaSeconds);
+        const scale = remaining / offsetLength;
+        offset.x *= scale;
+        offset.z *= scale;
+      } else {
+        offset.x = 0;
+        offset.z = 0;
+      }
+      const position = actorPosition(snapshot, actorId);
+      position.x += offset.x;
+      position.z += offset.z;
+    }
+  }
+
+  private clearPredictionCorrection(): void {
+    for (const actorId of ['guard1', 'guard2', 'kid'] as const) {
+      this.predictionCorrectionOffsets[actorId].x = 0;
+      this.predictionCorrectionOffsets[actorId].z = 0;
     }
   }
 
@@ -355,6 +406,15 @@ export class OnlineGameDriver implements GameDriver {
     this.lastSentActors = cloneHeldActors(actors);
     this.socket.emit('input-frame', frame);
   }
+}
+
+function cloneCommands(commands: GameCommands): GameCommands {
+  return {
+    guard1: { ...commands.guard1 },
+    guard2: { ...commands.guard2 },
+    kid: { ...commands.kid },
+    restartPressed: commands.restartPressed,
+  };
 }
 
 function cloneHeldActors(
@@ -409,15 +469,4 @@ function sameHeldCommands(
 function actorPosition(snapshot: GameSnapshot, actorId: ActorId): Vec2 {
   if (actorId === 'kid') return snapshot.kid.position;
   return snapshot.guards[actorId === 'guard1' ? 0 : 1].position;
-}
-
-function predictedMovementSpeed(snapshot: GameSnapshot, actorId: ActorId): number {
-  if (actorId === 'kid') {
-    return snapshot.kid.movementAmount > 0.01 ? snapshot.kid.speed : 0;
-  }
-  const guard = snapshot.guards[actorId === 'guard1' ? 0 : 1];
-  if (guard.state === 'Pounce') return GAME_CONFIG.pounceSpeed;
-  if (guard.movementAmount <= 0.01) return 0;
-  const tuning = defaultMovementTuning();
-  return tuning.baseSpeed * tuning.guardSpeedMultiplier;
 }

@@ -125,6 +125,8 @@ test.describe('desktop browser multiplayer demo', () => {
       .toBeLessThan(100);
     expect(diagnostics?.predictionReplayTicks ?? 0, 'owned input should be replayed ahead of authority')
       .toBeGreaterThan(0);
+    expect(diagnostics?.predictionMode).toBe('checkpoint-replay');
+    expect(diagnostics?.predictionTick ?? 0).toBeGreaterThanOrEqual(diagnostics?.serverTick ?? 0);
     expect(diagnostics?.bufferedStateFrames ?? 0).toBeGreaterThanOrEqual(3);
     expect(diagnostics?.simulatedStateLatencyMs).toBe(120);
     expect(diagnostics?.simulatedStateJitterMs).toBe(30);

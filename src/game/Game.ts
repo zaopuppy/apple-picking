@@ -27,6 +27,7 @@ import { deliveryZonesForMap, type OrchardMap } from './maps/OrchardMap';
 import {
   createEmptyCommands,
   type GameCommands,
+  type GameSnapshot,
   type SimulationStep,
 } from './types';
 
@@ -113,6 +114,7 @@ export class Game {
   private pausedForScreenshot = false;
   private reducedMotion = false;
   private renderTime = 0;
+  private presentationSnapshot: GameSnapshot | null = null;
   private debugPanel: DebugPanel | null = null;
   private debugUiHidden = false;
   private cameraPointerMode = false;
@@ -271,7 +273,9 @@ export class Game {
   }
 
   private syncPresentation(): void {
-    const snapshot = this.driver.getSnapshot();
+    const interpolationAlpha = Math.max(0, Math.min(1, this.accumulator / FIXED_DELTA_SECONDS));
+    const snapshot = this.driver.getSnapshot(interpolationAlpha);
+    this.presentationSnapshot = snapshot;
     const presentationTime = this.reducedMotion ? snapshot.elapsedSeconds : this.renderTime;
     this.view.sync(snapshot, presentationTime, this.reducedMotion);
     this.hud.update(snapshot, this.fps);
@@ -589,7 +593,7 @@ export class Game {
         this.publishDiagnostics();
         return result;
       },
-      getSnapshot: () => this.driver.getSnapshot(),
+      getSnapshot: () => this.presentationSnapshot ?? this.driver.getSnapshot(),
       setPausedForScreenshot: (paused: boolean) => {
         this.pausedForScreenshot = paused;
       },
@@ -638,7 +642,7 @@ export class Game {
   }
 
   private publishDiagnostics(): void {
-    const snapshot = this.driver.getSnapshot();
+    const snapshot = this.presentationSnapshot ?? this.driver.getSnapshot();
     const info = this.renderer.info;
     const groundAppleCount = snapshot.apples.filter((apple) => apple.state === 'Ground').length;
     const looseAppleCount = snapshot.apples.filter((apple) => apple.state !== 'Carried').length;

@@ -1,12 +1,18 @@
 import { expect, test } from '@playwright/test';
 import { GameSimulation } from '../src/game/GameSimulation';
-import { DEFAULT_MOVEMENT_TUNING } from '../src/game/config';
 import { SWEET_ORCHARD_ISLAND_MAP } from '../src/game/maps/IslandTourMap';
 import { createEmptyCommands } from '../src/game/types';
 import {
-  applyLocalActorPrediction,
+  applyOwnedPrediction,
+  createPredictionSimulation,
+  replayFromAuthoritativeFrame,
   type LocalInputSample,
-} from '../src/net/LocalActorPrediction';
+} from '../src/net/CheckpointPrediction';
+import {
+  BUILD_VERSION,
+  PROTOCOL_VERSION,
+  type ServerStateFrame,
+} from '../src/net/protocol';
 import { SnapshotTimeline, cloneSnapshot } from '../src/net/SnapshotInterpolation';
 
 test.describe('online presentation smoothing', () => {
@@ -39,11 +45,24 @@ test.describe('online presentation smoothing', () => {
     expect(midpoint.renderTick).toBeLessThan(end.renderTick);
   });
 
-  test('owned actors replay unacknowledged local input ahead of authority', () => {
+  test('owned actors replay unacknowledged input from a full simulation checkpoint', () => {
     const simulation = new GameSimulation(SWEET_ORCHARD_ISLAND_MAP);
     simulation.loadScenario('active-play');
     const authority = simulation.getSnapshot();
-    const rendered = cloneSnapshot(authority);
+    const frame: ServerStateFrame = {
+      protocolVersion: PROTOCOL_VERSION,
+      buildVersion: BUILD_VERSION,
+      roomCode: 'ABC234',
+      matchId: 'match-checkpoint-test',
+      serverTick: authority.tick,
+      sentAtMs: 0,
+      lastProcessedInputSeqByPlayer: {},
+      lastAppliedClientTickByPlayer: {},
+      appliedCommands: createEmptyCommands(),
+      checkpoint: simulation.createCheckpoint(),
+      snapshot: authority,
+      events: [],
+    };
     const history: LocalInputSample[] = Array.from({ length: 3 }, (_, index) => ({
       clientTick: index + 1,
       actors: {
@@ -62,14 +81,18 @@ test.describe('online presentation smoothing', () => {
       },
     }));
 
-    const result = applyLocalActorPrediction(
-      rendered,
-      authority,
+    const predictionSimulation = createPredictionSimulation(SWEET_ORCHARD_ISLAND_MAP, frame);
+    const result = replayFromAuthoritativeFrame(
+      predictionSimulation,
+      frame,
       'guards',
-      SWEET_ORCHARD_ISLAND_MAP,
-      DEFAULT_MOVEMENT_TUNING,
       history,
       0,
+    );
+    const rendered = applyOwnedPrediction(
+      cloneSnapshot(authority),
+      result.snapshot,
+      'guards',
     );
 
     expect(result.replayedTicks).toBe(3);

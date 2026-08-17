@@ -9,7 +9,7 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc && vite build",
     "preview": "concurrently --kill-others --names web,rooms \"npm:preview:web\" \"npm:server\"",
-    "preview:web": "vite preview --host 127.0.0.1",
+    "preview:web": "vite preview",
     "server": "tsx server/index.ts",
     "test": "playwright test",
     "verify:visual": "playwright test tests/visual.spec.ts",

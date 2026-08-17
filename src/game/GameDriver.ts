@@ -12,7 +12,7 @@ export type GameDriverMode = 'local' | 'online';
 export interface GameDriver {
   readonly mode: GameDriverMode;
   tick(commands: GameCommands): readonly SimulationStep[];
-  getSnapshot(): GameSnapshot;
+  getSnapshot(interpolationAlpha?: number): GameSnapshot;
   getMovementTuning(): Readonly<MovementTuning>;
   setMovementTuning(tuning: MovementTuning): void;
   seed(value: number): void;
