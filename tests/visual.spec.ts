@@ -904,6 +904,25 @@ test('KayKit Knight guards and Rogue kid load once and map key states independen
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.guard2))
     .toBe('Hit_A');
 
+  const recoveryPoses = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+    hooks.setPausedForScreenshot(true);
+    hooks.scenario('guard-recover');
+    const prone = window.__THREE_GAME_DIAGNOSTICS__?.characters.guardDetails.guard1 ?? null;
+    hooks.step({}, 13);
+    const gettingUp = window.__THREE_GAME_DIAGNOSTICS__?.characters.guardDetails.guard1 ?? null;
+    hooks.setPausedForScreenshot(false);
+    return { prone, gettingUp };
+  });
+  expect(recoveryPoses.prone?.recoveryPhase).toBe('prone');
+  expect(recoveryPoses.prone?.posturePitch).toBeGreaterThan(1.35);
+  expect(recoveryPoses.prone?.height).toBeGreaterThan(0.12);
+  expect(recoveryPoses.gettingUp?.recoveryPhase).toBe('getting-up');
+  expect(recoveryPoses.gettingUp?.posturePitch).toBeLessThan(
+    recoveryPoses.prone?.posturePitch ?? 0,
+  );
+  expect(recoveryPoses.gettingUp?.height).toBeLessThan(recoveryPoses.prone?.height ?? 0);
+
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.scenario('picking'));
   await expect
     .poll(async () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.characters.currentAnimations.kid))

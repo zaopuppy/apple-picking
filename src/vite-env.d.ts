@@ -129,6 +129,20 @@ declare global {
         guard2: string | null;
         kid: string | null;
       };
+      guardDetails: {
+        guard1: {
+          recoveryPhase: 'landing' | 'prone' | 'getting-up' | null;
+          posturePitch: number;
+          height: number;
+          animationPaused: boolean | null;
+        } | null;
+        guard2: {
+          recoveryPhase: 'landing' | 'prone' | 'getting-up' | null;
+          posturePitch: number;
+          height: number;
+          animationPaused: boolean | null;
+        } | null;
+      };
       sockets: string[];
       kidSockets: string[];
       kidDetails: {
@@ -161,6 +175,11 @@ declare global {
     };
     camera: {
       controlMode: 'manual' | 'mouse';
+      followSeat: 'guards' | 'kid' | null;
+      followActive: boolean;
+      followDesiredZoom: number | null;
+      followFrameOccupancy: number | null;
+      followSubjectCount: number;
       projectionMode: 'orthographic' | 'weak-perspective';
       perspectiveFov: number | null;
       distance: number;

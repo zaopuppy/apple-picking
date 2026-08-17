@@ -313,6 +313,15 @@ export class GameSimulation {
         this.guards[1].position = { x: 10, z: -7 };
         this.guards[1].previousPosition = copy(this.guards[1].position);
         return;
+      case 'pounce-danger':
+        this.kid.position = { x: 0, z: 0 };
+        this.kid.previousPosition = copy(this.kid.position);
+        this.guards[0].position = { x: 0, z: 1.1 };
+        this.guards[0].previousPosition = copy(this.guards[0].position);
+        this.guards[0].facing = { x: 0, z: -1 };
+        this.guards[1].position = { x: 10, z: -7 };
+        this.guards[1].previousPosition = copy(this.guards[1].position);
+        return;
       case 'carrying':
         this.moveGuardsAway();
         this.kid.position = { x: 0, z: 0 };
@@ -349,7 +358,7 @@ export class GameSimulation {
         this.moveGuardsAway();
         this.guards[0].position = { x: -1.4, z: 0 };
         this.guards[0].previousPosition = copy(this.guards[0].position);
-        this.guards[0].facing = { x: 0, z: -1 };
+        this.guards[0].facing = { x: 1, z: 0 };
         this.guards[0].state = 'Recover';
         this.guards[0].stateTicks = Math.ceil(GAME_CONFIG.recoverTicks * 0.72);
         this.kid.position = { x: 1.2, z: -0.7 };
@@ -680,11 +689,27 @@ export class GameSimulation {
   private checkCapture(): boolean {
     if (this.kid.state === 'Hit' || this.kid.state === 'Invincible') return false;
     const captureRadius = GAME_CONFIG.guardRadius + GAME_CONFIG.kidRadius;
-    const captor = this.guards.find((guard) =>
-      (guard.state === 'Move' || guard.state === 'Pounce') &&
-      movingPointDistanceSquared(guard, this.kid) <= captureRadius * captureRadius,
-    );
-    if (!captor) return false;
+    const capture = this.guards
+      .map((guard) => ({
+        guard,
+        hitTime: guard.state === 'Move' || guard.state === 'Pounce'
+          ? movingPointFirstOverlapTime(guard, this.kid, captureRadius)
+          : null,
+      }))
+      .find(({ hitTime }) => hitTime !== null);
+    if (!capture || capture.hitTime === null) return false;
+    const captor = capture.guard;
+
+    if (captor.state === 'Pounce') {
+      captor.position.x = captor.previousPosition.x +
+        (captor.position.x - captor.previousPosition.x) * capture.hitTime;
+      captor.position.z = captor.previousPosition.z +
+        (captor.position.z - captor.previousPosition.z) * capture.hitTime;
+      captor.state = 'Recover';
+      // advanceGuardState runs later in this tick. The extra tick preserves the
+      // configured 42-tick recovery window from the capture snapshot onward.
+      captor.stateTicks = GAME_CONFIG.recoverTicks + 1;
+    }
 
     this.catches += 1;
     this.cancelPicking();
@@ -994,6 +1019,30 @@ function movingPointDistanceSquared(
   const x = start.x + delta.x * t;
   const z = start.z + delta.z * t;
   return x * x + z * z;
+}
+
+function movingPointFirstOverlapTime(
+  first: { previousPosition: Vec2; position: Vec2 },
+  second: { previousPosition: Vec2; position: Vec2 },
+  radius: number,
+): number | null {
+  const startX = first.previousPosition.x - second.previousPosition.x;
+  const startZ = first.previousPosition.z - second.previousPosition.z;
+  const radiusSq = radius * radius;
+  const c = startX * startX + startZ * startZ - radiusSq;
+  if (c <= 0) return 0;
+
+  const deltaX = (first.position.x - first.previousPosition.x) -
+    (second.position.x - second.previousPosition.x);
+  const deltaZ = (first.position.z - first.previousPosition.z) -
+    (second.position.z - second.previousPosition.z);
+  const a = deltaX * deltaX + deltaZ * deltaZ;
+  if (a <= 0.000001) return null;
+  const b = 2 * (startX * deltaX + startZ * deltaZ);
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant < 0) return null;
+  const hitTime = (-b - Math.sqrt(discriminant)) / (2 * a);
+  return hitTime >= 0 && hitTime <= 1 ? hitTime : null;
 }
 
 function movingCirclesOverlap(first: GuardModel, second: GuardModel, radius: number): boolean {

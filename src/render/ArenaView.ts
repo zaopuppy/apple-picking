@@ -31,6 +31,7 @@ import {
   disposeImportedGuardView,
   loadImportedGuardView,
   syncImportedGuardView,
+  type GuardRecoveryPhase,
   type ImportedGuardId,
   type ImportedGuardView,
 } from './ImportedGuardView';
@@ -150,6 +151,12 @@ export type CharacterAssetDiagnostics = {
   animations: string[];
   kidAnimations: string[];
   currentAnimations: Record<ImportedGuardId | 'kid', string | null>;
+  guardDetails: Record<ImportedGuardId, {
+    recoveryPhase: GuardRecoveryPhase | null;
+    posturePitch: number;
+    height: number;
+    animationPaused: boolean | null;
+  } | null>;
   sockets: string[];
   kidSockets: string[];
   kidDetails: {
@@ -258,6 +265,7 @@ export class ArenaView {
     animations: [],
     kidAnimations: [],
     currentAnimations: { guard1: null, guard2: null, kid: null },
+    guardDetails: { guard1: null, guard2: null },
     sockets: [],
     kidSockets: [],
     kidDetails: null,
@@ -418,6 +426,14 @@ export class ArenaView {
       if (imported) {
         syncImportedGuardView(imported, guard, renderTime, reducedMotion);
         this.characterDiagnostics.currentAnimations[guard.id] = imported.currentAnimation;
+        this.characterDiagnostics.guardDetails[guard.id] = {
+          recoveryPhase: imported.recoveryPhase,
+          posturePitch: imported.motionRoot.rotation.x,
+          height: imported.motionRoot.position.y,
+          animationPaused: imported.currentAnimation
+            ? imported.actions.get(imported.currentAnimation)?.paused ?? null
+            : null,
+        };
       }
     }
     if (this.importedKidView) {
@@ -466,6 +482,14 @@ export class ArenaView {
       animations: [...this.characterDiagnostics.animations],
       kidAnimations: [...this.characterDiagnostics.kidAnimations],
       currentAnimations: { ...this.characterDiagnostics.currentAnimations },
+      guardDetails: {
+        guard1: this.characterDiagnostics.guardDetails.guard1
+          ? { ...this.characterDiagnostics.guardDetails.guard1 }
+          : null,
+        guard2: this.characterDiagnostics.guardDetails.guard2
+          ? { ...this.characterDiagnostics.guardDetails.guard2 }
+          : null,
+      },
       sockets: [...this.characterDiagnostics.sockets],
       kidSockets: [...this.characterDiagnostics.kidSockets],
       kidDetails: this.characterDiagnostics.kidDetails

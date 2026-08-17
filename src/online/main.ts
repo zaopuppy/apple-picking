@@ -204,7 +204,11 @@ function applySession(session: RoomSession): void {
     driver.replaceSession(session);
   } else {
     driver = new OnlineGameDriver(socket, session);
-    game = new Game(canvas, { map: session.map, driver });
+    game = new Game(canvas, {
+      map: session.map,
+      driver,
+      cameraFollowSeat: session.seat,
+    });
     game.start();
   }
   setNetworkState('online', '权威房间已连接', session.room.roomCode);

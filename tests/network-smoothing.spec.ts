@@ -13,7 +13,11 @@ import {
   PROTOCOL_VERSION,
   type ServerStateFrame,
 } from '../src/net/protocol';
-import { SnapshotTimeline, cloneSnapshot } from '../src/net/SnapshotInterpolation';
+import {
+  SnapshotTimeline,
+  cloneSnapshot,
+  interpolateSnapshots,
+} from '../src/net/SnapshotInterpolation';
 
 test.describe('online presentation smoothing', () => {
   test.beforeEach(({}, testInfo) => {
@@ -43,6 +47,26 @@ test.describe('online presentation smoothing', () => {
     expect(end.snapshot.guards[0].position.x).toBeCloseTo(endX, 6);
     expect(start.renderTick).toBeLessThan(midpoint.renderTick);
     expect(midpoint.renderTick).toBeLessThan(end.renderTick);
+  });
+
+  test('guard state ticks do not interpolate across a discrete recovery transition', () => {
+    const simulation = new GameSimulation(SWEET_ORCHARD_ISLAND_MAP);
+    simulation.loadScenario('active-play');
+    const from = simulation.getSnapshot();
+    from.guards[0].state = 'Pounce';
+    from.guards[0].stateTicks = 1;
+    const to = cloneSnapshot(from);
+    to.tick += 3;
+    to.guards[0].state = 'Recover';
+    to.guards[0].stateTicks = 42;
+
+    const midpoint = interpolateSnapshots(from, to, 0.5);
+    const transitioned = interpolateSnapshots(from, to, 1);
+
+    expect(midpoint.guards[0].state).toBe('Pounce');
+    expect(midpoint.guards[0].stateTicks).toBe(1);
+    expect(transitioned.guards[0].state).toBe('Recover');
+    expect(transitioned.guards[0].stateTicks).toBe(42);
   });
 
   test('owned actors replay unacknowledged input from a full simulation checkpoint', () => {

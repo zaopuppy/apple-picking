@@ -12,6 +12,10 @@ import {
 } from '../core/Renderer';
 import { ArenaView } from '../render/ArenaView';
 import { AudioSystem } from '../systems/AudioSystem';
+import {
+  orthographicFrameOccupancy,
+  resolveOrthographicFollowZoom,
+} from '../systems/CameraFollow';
 import type { DebugPanel, DebugTuning } from '../systems/DebugPanel';
 import { Hud } from '../systems/Hud';
 import { loadActiveMap } from '../systems/MapStorage';
@@ -38,12 +42,21 @@ const DEFAULT_LANDSCAPE_CAMERA_HEIGHT = 117.5;
 const ISLAND_LANDSCAPE_CAMERA_ANGLE = 40;
 const ISLAND_LANDSCAPE_CAMERA_HEIGHT = 112;
 const ISLAND_CAMERA_ZOOM = 0.96;
+const ONLINE_CAMERA_MAX_ZOOM = 1.4;
+const ONLINE_CAMERA_SAFE_FRAME = 0.78;
+const ONLINE_CAMERA_SUBJECT_PADDING = 3;
+const ONLINE_CAMERA_POSITION_LAG_SECONDS = 0.16;
+const ONLINE_CAMERA_ZOOM_OUT_LAG_SECONDS = 0.08;
+const ONLINE_CAMERA_ZOOM_IN_LAG_SECONDS = 0.42;
 const DEFAULT_LANDSCAPE_CAMERA_DISTANCE = roundCameraValue(DEFAULT_LANDSCAPE_CAMERA_HEIGHT *
   Math.tan(THREE.MathUtils.degToRad(DEFAULT_LANDSCAPE_CAMERA_ANGLE)));
+
+export type CameraFollowSeat = 'guards' | 'kid';
 
 export type GameOptions = {
   map?: OrchardMap;
   driver?: GameDriver;
+  cameraFollowSeat?: CameraFollowSeat;
 };
 
 const DEFAULT_DEBUG_TUNING: Readonly<DebugTuning> = {
@@ -81,12 +94,19 @@ export class Game {
   private readonly map: OrchardMap;
   private readonly islandWorld: boolean;
   private readonly driver: GameDriver;
+  private readonly cameraFollowSeat: CameraFollowSeat | null;
   private readonly hemisphere = new THREE.HemisphereLight('#fff7db', '#55743d', 2.1);
   private readonly sun = new THREE.DirectionalLight('#fff0bd', 3.1);
   private readonly debugTuning: DebugTuning = { ...DEFAULT_DEBUG_TUNING };
   private readonly cameraLookTarget = new THREE.Vector3();
   private readonly cameraDirection = new THREE.Vector3();
   private readonly projectionDirection = new THREE.Vector3();
+  private readonly cameraFollowTarget = new THREE.Vector3();
+  private readonly cameraFollowDesiredTarget = new THREE.Vector3();
+  private readonly cameraFollowOffset = new THREE.Vector3();
+  private readonly cameraFollowRight = new THREE.Vector3();
+  private readonly cameraFollowUp = new THREE.Vector3();
+  private readonly cameraFollowSubjectOffset = new THREE.Vector3();
   private readonly view: ArenaView;
   private readonly audio = new AudioSystem();
   private readonly hud = new Hud();
@@ -118,6 +138,10 @@ export class Game {
   private debugPanel: DebugPanel | null = null;
   private debugUiHidden = false;
   private cameraPointerMode = false;
+  private cameraFollowInitialized = false;
+  private cameraFollowDesiredZoom: number | null = null;
+  private cameraFollowFrameOccupancy: number | null = null;
+  private cameraFollowSubjectCount = 0;
   private activeProjection: CameraProjection = DEFAULT_DEBUG_TUNING.cameraProjection;
   private disposed = false;
 
@@ -144,6 +168,9 @@ export class Game {
     this.islandWorld = isIslandTourMap(this.map);
     if (this.islandWorld) this.configureIslandCamera();
     this.driver = options.driver ?? new LocalGameDriver(new GameSimulation(this.map));
+    this.cameraFollowSeat = this.driver.mode === 'online'
+      ? options.cameraFollowSeat ?? null
+      : null;
     this.renderer = createRenderer(canvas);
     if (this.islandWorld) {
       this.renderer.toneMappingExposure = 1.01;
@@ -175,6 +202,7 @@ export class Game {
     this.updateCameraComposition();
     this.syncCameraControlUi();
     this.syncPresentation();
+    this.updateCameraFollow(0, true);
     this.installTestHooks();
     this.publishDiagnostics();
     if (import.meta.env.DEV && this.driver.mode === 'local') void this.installDebugPanel();
@@ -241,13 +269,15 @@ export class Game {
   private update(delta: number, elapsed: number, fps: number): void {
     this.frame += 1;
     this.fps = fps;
-    if (resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr)) {
+    const resized = resizeRenderer(this.renderer, this.camera, GAME_CONFIG.maxDpr);
+    if (resized) {
       this.updateCameraComposition();
     }
     if (this.cameraPointerMode) this.cameraControls.update();
     this.renderTime = elapsed;
     if (this.pausedForScreenshot) {
       this.syncPresentation();
+      this.updateCameraFollow(delta, resized);
       this.publishDiagnostics();
       return;
     }
@@ -261,6 +291,7 @@ export class Game {
       firstStep = false;
     }
     this.syncPresentation();
+    this.updateCameraFollow(delta, resized);
     this.publishDiagnostics();
   }
 
@@ -322,6 +353,94 @@ export class Game {
     );
   }
 
+  private updateCameraFollow(delta: number, snap: boolean): void {
+    const snapshot = this.presentationSnapshot;
+    if (!snapshot || !this.cameraFollowSeat || this.cameraPointerMode) return;
+
+    const subjects = this.cameraFollowSeat === 'kid'
+      ? [snapshot.kid.position]
+      : snapshot.guards.map((guard) => guard.position);
+    this.cameraFollowSubjectCount = subjects.length;
+    const targetX = subjects.reduce((total, subject) => total + subject.x, 0) / subjects.length;
+    const targetZ = subjects.reduce((total, subject) => total + subject.z, 0) / subjects.length;
+    this.cameraFollowDesiredTarget.set(targetX, 0, targetZ);
+
+    const snapPosition = snap || !this.cameraFollowInitialized;
+    if (snapPosition) {
+      this.cameraFollowTarget.copy(this.cameraFollowDesiredTarget);
+      this.cameraFollowInitialized = true;
+    } else {
+      const positionFactor = exponentialFollowFactor(delta, ONLINE_CAMERA_POSITION_LAG_SECONDS);
+      this.cameraFollowTarget.lerp(this.cameraFollowDesiredTarget, positionFactor);
+    }
+
+    this.cameraFollowOffset.copy(this.cameraFollowTarget).sub(this.cameraLookTarget);
+    this.camera.position.add(this.cameraFollowOffset);
+    this.cameraLookTarget.copy(this.cameraFollowTarget);
+    this.camera.lookAt(this.cameraLookTarget);
+    this.camera.updateMatrixWorld();
+
+    const minimumZoom = this.islandWorld ? ISLAND_CAMERA_ZOOM : DEFAULT_DEBUG_TUNING.cameraZoom;
+    let desiredZoom = ONLINE_CAMERA_MAX_ZOOM;
+    let horizontalExtent = 0;
+    let verticalExtent = 0;
+    let halfWidth = 0;
+    let halfHeight = 0;
+    if (this.camera instanceof THREE.OrthographicCamera) {
+      this.cameraFollowRight.setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+      this.cameraFollowUp.setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();
+      horizontalExtent = ONLINE_CAMERA_SUBJECT_PADDING;
+      verticalExtent = ONLINE_CAMERA_SUBJECT_PADDING;
+      for (const subject of subjects) {
+        this.cameraFollowSubjectOffset.set(
+          subject.x - this.cameraLookTarget.x,
+          -this.cameraLookTarget.y,
+          subject.z - this.cameraLookTarget.z,
+        );
+        horizontalExtent = Math.max(
+          horizontalExtent,
+          Math.abs(this.cameraFollowSubjectOffset.dot(this.cameraFollowRight)) +
+            ONLINE_CAMERA_SUBJECT_PADDING,
+        );
+        verticalExtent = Math.max(
+          verticalExtent,
+          Math.abs(this.cameraFollowSubjectOffset.dot(this.cameraFollowUp)) +
+            ONLINE_CAMERA_SUBJECT_PADDING,
+        );
+      }
+      halfWidth = (this.camera.right - this.camera.left) / 2;
+      halfHeight = (this.camera.top - this.camera.bottom) / 2;
+      desiredZoom = resolveOrthographicFollowZoom(
+        { halfWidth, halfHeight, horizontalExtent, verticalExtent },
+        minimumZoom,
+        ONLINE_CAMERA_MAX_ZOOM,
+        ONLINE_CAMERA_SAFE_FRAME,
+      );
+    }
+    desiredZoom = THREE.MathUtils.clamp(desiredZoom, minimumZoom, ONLINE_CAMERA_MAX_ZOOM);
+    this.cameraFollowDesiredZoom = desiredZoom;
+
+    if (snapPosition) {
+      this.camera.zoom = desiredZoom;
+    } else {
+      const zoomLag = desiredZoom < this.camera.zoom
+        ? ONLINE_CAMERA_ZOOM_OUT_LAG_SECONDS
+        : ONLINE_CAMERA_ZOOM_IN_LAG_SECONDS;
+      this.camera.zoom = THREE.MathUtils.lerp(
+        this.camera.zoom,
+        desiredZoom,
+        exponentialFollowFactor(delta, zoomLag),
+      );
+    }
+    this.camera.updateProjectionMatrix();
+    this.cameraFollowFrameOccupancy = this.camera instanceof THREE.OrthographicCamera
+      ? orthographicFrameOccupancy(
+        { halfWidth, halfHeight, horizontalExtent, verticalExtent },
+        this.camera.zoom,
+      )
+      : null;
+  }
+
   private configureCameraControls(
     controls: OrbitControls,
     changeHandler: () => void,
@@ -366,9 +485,24 @@ export class Game {
       this.cameraControls.update();
     }
     this.syncCameraTuningFromControls();
+    if (!enabled && this.cameraFollowSeat) {
+      this.restoreCameraFollowComposition();
+      this.updateCameraFollow(0, true);
+    }
     this.debugPanel?.setCameraPointerMode(enabled);
     this.syncCameraControlUi();
     this.publishDiagnostics();
+  }
+
+  private restoreCameraFollowComposition(): void {
+    if (this.islandWorld) {
+      this.debugTuning.cameraPositionX = 0;
+      this.debugTuning.cameraTargetX = 0;
+      this.debugTuning.cameraTargetY = 0;
+      this.debugTuning.cameraTargetZ = 0;
+      this.configureIslandCamera();
+    }
+    this.updateCameraComposition();
   }
 
   private syncCameraControlUi(): void {
@@ -696,6 +830,11 @@ export class Game {
       },
       camera: {
         controlMode: this.cameraPointerMode ? 'mouse' : 'manual',
+        followSeat: this.cameraFollowSeat,
+        followActive: this.cameraFollowSeat !== null && !this.cameraPointerMode,
+        followDesiredZoom: this.cameraFollowDesiredZoom,
+        followFrameOccupancy: this.cameraFollowFrameOccupancy,
+        followSubjectCount: this.cameraFollowSubjectCount,
         projectionMode: this.activeProjection,
         perspectiveFov: this.activeProjection === 'weak-perspective'
           ? this.perspectiveCamera.fov
@@ -730,6 +869,10 @@ export class Game {
 
 function roundCameraValue(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function exponentialFollowFactor(delta: number, lagSeconds: number): number {
+  return 1 - Math.exp(-Math.max(0, delta) / Math.max(0.001, lagSeconds));
 }
 
 function getElement<T extends HTMLElement>(selector: string): T {

@@ -149,11 +149,14 @@ export function interpolateSnapshots(
 
 function interpolateGuard(from: GuardSnapshot, to: GuardSnapshot, alpha: number): GuardSnapshot {
   const discrete = alpha >= 1 ? to : from;
+  const stateTicks = from.state === to.state
+    ? Math.round(lerp(from.stateTicks, to.stateTicks, alpha))
+    : discrete.stateTicks;
   return {
     ...discrete,
     position: lerpVec2(from.position, to.position, alpha),
     facing: normalizedLerp(from.facing, to.facing, alpha),
-    stateTicks: Math.max(0, Math.round(lerp(from.stateTicks, to.stateTicks, alpha))),
+    stateTicks: Math.max(0, stateTicks),
     cooldownTicks: Math.max(0, Math.round(lerp(from.cooldownTicks, to.cooldownTicks, alpha))),
     movementAmount: clamp(lerp(from.movementAmount, to.movementAmount, alpha), 0, 1),
   };

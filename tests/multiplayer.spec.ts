@@ -1,8 +1,27 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import {
+  orthographicFrameOccupancy,
+  resolveOrthographicFollowZoom,
+} from '../src/systems/CameraFollow';
 
 test.describe('desktop browser multiplayer demo', () => {
   test.beforeEach(({}, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', 'The first online slice targets desktop Chrome.');
+  });
+
+  test('guard framing zooms out to the safe frame without exceeding the full-map limit', () => {
+    const separatedGuards = {
+      halfWidth: 53.76,
+      halfHeight: 30.24,
+      horizontalExtent: 39,
+      verticalExtent: 3,
+    };
+    const separatedZoom = resolveOrthographicFollowZoom(separatedGuards, 0.96, 1.4, 0.78);
+    expect(separatedZoom).toBeCloseTo(1.0752, 4);
+    expect(orthographicFrameOccupancy(separatedGuards, separatedZoom)).toBeCloseTo(0.78, 5);
+
+    const extremeSeparation = { ...separatedGuards, horizontalExtent: 50 };
+    expect(resolveOrthographicFollowZoom(extremeSeparation, 0.96, 1.4, 0.78)).toBe(0.96);
   });
 
   test('two tabs share one authoritative match and reject an unowned actor command', async ({ page, context }, testInfo) => {
@@ -141,6 +160,70 @@ test.describe('desktop browser multiplayer demo', () => {
     await expectSnapshotsToConverge(page, kidPage);
     await kidPage.close();
   });
+
+  test('each online seat follows its owned actors and keeps both guards in a safe frame', async ({ page, context }) => {
+    test.setTimeout(45_000);
+    const { kidPage } = await createTwoPlayerRoom(page, context);
+    await startMatch(page, kidPage);
+
+    const initialGuards = await snapshotOf(page);
+    const initialGuardMidpoint = midpointOfGuards(initialGuards);
+    const initialGuardCamera = await cameraOf(page);
+    const initialKidCamera = await cameraOf(kidPage);
+    expect(initialGuardCamera.followSeat).toBe('guards');
+    expect(initialGuardCamera.followSubjectCount).toBe(2);
+    expect(initialGuardCamera.followActive).toBe(true);
+    expect(initialGuardCamera.zoom).toBeCloseTo(1.4, 2);
+    expect(initialGuardCamera.targetX).toBeCloseTo(initialGuardMidpoint.x, 1);
+    expect(initialGuardCamera.targetZ).toBeCloseTo(initialGuardMidpoint.z, 1);
+    expect(initialKidCamera.followSeat).toBe('kid');
+    expect(initialKidCamera.followSubjectCount).toBe(1);
+    expect(initialKidCamera.followActive).toBe(true);
+    expect(initialKidCamera.zoom).toBeCloseTo(1.4, 2);
+    expect(initialKidCamera.targetX).toBeCloseTo(initialGuards.kid.position.x, 1);
+    expect(initialKidCamera.targetZ).toBeCloseTo(initialGuards.kid.position.z, 1);
+
+    const guardTargetBeforeKidMoves = {
+      x: initialGuardCamera.targetX,
+      z: initialGuardCamera.targetZ,
+    };
+    await kidPage.keyboard.down('ArrowRight');
+    await kidPage.waitForTimeout(450);
+    await kidPage.keyboard.up('ArrowRight');
+    await expect.poll(async () => (await cameraOf(kidPage)).targetX)
+      .toBeGreaterThan(initialKidCamera.targetX + 0.5);
+    const guardCameraAfterKidMoves = await cameraOf(page);
+    expect(guardCameraAfterKidMoves.targetX).toBeCloseTo(guardTargetBeforeKidMoves.x, 1);
+    expect(guardCameraAfterKidMoves.targetZ).toBeCloseTo(guardTargetBeforeKidMoves.z, 1);
+
+    await page.locator('#camera-mode-toggle').click();
+    const freeCamera = await cameraOf(page);
+    expect(freeCamera.followActive).toBe(false);
+    await page.keyboard.down('f');
+    await page.waitForTimeout(450);
+    await page.keyboard.up('f');
+    const freeCameraAfterMovement = await cameraOf(page);
+    expect(freeCameraAfterMovement.targetX).toBeCloseTo(freeCamera.targetX, 2);
+    expect(freeCameraAfterMovement.targetZ).toBeCloseTo(freeCamera.targetZ, 2);
+
+    await page.locator('#camera-mode-toggle').click();
+    const restoredSnapshot = await snapshotOf(page);
+    const restoredMidpoint = midpointOfGuards(restoredSnapshot);
+    const restoredCamera = await cameraOf(page);
+    expect(restoredCamera.followActive).toBe(true);
+    expect(restoredCamera.targetX).toBeCloseTo(restoredMidpoint.x, 1);
+    expect(restoredCamera.targetZ).toBeCloseTo(restoredMidpoint.z, 1);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(async () => (await cameraOf(page)).portraitLayout).toBe(true);
+    const portraitSnapshot = await snapshotOf(page);
+    const portraitMidpoint = midpointOfGuards(portraitSnapshot);
+    const portraitCamera = await cameraOf(page);
+    expect(portraitCamera.targetX).toBeCloseTo(portraitMidpoint.x, 2);
+    expect(portraitCamera.targetZ).toBeCloseTo(portraitMidpoint.z, 2);
+    expect(portraitCamera.followFrameOccupancy ?? 1).toBeLessThanOrEqual(0.8);
+    await kidPage.close();
+  });
 });
 
 async function createTwoPlayerRoom(
@@ -177,6 +260,17 @@ async function startMatch(guardsPage: Page, kidPage: Page): Promise<void> {
 
 async function snapshotOf(page: Page) {
   return page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__!.getSnapshot());
+}
+
+async function cameraOf(page: Page) {
+  return page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.camera);
+}
+
+function midpointOfGuards(snapshot: Awaited<ReturnType<typeof snapshotOf>>): { x: number; z: number } {
+  return {
+    x: (snapshot.guards[0].position.x + snapshot.guards[1].position.x) / 2,
+    z: (snapshot.guards[0].position.z + snapshot.guards[1].position.z) / 2,
+  };
 }
 
 async function expectSnapshotsToConverge(first: Page, second: Page): Promise<void> {

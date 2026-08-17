@@ -17,6 +17,14 @@ const REQUIRED_ANIMATIONS = [
 
 type GuardAnimationName = typeof REQUIRED_ANIMATIONS[number];
 export type ImportedGuardId = 'guard1' | 'guard2';
+export type GuardRecoveryPhase = 'landing' | 'prone' | 'getting-up';
+
+const RECOVERY_LANDING_TICKS = 9;
+const RECOVERY_PRONE_TICKS = 7;
+const RECOVERY_GET_UP_START_TICK = RECOVERY_LANDING_TICKS + RECOVERY_PRONE_TICKS;
+const POUNCE_PITCH = 0.34;
+const PRONE_PITCH = 1.48;
+const PRONE_HEIGHT = 0.18;
 
 const GUARD_IDENTITIES: Record<ImportedGuardId, { primary: string; accent: string }> = {
   guard1: {
@@ -41,6 +49,7 @@ export type ImportedGuardView = {
   stateRing: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   stunMarks: THREE.InstancedMesh;
   currentAnimation: GuardAnimationName | null;
+  recoveryPhase: GuardRecoveryPhase | null;
   lastUpdateTime: number;
   triangles: number;
   meshes: number;
@@ -173,6 +182,7 @@ export async function loadImportedGuardView(id: ImportedGuardId): Promise<Import
     stateRing,
     stunMarks,
     currentAnimation: null,
+    recoveryPhase: null,
     lastUpdateTime: 0,
     triangles,
     meshes,
@@ -195,6 +205,7 @@ export function syncImportedGuardView(
   view.motionRoot.position.set(0, 0, 0);
   view.motionRoot.rotation.set(0, 0, 0);
   view.motionRoot.scale.set(1, 1, 1);
+  view.recoveryPhase = null;
 
   const animation = selectAnimation(guard);
   const action = activateAnimation(view, animation, guard.state !== 'Move');
@@ -219,14 +230,18 @@ export function syncImportedGuardView(
 
   if (guard.state === 'Pounce') {
     view.motionRoot.position.y = 0.05;
-    view.motionRoot.rotation.x = 0.34;
+    view.motionRoot.rotation.x = POUNCE_PITCH;
     view.motionRoot.scale.set(0.96, 0.91, 1.1);
   } else if (guard.state === 'Recover') {
-    const remaining = THREE.MathUtils.clamp(guard.stateTicks / GAME_CONFIG.recoverTicks, 0, 1);
-    const down = THREE.MathUtils.smoothstep(remaining, 0, 1);
-    view.motionRoot.position.y = 0.03 * down;
-    view.motionRoot.rotation.x = 0.58 * down;
-    view.motionRoot.scale.set(1.02, 1 - down * 0.08, 1.03);
+    const pose = recoveryPose(guard.stateTicks);
+    view.recoveryPhase = pose.phase;
+    view.motionRoot.position.y = pose.height;
+    view.motionRoot.rotation.x = pose.pitch;
+    view.motionRoot.scale.set(
+      1 + pose.proneAmount * 0.04,
+      1 - pose.proneAmount * 0.1,
+      1 + pose.proneAmount * 0.06,
+    );
   } else if (guard.state === 'Stunned') {
     view.motionRoot.position.y = 0.1;
     view.motionRoot.rotation.z = 1.02;
@@ -295,16 +310,63 @@ function findSocketLabels(scene: THREE.Group): string[] {
 
 function stateAnimationTime(duration: number, guard: GuardSnapshot): number {
   if (guard.state === 'Pounce') {
-    return (1 - guard.stateTicks / GAME_CONFIG.pounceTicks) * duration;
+    const progress = THREE.MathUtils.clamp(1 - guard.stateTicks / GAME_CONFIG.pounceTicks, 0, 1);
+    return progress * duration;
   }
   if (guard.state === 'Recover') {
-    return (1 - guard.stateTicks / GAME_CONFIG.recoverTicks) * duration;
+    return recoveryPose(guard.stateTicks).animationProgress * duration;
   }
   if (guard.state === 'Stunned') {
-    const progress = 1 - guard.stateTicks / GAME_CONFIG.stunTicks;
+    const progress = THREE.MathUtils.clamp(1 - guard.stateTicks / GAME_CONFIG.stunTicks, 0, 1);
     return Math.min(1, progress * 2.4) * duration;
   }
   return 0;
+}
+
+function recoveryPose(stateTicks: number): {
+  phase: GuardRecoveryPhase;
+  pitch: number;
+  height: number;
+  proneAmount: number;
+  animationProgress: number;
+} {
+  const clampedTicks = THREE.MathUtils.clamp(stateTicks, 0, GAME_CONFIG.recoverTicks);
+  const elapsedTicks = GAME_CONFIG.recoverTicks - clampedTicks;
+  if (elapsedTicks < RECOVERY_LANDING_TICKS) {
+    const progress = elapsedTicks / RECOVERY_LANDING_TICKS;
+    const impact = 1 - (1 - progress) ** 3;
+    return {
+      phase: 'landing',
+      pitch: THREE.MathUtils.lerp(POUNCE_PITCH, PRONE_PITCH, impact),
+      height: THREE.MathUtils.lerp(0.05, PRONE_HEIGHT, impact),
+      proneAmount: impact,
+      animationProgress: 0,
+    };
+  }
+  if (elapsedTicks < RECOVERY_GET_UP_START_TICK) {
+    return {
+      phase: 'prone',
+      pitch: PRONE_PITCH,
+      height: PRONE_HEIGHT,
+      proneAmount: 1,
+      animationProgress: 0,
+    };
+  }
+
+  const getUpTicks = GAME_CONFIG.recoverTicks - RECOVERY_GET_UP_START_TICK;
+  const progress = THREE.MathUtils.clamp(
+    (elapsedTicks - RECOVERY_GET_UP_START_TICK) / getUpTicks,
+    0,
+    1,
+  );
+  const lift = THREE.MathUtils.smoothstep(progress, 0, 1);
+  return {
+    phase: 'getting-up',
+    pitch: THREE.MathUtils.lerp(PRONE_PITCH, 0, lift),
+    height: THREE.MathUtils.lerp(PRONE_HEIGHT, 0, lift),
+    proneAmount: 1 - lift,
+    animationProgress: lift,
+  };
 }
 
 function createGuardIdentity(id: ImportedGuardId, color: string): THREE.Group {

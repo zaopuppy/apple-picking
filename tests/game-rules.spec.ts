@@ -123,6 +123,31 @@ test.describe('deterministic apple-picking rules', () => {
     expect(result.standing.guards[0].state).toBe('Move');
   });
 
+  test('a pounce that captures the kid stops at the hit and starts recovery immediately', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const hooks = window.__THREE_GAME_TEST_HOOKS__!;
+      hooks.scenario('pounce-danger');
+      const before = hooks.getSnapshot();
+      const captured = hooks.step({
+        guard1: { moveX: 0, moveZ: -1, actionPressed: true, dropPressed: false },
+      }, 1);
+      const recovering = hooks.step({
+        guard1: { moveX: 0, moveZ: -1, actionPressed: false, dropPressed: false },
+      }, 12);
+      return { before, captured, recovering };
+    });
+
+    expect(result.captured.catches).toBe(1);
+    expect(result.captured.guards[0].state).toBe('Recover');
+    expect(result.captured.guards[0].stateTicks).toBe(42);
+    expect(result.captured.guards[0].position.z).toBeLessThan(result.before.guards[0].position.z);
+    expect(result.captured.guards[0].position.z).toBeGreaterThan(
+      result.before.guards[0].position.z - 9 / 60,
+    );
+    expect(result.recovering.guards[0].position).toEqual(result.captured.guards[0].position);
+    expect(result.recovering.guards[0].state).toBe('Recover');
+  });
+
   test('dropping is immediate and can repeat without entering Picking', async ({ page }) => {
     const snapshots = await page.evaluate(() => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__!;
